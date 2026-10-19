@@ -31,6 +31,7 @@ defmodule Foreman.CLI do
     option: :keep,
     recommendation: :string,
     text: :string,
+    doc: :keep,
     timeout: :integer,
     json: :boolean,
     actor: :string,
@@ -189,7 +190,7 @@ defmodule Foreman.CLI do
     }
   end
 
-  defp ask_facts("session_waiting", opts),
+  defp ask_facts("session_waiting", opts, _cwd),
     do: %{
       "reason" => opts[:reason],
       "window" => opts[:window],
@@ -197,7 +198,7 @@ defmodule Foreman.CLI do
       "reset_at" => opts[:reset_at]
     }
 
-  defp ask_facts("open_pr", opts) do
+  defp ask_facts("open_pr", opts, _cwd) do
     %{
       "head_branch" => opts[:head],
       "expected_sha" => opts[:sha],
@@ -207,9 +208,9 @@ defmodule Foreman.CLI do
     }
   end
 
-  defp ask_facts("merge", opts), do: %{"number" => opts[:pr], "expected_sha" => opts[:sha]}
+  defp ask_facts("merge", opts, _cwd), do: %{"number" => opts[:pr], "expected_sha" => opts[:sha]}
 
-  defp ask_facts("push", opts) do
+  defp ask_facts("push", opts, _cwd) do
     %{
       "worktree" => opts[:worktree],
       "local_branch" => opts[:branch],
@@ -218,13 +219,31 @@ defmodule Foreman.CLI do
     }
   end
 
-  defp ask_facts(_, opts) do
-    %{
+  # Any other kind is sent with decision facts (the server refuses unknown kinds).
+  defp ask_facts(_, opts, cwd) do
+    facts = %{
       "question" => opts[:question],
       "options" => Keyword.get_values(opts, :option),
       "recommendation" => opts[:recommendation],
       "text" => opts[:text]
     }
+
+    # The board resolves a relative --doc against the ticket's repo, so a file
+    # that exists relative to the asker's worktree is sent as its absolute path.
+    case Keyword.get_values(opts, :doc) do
+      [] ->
+        facts
+
+      docs ->
+        Map.put(
+          facts,
+          "docs",
+          Enum.map(docs, fn doc ->
+            full = Path.expand(doc, cwd)
+            if Path.type(doc) == :relative and File.regular?(full), do: full, else: doc
+          end)
+        )
+    end
   end
 
   def parse(args, defaults \\ []) do
@@ -245,7 +264,7 @@ defmodule Foreman.CLI do
             "kind" => "ticket",
             "id" => id,
             "request_kind" => request_kind,
-            "facts" => ask_facts(request_kind, opts)
+            "facts" => ask_facts(request_kind, opts, defaults[:cwd] || File.cwd!())
           })
           # A waiting ask replayed after an outage would outlive the session's resume
           # (clears are never spooled), so it is not queued either.

@@ -2,7 +2,7 @@ defmodule Foreman.Requests.Decision do
   @moduledoc "A decision records an answer and can never enqueue external work."
   @behaviour Foreman.Requests.Kind
   @impl true
-  def validate(facts, _) when is_map(facts) do
+  def validate(facts, row) when is_map(facts) do
     options = Map.get(facts, "options", [])
     recommendation = facts["recommendation"]
 
@@ -10,11 +10,15 @@ defmodule Foreman.Requests.Decision do
          Enum.all?(options, &text?/1) and
          (is_nil(recommendation) or recommendation in options) and
          (is_nil(facts["text"]) or text?(facts["text"])) do
-      {:ok,
-       Map.take(
-         Map.put(facts, "options", Enum.uniq(options)),
-         ~w(question options recommendation text)
-       )}
+      # --doc paths must name Markdown files in a configured repo; stored as {repo, path}.
+      with {:ok, docs} <- Foreman.CardText.docs(facts["docs"], row.repo_key) do
+        facts =
+          facts
+          |> Map.put("options", Enum.uniq(options))
+          |> Map.take(~w(question options recommendation text))
+
+        {:ok, if(docs == [], do: facts, else: Map.put(facts, "docs", docs))}
+      end
     else
       {:error, :invalid_facts}
     end

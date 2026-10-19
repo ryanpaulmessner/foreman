@@ -46,7 +46,8 @@ defmodule Foreman.Role do
         Foreman.Config.Watcher,
         Foreman.SpoolWorker,
         Foreman.SessionMonitor,
-        Foreman.Previews.Poller
+        Foreman.Previews.Poller,
+        Foreman.OsNotifications
       ],
       else: []
   end

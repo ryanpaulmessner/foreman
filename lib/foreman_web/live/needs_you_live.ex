@@ -9,15 +9,68 @@ defmodule ForemanWeb.NeedsYouLive do
     {:ok,
      socket
      |> assign(:pending_ids, MapSet.new())
+     |> assign(panel: Foreman.CardPanel.__fsm__(:initial), panel_doc: nil, card_repos: [])
      |> stream_configure(:pending, dom_id: &("request-" <> &1.id))
      |> stream(:pending, [])
      |> refresh()}
   end
 
   def handle_params(params, uri, socket),
-    do: {:noreply, ForemanWeb.TicketDetail.load(socket, params, uri)}
+    do: {:noreply, socket |> ForemanWeb.TicketDetail.load(params, uri) |> panel(params)}
+
+  defp panel(socket, params) do
+    {event, doc} =
+      cond do
+        socket.assigns.sheet_state == :open -> {:ticket, nil}
+        key = Foreman.CardPanel.doc_key(params["doc"]) -> panel_document(key)
+        true -> {:close, nil}
+      end
+
+    {panel, []} = Foreman.CardPanel.step(socket.assigns.panel, event, %{})
+    assign(socket, panel: panel, panel_doc: doc)
+  end
+
+  # A ticket open in the panel can vanish on refresh; the document is left as read.
+  defp refresh_panel(%{assigns: %{panel: :ticket, sheet_state: state}} = socket)
+       when state != :open,
+       do: panel(socket, URI.decode_query(URI.parse(socket.assigns.page_uri).query || ""))
+
+  defp refresh_panel(socket), do: socket
+
+  defp panel_document({repo_key, path}) do
+    repo = Enum.find(Foreman.CardText.repos(), &(&1["key"] == repo_key))
+
+    case repo && Foreman.Documents.open(repo, path) do
+      {:ok, doc} ->
+        html =
+          Foreman.Markdown.render(doc.content, repo: repo_key, path: doc.path, header_ids: false)
+
+        {:document, %{repo: repo_key, path: doc.path, html: html}}
+
+      _ ->
+        {:missing, %{repo: repo_key, path: path}}
+    end
+  end
 
   def handle_event("resolve", params, socket), do: {:noreply, result(socket, resolve(params))}
+
+  # Document links on cards and in the panel open in the side panel; the hook
+  # leaves modified clicks (new tab) to the browser, which opens the viewer.
+  def handle_event("open-doc", %{"href" => href}, socket) do
+    case Foreman.CardPanel.doc_param(href) do
+      nil ->
+        {:noreply, socket}
+
+      doc ->
+        {:noreply, push_patch(socket, to: "/needs-you?" <> URI.encode_query(%{"doc" => doc}))}
+    end
+  end
+
+  def handle_event("close-panel", _, socket) do
+    if socket.assigns.panel == :closed,
+      do: {:noreply, socket},
+      else: {:noreply, push_patch(socket, to: "/needs-you")}
+  end
 
   def handle_event("close-ticket", params, socket),
     do: {:noreply, ForemanWeb.TicketDetail.close(socket, params)}
@@ -101,11 +154,11 @@ defmodule ForemanWeb.NeedsYouLive do
 
   def handle_info(:reconcile, socket) do
     Process.send_after(self(), :reconcile, 3_000)
-    {:noreply, socket |> refresh() |> ForemanWeb.TicketDetail.refresh()}
+    {:noreply, socket |> refresh() |> ForemanWeb.TicketDetail.refresh() |> refresh_panel()}
   end
 
   def handle_info({:notification, :foreman_events, _}, socket),
-    do: {:noreply, socket |> refresh() |> ForemanWeb.TicketDetail.refresh()}
+    do: {:noreply, socket |> refresh() |> ForemanWeb.TicketDetail.refresh() |> refresh_panel()}
 
   defp result(socket, {:navigate, path}), do: push_navigate(socket, to: path)
 
@@ -124,6 +177,7 @@ defmodule ForemanWeb.NeedsYouLive do
   defp refresh(socket) do
     pending = Requests.pending()
     ids = MapSet.new(pending, & &1.id)
+    socket = assign(socket, :card_repos, Foreman.CardText.repos())
     previous = socket.assigns.pending_ids
 
     # Pending facts are immutable. Leave existing cards mounted so reconciliation
@@ -158,44 +212,119 @@ defmodule ForemanWeb.NeedsYouLive do
       pending_count={@pending_count}
       active={:needs_you}
     >
-      <header id="inbox-heading" class="flex items-center gap-3">
-        <h1 class="text-xl font-semibold">Needs you</h1>
-        <Badge.badge :if={@pending_count > 0}>{@pending_count}</Badge.badge>
-      </header>
-      <div id="pending-requests" phx-update="stream" class="max-w-3xl space-y-5">
-        <div
-          id="inbox-empty"
-          class="hidden only:block rounded-xl border border-dashed border-base p-10 text-center text-foreground-softer"
+      <div
+        id="needs-you"
+        phx-hook=".CardDocLinks"
+        class={[
+          "min-w-0",
+          @panel != :closed &&
+            "lg:grid lg:grid-cols-[minmax(0,48rem)_minmax(24rem,1fr)] lg:items-start lg:gap-6"
+        ]}
+      >
+        <div class="min-w-0 space-y-5">
+          <header id="inbox-heading" class="flex items-center gap-3">
+            <h1 class="text-xl font-semibold">Needs you</h1>
+            <Badge.badge :if={@pending_count > 0}>{@pending_count}</Badge.badge>
+          </header>
+          <div id="pending-requests" phx-update="stream" class="max-w-3xl space-y-5">
+            <div
+              id="inbox-empty"
+              class="hidden only:block rounded-xl border border-dashed border-base p-10 text-center text-foreground-softer"
+            >
+              No pending requests
+            </div>
+            <.request_card
+              :for={{id, item} <- @streams.pending}
+              id={id}
+              request={item.request}
+              card={item.card}
+              repos={@card_repos}
+            />
+          </div>
+          <details id="recent-outcomes" class="max-w-3xl border-t border-base pt-4">
+            <summary class="cursor-pointer text-sm font-medium text-foreground-softer">
+              Recent outcomes
+            </summary>
+            <div id="recent-requests" phx-update="stream" class="mt-4 space-y-3">
+              <ForemanWeb.RequestCard.summary
+                :for={{id, request} <- @streams.recent}
+                id={id}
+                request={request}
+                repos={@card_repos}
+                link={:patch}
+              />
+            </div>
+          </details>
+        </div>
+        <aside
+          :if={@panel != :closed}
+          id="card-panel"
+          aria-label={if(@panel == :ticket, do: "Ticket", else: "Document")}
+          phx-window-keydown="close-panel"
+          phx-key="Escape"
+          class="fixed inset-0 z-40 space-y-6 overflow-y-auto bg-base p-5 lg:sticky lg:inset-auto lg:top-6 lg:z-auto lg:max-h-[calc(100vh-3rem)] lg:rounded-xl lg:border lg:border-base lg:p-6 lg:shadow-sm"
         >
-          No pending requests
-        </div>
-        <.request_card
-          :for={{id, item} <- @streams.pending}
-          id={id}
-          request={item.request}
-          card={item.card}
-        />
+          <%= if @panel == :ticket do %>
+            <ForemanWeb.TicketDetail.content
+              ticket={@ticket}
+              return_to={@sheet_return}
+              streams={@streams}
+              tab={@ticket_tab}
+              uri={@page_uri}
+            />
+          <% else %>
+            <header class="flex items-center gap-3 text-xs text-foreground-softer">
+              <span>{@panel_doc.repo}</span>
+              <span class="min-w-0 flex-1 break-all font-mono" title={@panel_doc.path}>
+                {@panel_doc.path}
+              </span>
+              <a
+                :if={@panel == :document}
+                id="panel-open-viewer"
+                data-viewer
+                href={Foreman.Markdown.viewer_path(@panel_doc.repo, @panel_doc.path)}
+                class="rounded p-2 hover:bg-sunken"
+                aria-label="Open in Documents"
+                title="Open in Documents"
+              >
+                <.icon name="hero-arrow-top-right-on-square" class="size-5" />
+              </a>
+              <.link
+                id="panel-close"
+                patch="/needs-you"
+                class="rounded p-2 hover:bg-sunken"
+                aria-label="Close document"
+              >
+                <.icon name="hero-x-mark" class="size-5" />
+              </.link>
+            </header>
+            <div :if={@panel == :document} id="panel-document" class="fm-markdown">
+              {Phoenix.HTML.raw(@panel_doc.html)}
+            </div>
+            <p :if={@panel == :unavailable} id="panel-status" class="py-6 text-foreground-softer">
+              Document unavailable
+            </p>
+          <% end %>
+        </aside>
       </div>
-      <details id="recent-outcomes" class="max-w-3xl border-t border-base pt-4">
-        <summary class="cursor-pointer text-sm font-medium text-foreground-softer">
-          Recent outcomes
-        </summary>
-        <div id="recent-requests" phx-update="stream" class="mt-4 space-y-3">
-          <ForemanWeb.RequestCard.summary
-            :for={{id, request} <- @streams.recent}
-            id={id}
-            request={request}
-          />
-        </div>
-      </details>
-      <ForemanWeb.TicketDetail.sheet
-        ticket={@ticket}
-        state={@sheet_state}
-        return_to={@sheet_return}
-        streams={@streams}
-        tab={@ticket_tab}
-        uri={@page_uri}
-      />
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".CardDocLinks">
+        export default {
+          mounted() {
+            this.onClick = (event) => {
+              const link = event.target.closest("a[href^='/documents/']:not([data-viewer])")
+              const modified = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey
+              if (!link || event.defaultPrevented || event.button !== 0 || modified) return
+              event.preventDefault()
+              event.stopPropagation()
+              this.pushEvent("open-doc", {href: link.getAttribute("href")})
+            }
+            this.el.addEventListener("click", this.onClick)
+          },
+          destroyed() {
+            this.el.removeEventListener("click", this.onClick)
+          }
+        }
+      </script>
     </Layouts.app>
     """
   end
@@ -206,6 +335,7 @@ defmodule ForemanWeb.NeedsYouLive do
   attr :prefix, :string, default: ""
   attr :event, :string, default: "resolve"
   attr :card, :atom, default: :ready
+  attr :repos, :list, default: nil
 
   def request_card(%{request: %{kind: kind}} = assigns) when kind in ["push", "open_pr", "merge"],
     do: action_card(assigns)
@@ -230,21 +360,22 @@ defmodule ForemanWeb.NeedsYouLive do
     <article id={@id} class="rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
       <div class="mb-4 flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
         <Badge.badge>Session waiting</Badge.badge>
-        <.link
-          navigate={"/needs-you?" <> URI.encode_query(%{"ticket" => @request.repo_key <> ":" <> @request.bead_id})}
-          class="font-mono hover:underline"
-        >
-          {@request.bead_id}
-        </.link>
+        <ForemanWeb.RequestCard.ticket_link
+          id={@prefix <> "ticket-link-" <> @request.id}
+          request={@request}
+          link={if(@prefix == "", do: :patch, else: :navigate)}
+        />
         <span class="ml-auto"><ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} /></span>
       </div>
       <ForemanWeb.RequestCard.waiting_facts request={@request} />
       <%= if @question do %>
-        <h3
+        <ForemanWeb.RequestCard.agent_text
           id={@prefix <> "question-" <> @request.id}
-          class="mt-4 whitespace-pre-wrap break-words font-medium"
-          phx-no-format
-        >{@question["question"]}</h3>
+          text={@question["question"]}
+          repo={@request.repo_key}
+          repos={@repos}
+          class="fm-card-question mt-4"
+        />
         <.form
           for={@form}
           id={@prefix <> "answer-" <> @request.id}
@@ -295,11 +426,13 @@ defmodule ForemanWeb.NeedsYouLive do
         </.form>
       <% end %>
       <%= if @request.facts["reason"] == "question" do %>
-        <p
+        <ForemanWeb.RequestCard.agent_text
           id={@prefix <> "chat-question-" <> @request.id}
-          class="mt-4 max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-medium [overflow-wrap:anywhere]"
-          phx-no-format
-        >{@request.facts["question"]}</p>
+          text={@request.facts["question"]}
+          repo={@request.repo_key}
+          repos={@repos}
+          class="mt-4"
+        />
         <.form
           for={@reply}
           id={@prefix <> "reply-" <> @request.id}
@@ -334,8 +467,17 @@ defmodule ForemanWeb.NeedsYouLive do
           id={@prefix <> "questions-" <> @request.id}
           class="mt-4 space-y-3"
         >
-          <li :for={question <- @request.facts["questions"]} class="space-y-1">
-            <p class="whitespace-pre-wrap break-words font-medium" phx-no-format>{question["question"]}</p>
+          <li
+            :for={{question, index} <- Enum.with_index(@request.facts["questions"])}
+            class="space-y-1"
+          >
+            <ForemanWeb.RequestCard.agent_text
+              id={@prefix <> "questions-" <> @request.id <> "-" <> Integer.to_string(index)}
+              text={question["question"]}
+              repo={@request.repo_key}
+              repos={@repos}
+              class="font-medium"
+            />
             <p class="break-words text-sm text-foreground-softer">
               {Enum.join(question["options"], " · ")}
             </p>
@@ -413,28 +555,21 @@ defmodule ForemanWeb.NeedsYouLive do
         <Badge.badge>
           {%{"push" => "Push", "open_pr" => "Open PR", "merge" => "Merge"}[@request.kind]}
         </Badge.badge>
-        <.link
-          patch={
-            if @prefix == "",
-              do:
-                "/needs-you?" <>
-                  URI.encode_query(%{"ticket" => @request.repo_key <> ":" <> @request.bead_id})
-          }
-          navigate={
-            if @prefix != "",
-              do:
-                "/needs-you?" <>
-                  URI.encode_query(%{"ticket" => @request.repo_key <> ":" <> @request.bead_id})
-          }
-          class="font-mono hover:underline"
-        >
-          {@request.bead_id}
-        </.link>
+        <ForemanWeb.RequestCard.ticket_link
+          id={@prefix <> "ticket-link-" <> @request.id}
+          request={@request}
+          link={if(@prefix == "", do: :patch, else: :navigate)}
+        />
         <span>{@request.actor}<span :if={@request.session}> · {@request.session}</span></span>
         <span class="ml-auto"><ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} /></span>
       </div>
       <ForemanWeb.RequestCard.push_facts :if={@request.kind == "push"} request={@request} />
-      <ForemanWeb.RequestCard.open_pr_facts :if={@request.kind == "open_pr"} request={@request} />
+      <ForemanWeb.RequestCard.open_pr_facts
+        :if={@request.kind == "open_pr"}
+        request={@request}
+        repos={@repos}
+        prefix={@prefix}
+      />
       <ForemanWeb.RequestCard.merge_facts :if={@request.kind == "merge"} request={@request} />
       <.form
         for={@form}
@@ -491,32 +626,33 @@ defmodule ForemanWeb.NeedsYouLive do
     <article id={@id} class="rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
       <div class="mb-4 flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
         <Badge.badge>Decision</Badge.badge>
-        <.link
-          patch={
-            if @prefix == "",
-              do:
-                "/needs-you?" <>
-                  URI.encode_query(%{"ticket" => @request.repo_key <> ":" <> @request.bead_id})
-          }
-          navigate={
-            if @prefix != "",
-              do:
-                "/needs-you?" <>
-                  URI.encode_query(%{"ticket" => @request.repo_key <> ":" <> @request.bead_id})
-          }
-          class="font-mono hover:underline"
-        >
-          {@request.bead_id}
-        </.link>
+        <ForemanWeb.RequestCard.ticket_link
+          id={@prefix <> "ticket-link-" <> @request.id}
+          request={@request}
+          link={if(@prefix == "", do: :patch, else: :navigate)}
+        />
         <span>{@request.actor}<span :if={@request.session}> · {@request.session}</span></span>
         <span class="ml-auto"><ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} /></span>
       </div>
-      <h2 class="break-words text-lg font-semibold">{@request.facts["question"]}</h2>
-      <p
+      <ForemanWeb.RequestCard.agent_text
+        id={@prefix <> "question-" <> @request.id}
+        text={@request.facts["question"]}
+        repo={@request.repo_key}
+        repos={@repos}
+        class="fm-card-question"
+      />
+      <ForemanWeb.RequestCard.agent_text
         :if={@request.facts["text"]}
-        class="mt-2 whitespace-pre-wrap break-words text-foreground-softer"
-        phx-no-format
-      >{@request.facts["text"]}</p>
+        id={@prefix <> "text-" <> @request.id}
+        text={@request.facts["text"]}
+        repo={@request.repo_key}
+        repos={@repos}
+        class="mt-2 text-foreground-softer"
+      />
+      <ForemanWeb.RequestCard.doc_links
+        id={@prefix <> "docs-" <> @request.id}
+        request={@request}
+      />
       <.form
         for={@form}
         id={@prefix <> "decision-" <> @request.id}

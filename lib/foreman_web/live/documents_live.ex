@@ -16,7 +16,7 @@ defmodule ForemanWeb.DocumentsLive do
     path =
       Map.get(params, "path", if("README.md" in files, do: "README.md", else: List.first(files)))
 
-    result = if repo, do: read_document(repo, path), else: {:error, :refused}
+    result = if repo, do: Documents.open(repo, path), else: {:error, :refused}
 
     {event, document, html} =
       case result do
@@ -44,18 +44,6 @@ defmodule ForemanWeb.DocumentsLive do
      |> stream(:files, Enum.map(files, &%{id: Base.url_encode64(&1, padding: false), path: &1}),
        reset: true
      )}
-  end
-
-  defp read_document(repo, path) do
-    case Documents.read(repo["path"], path) do
-      {:error, _} = error ->
-        if is_binary(path) and Foreman.Overlay.document_reference?(repo["key"], path),
-          do: Documents.read_recorded(repo["path"], path),
-          else: error
-
-      document ->
-        document
-    end
   end
 
   @impl true

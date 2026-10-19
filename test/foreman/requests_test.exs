@@ -39,6 +39,33 @@ defmodule Foreman.RequestsTest do
     assert Repo.aggregate(Oban.Job, :count) == 0
   end
 
+  test "a decision's --doc paths are stored as {repo, path}; outside paths are refused" do
+    root = Foreman.ScratchDocs.dir("requests-docs")
+    Foreman.ScratchDocs.write(root, %{"reports/27.md" => "# Report"})
+    outside = Foreman.ScratchDocs.write(Foreman.ScratchDocs.dir("outside"), %{"x.md" => "# X"})
+    on_exit(fn -> File.rm_rf!(root) && File.rm_rf!(outside) end)
+    Foreman.ScratchDocs.configure(%{"sample" => root})
+
+    facts = fn docs -> %{"facts" => %{"question" => "Ship?", "docs" => docs}} end
+
+    assert {:ok, request} =
+             Requests.ask(
+               {"sample", "s-1"},
+               "decision",
+               facts.(["reports/27.md", root <> "/reports/27.md"])
+             )
+
+    assert request.facts["docs"] == [%{"repo" => "sample", "path" => "reports/27.md"}]
+
+    for docs <- [[outside <> "/x.md"], ["reports/missing.md"], ["../x.md"], "reports/27.md"] do
+      assert {:error, :invalid_doc} = Requests.ask({"sample", "s-1"}, "decision", facts.(docs))
+    end
+
+    assert {:ok, plain} = Requests.ask({"sample", "s-1"}, "decision", facts.([]))
+    refute Map.has_key?(plain.facts, "docs")
+    assert Requests.pending_count() == 2
+  end
+
   test "bad kinds and facts are refused before recording" do
     for {kind, facts} <- [
           {"push", %{}},

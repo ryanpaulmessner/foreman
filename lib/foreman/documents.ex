@@ -50,6 +50,30 @@ defmodule Foreman.Documents do
 
   def read(_, _), do: {:error, :refused}
 
+  @doc "Cheap existence check for a Markdown file strictly beneath `root` (no read, no worktree lookup)."
+  def document?(root, path) when is_binary(root) and is_binary(path) do
+    root = Path.expand(root)
+    full = Path.expand(path, root)
+
+    inside?(full, root) and String.downcase(Path.extname(full)) == ".md" and
+      regular_path(full) == :ok
+  end
+
+  def document?(_, _), do: false
+
+  @doc "Reads a document for display, falling back to a recorded artifact reference."
+  def open(%{"key" => key, "path" => root}, path) do
+    case read(root, path) do
+      {:error, _} = error ->
+        if is_binary(path) and Foreman.Overlay.document_reference?(key, path),
+          do: read_recorded(root, path),
+          else: error
+
+      document ->
+        document
+    end
+  end
+
   @doc "Fallback for an exact artifact reference already recorded in this project's history. Never reads the old root."
   def read_recorded(root, path) do
     if Path.type(path) == :absolute and ".." not in Path.split(path) do

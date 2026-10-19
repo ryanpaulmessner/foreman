@@ -35,6 +35,8 @@ defmodule Foreman.FsmDocsTest do
         {"epic", Foreman.Epic},
         {"disclosure", Foreman.Initiatives.Disclosure},
         {"ticket_sheet", Foreman.TicketSheet},
+        {"card_panel", Foreman.CardPanel},
+        {"os_notification", Foreman.OsNotification},
         {"request_drawer", Foreman.RequestDrawer},
         {"waiting_card", Foreman.WaitingCard},
         {"reload_machine", Foreman.Config.ReloadMachine},

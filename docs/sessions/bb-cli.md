@@ -78,8 +78,24 @@ board wait "$request" --timeout 300
 ```
 
 `ask decision <ticket-or-epic>` accepts `--question` (required), repeatable `--option`,
-`--recommendation` (one of those options), and `--text` (optional context). Identity,
+`--recommendation` (one of those options), `--text` (optional context), and repeatable
+`--doc <path>` for the report, review or spec the question is about. Identity,
 `--project`, actor and session flags work as above; use `draft:<slug>` for a draft.
+
+`--doc` takes a Markdown file path: repo-relative, or absolute beneath a configured repo or
+one of its git worktrees. A relative path that exists under the asker's working directory is
+sent as its absolute path; otherwise it is read relative to the ticket's repo. The board
+refuses the ask with `invalid_doc` when a path is outside every configured repo, missing, or
+not Markdown (at most 20 per ask). Accepted paths are stored in the request facts as
+`docs: [{repo, path}]` and shown on the card as links that open the document in the Needs you
+side panel (modified clicks open `/documents/<repo>?path=…`).
+
+Card text (the question, `--text`, chat questions, AskUserQuestion text, PR bodies) is
+rendered as GitHub-flavoured Markdown with raw HTML omitted. A bare `.md` path in that text
+(`slices/…/reviews/27-r1.md`, `docs/spec.md:12`, an absolute path under a configured repo)
+becomes a document link when the file exists; relative paths are looked up in the card's repo
+first, then the other configured repos. Long text shows its first lines and Show more. Each
+card's ticket ID opens that ticket in the same side panel.
 Success prints the UUID alone, or `{id,state}` with `--json`. No action kinds are enabled yet.
 
 `wait <uuid>` always prints JSON. It polls every 500 ms until answered, declined,
@@ -92,7 +108,7 @@ Ask and wait always exit 0, including refusals and malformed input. Wait never s
 The authenticated `/api/commands` envelope adds:
 
 - `action: "ask"`, `id: <ticket-or-epic>`, `request_kind: "decision"`, `facts: {question,
-  options, recommendation, text}`, plus the existing identity and UUID fields.
+  options, recommendation, text, docs}` (`docs` is a list of path strings), plus the existing identity and UUID fields.
 - `action: "wait"`, `id: <request-uuid>` returns the current request immediately;
   the CLI owns polling. It does not resolve ticket prefixes or force a beads read.
 

@@ -388,6 +388,7 @@ merge_policy = "board" # board (default) | human; default for every repo on this
 swimlanes = "project" # project | epic | none
 stale_session_after = "2h" # positive integer with s, m, h, or d
 terminal_app = "Ghostty" # macOS app Open session brings to the front (default Ghostty)
+os_notifications = true # macOS notification per new Needs you request (default true; no-op elsewhere)
 
 [[repos]]
 key = "sample"

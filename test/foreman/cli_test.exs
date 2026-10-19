@@ -32,6 +32,26 @@ defmodule Foreman.CLITest do
              CLI.parse(["dispatch", "s-1", "--window", "build", "--branch", "feature"])
   end
 
+  test "ask decision --doc repeats; cwd-relative files become absolute, others stay repo-relative" do
+    cwd =
+      Foreman.ScratchDocs.write(Foreman.ScratchDocs.dir("cli-docs"), %{"drafts/r.md" => "# R"})
+
+    on_exit(fn -> File.rm_rf!(cwd) end)
+
+    assert {:ok, %{request: %{"facts" => facts}}} =
+             CLI.parse(
+               ~w(ask decision s-1 --question Ship? --doc drafts/r.md --doc docs/spec.md --doc /abs/x.md),
+               cwd: cwd
+             )
+
+    assert facts["docs"] == [Path.join(cwd, "drafts/r.md"), "docs/spec.md", "/abs/x.md"]
+
+    assert {:ok, %{request: %{"facts" => facts}}} =
+             CLI.parse(~w(ask decision s-1 --question Ship?), cwd: cwd)
+
+    refute Map.has_key?(facts, "docs")
+  end
+
   test "draft verbs use slugs and cwd or explicit project" do
     for {verb, event} <- [
           {"create", "create"},
