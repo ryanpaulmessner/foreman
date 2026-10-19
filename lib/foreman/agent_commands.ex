@@ -121,6 +121,7 @@ defmodule Foreman.AgentCommands do
           Agent.ensure_entity(key)
 
           case Foreman.Requests.ask(key, request["request_kind"], request) do
+            {:ok, %Foreman.PlanningSession{} = session} -> {200, %{state: session.state}}
             {:ok, ask} -> {200, %{id: ask.id, state: ask.state}}
             {:error, :not_found} -> {404, %{error: "not_found"}}
             {:error, reason} -> {422, %{error: reason}}

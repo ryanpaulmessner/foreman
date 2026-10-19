@@ -82,6 +82,77 @@ defmodule Foreman.CoordinatorTest do
     assert Foreman.Requests.get(id).state == "superseded"
   end
 
+  defp coordinator_hook(session, event, input) do
+    {project, ticket} = Sessions.coordinator_key()
+    base = %{"id" => ticket, "project" => project, "session" => session.session_id}
+
+    case Foreman.SessionHooks.facts(event, input) do
+      {:waiting, facts} ->
+        Foreman.AgentCommands.execute(
+          Map.merge(base, %{
+            "action" => "ask",
+            "request_kind" => "session_waiting",
+            "facts" => facts
+          })
+        )
+
+      {:resumed, tool} ->
+        Foreman.AgentCommands.execute(
+          Map.merge(base, %{"action" => "session_resumed", "resume_tool" => tool})
+        )
+    end
+  end
+
+  test "an idle coordinator Stop records waiting without a Needs you request" do
+    {:ok, s, :fresh} = Sessions.prepare_coordinator(:resume, window: "@123")
+
+    assert {200, %{state: :waiting}} = coordinator_hook(s, "Stop", %{})
+    assert Foreman.Requests.pending() == []
+    assert Foreman.Requests.pending_count() == 0
+    assert Sessions.coordinator().state == :waiting
+
+    assert {200, %{state: :running}} = coordinator_hook(s, "PreToolUse", %{"tool_name" => "Bash"})
+    assert Sessions.coordinator().state == :running
+  end
+
+  test "coordinator questions and permissions still reach Needs you and clear on resume" do
+    {:ok, s, :fresh} = Sessions.prepare_coordinator(:resume, window: "@123")
+    question = %{"tool_name" => "AskUserQuestion", "tool_input" => %{"questions" => [%{}]}}
+    permission = %{"tool_name" => "Bash", "tool_input" => %{"command" => "ls"}}
+
+    for {event, input} <- [{"PreToolUse", question}, {"PermissionRequest", permission}] do
+      assert {200, %{id: id}} = coordinator_hook(s, event, input)
+      assert [%{id: ^id}] = Foreman.Requests.pending()
+      assert Sessions.coordinator().state == :waiting
+      assert {200, %{state: :running}} = coordinator_hook(s, "PostToolUse", input)
+      assert Foreman.Requests.get(id).state == "superseded"
+      assert Foreman.Requests.pending() == []
+    end
+  end
+
+  test "an idle coordinator Stop supersedes an idle request recorded before the change" do
+    {:ok, s, :fresh} = Sessions.prepare_coordinator(:resume, window: "@123")
+
+    {:ok, old} =
+      Foreman.Requests.create(Sessions.coordinator_key(), "session_waiting", %{
+        "session" => s.session_id,
+        "facts" => %{"reason" => "input", "target" => "planning"}
+      })
+
+    assert {200, %{state: :waiting}} = coordinator_hook(s, "Stop", %{})
+    assert Foreman.Requests.get(old.id).state == "superseded"
+    assert Foreman.Requests.pending() == []
+  end
+
+  test "an idle coordinator Stop keeps a permission prompt that is still open" do
+    {:ok, s, :fresh} = Sessions.prepare_coordinator(:resume, window: "@123")
+    permission = %{"tool_name" => "Bash", "tool_input" => %{"command" => "ls"}}
+
+    assert {200, %{id: id}} = coordinator_hook(s, "PermissionRequest", permission)
+    assert {200, %{state: :waiting}} = coordinator_hook(s, "Stop", %{})
+    assert [%{id: ^id}] = Foreman.Requests.pending()
+  end
+
   test "coordinator adoption is an authenticated command independent of the project catalog" do
     id = "1edc88cf-b665-4ce3-adc4-f1bd434c64f2"
 

@@ -309,16 +309,8 @@ defmodule Foreman.Sessions do
           session = locked(key)
           pending = Foreman.SessionWaiting.pending(key, id)
 
-          matches =
-            is_nil(tool) or
-              Enum.any?(pending, fn request ->
-                request.facts["tool"] == tool or
-                  (tool == "activity" and is_nil(request.facts["tool"]) and
-                     request.facts["reason"] in ["input", "usage_limit"])
-              end)
-
           session = save(session, %{last_activity_at: DateTime.utc_now()})
-          {:ok, transition(session, event, %{resume_matches: matches})}
+          {:ok, transition(session, event, %{resume_matches: resumes?(pending, tool)})}
 
         _ ->
           {:error, :unknown_session}
@@ -329,6 +321,17 @@ defmodule Foreman.Sessions do
       error -> error
     end
   end
+
+  defp resumes?(_pending, nil), do: true
+  defp resumes?([], _tool), do: true
+
+  defp resumes?(pending, tool),
+    do:
+      Enum.any?(pending, fn request ->
+        request.facts["tool"] == tool or
+          (tool == "activity" and is_nil(request.facts["tool"]) and
+             request.facts["reason"] in ["input", "usage_limit"])
+      end)
 
   def reconcile(opts \\ []) do
     Foreman.SessionWaiting.reconcile_external()

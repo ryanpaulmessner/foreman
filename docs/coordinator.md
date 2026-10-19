@@ -15,6 +15,8 @@ Pane startup uses the tmux server/session environment, not the web service's cli
 
 The singleton uses the reserved system key `__foreman__/coordinator` in the existing session table. It has no ticket overlay or configured project. Only session-waiting requests use that system subject; ordinary approvals still need tickets. Idle time never parks this session. A missing window becomes `ended`, preserving its conversation ID.
 
+When this session or a board-launched planning session finishes a turn (Claude's Stop hook), it is recorded as `waiting`, but nothing goes to Needs you. The Stop also supersedes that session's pending idle and usage-limit requests; question and permission requests stay open, since a background agent's prompt can outlive the main turn. AskUserQuestion, other permission requests and usage limits still raise a request, which clears when the session resumes. While no request is pending, any hook activity returns the session to `running`. External and pi sessions raise a request every time they wait.
+
 ## Verification notes
 
 `FOREMAN_HOST_ACCEPTANCE=1 mix test test/foreman/pane_environment_test.exs` checks the real login environment on a clean foreground scratch server. Without that flag, the test uses a fixture shell and tools. Both use stub Claude and a local ticket fixture.

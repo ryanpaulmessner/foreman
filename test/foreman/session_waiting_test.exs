@@ -19,7 +19,7 @@ defmodule Foreman.SessionWaitingTest do
   end
 
   test "a repeated waiting hook is still activity", %{session: s} do
-    params = %{"session" => s.session_id, "facts" => %{"reason" => "input"}}
+    params = %{"session" => s.session_id, "facts" => %{"reason" => "input", "tool" => "ask"}}
     {:ok, request} = Requests.ask({"sample", "s-1"}, "session_waiting", params)
     old = DateTime.add(DateTime.utc_now(), -90_000, :second)
 
@@ -40,6 +40,64 @@ defmodule Foreman.SessionWaitingTest do
 
     assert Requests.get(request.id).state == "pending"
     assert DateTime.compare(Sessions.get({"sample", "s-1"}).last_activity_at, old) == :gt
+  end
+
+  test "a planning session's idle Stop waits without asking", %{session: s} do
+    {:waiting, facts} = Foreman.SessionHooks.facts("Stop", %{})
+
+    assert {200, %{state: :waiting}} =
+             Foreman.AgentCommands.execute(%{
+               "action" => "ask",
+               "request_kind" => "session_waiting",
+               "repo" => "sample",
+               "id" => "s-1",
+               "session" => s.session_id,
+               "facts" => facts
+             })
+
+    assert Requests.pending() == []
+    assert Sessions.get({"sample", "s-1"}).state == :waiting
+  end
+
+  test "an external pi session waiting for input still asks" do
+    Foreman.Overlay.backfill("sample", [%{bead_id: "s-2", status: "open", issue_type: "task"}])
+    socket = "fm-external-#{System.unique_integer([:positive])}"
+
+    {_, 0} =
+      System.cmd("tmux", [
+        "-L",
+        socket,
+        "-f",
+        "/dev/null",
+        "new-session",
+        "-d",
+        "-s",
+        "sample",
+        "-n",
+        "build",
+        "sleep 60"
+      ])
+
+    old = Application.get_env(:foreman, :external_tmux_socket)
+    Application.put_env(:foreman, :external_tmux_socket, socket)
+
+    on_exit(fn ->
+      if old,
+        do: Application.put_env(:foreman, :external_tmux_socket, old),
+        else: Application.delete_env(:foreman, :external_tmux_socket)
+
+      System.cmd("tmux", ["-L", socket, "kill-server"], stderr_to_stdout: true)
+    end)
+
+    assert {:ok, request} =
+             Requests.ask({"sample", "s-2"}, "session_waiting", %{
+               "session" => "pi-build",
+               "facts" => %{"reason" => "input", "window" => "build"}
+             })
+
+    assert request.facts["target"] == "external"
+    assert [%{id: id}] = Requests.pending()
+    assert id == request.id
   end
 
   test "completion of an unrelated parallel tool does not clear a permission wait", %{session: s} do

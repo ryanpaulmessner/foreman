@@ -43,6 +43,21 @@ defmodule ForemanWeb.InitiativesLiveTest do
     assert has_element?(view, "#coordinator-fresh[data-confirm]")
   end
 
+  test "an idle coordinator shows waiting on its row with nothing in Needs you", %{conn: conn} do
+    {:ok, s, :fresh} = Foreman.Sessions.prepare_coordinator(:resume, window: "@123")
+    {:waiting, facts} = Foreman.SessionHooks.facts("Stop", %{})
+
+    {:ok, _} =
+      Foreman.SessionWaiting.ask(Foreman.Sessions.coordinator_key(), %{
+        "session" => s.session_id,
+        "facts" => facts
+      })
+
+    {:ok, view, _} = live(conn, "/")
+    assert has_element?(view, "#coordinator-state", "waiting")
+    refute has_element?(view, "#needs-you-count")
+  end
+
   test "sheet preview is explicit and exposes running URL, logs and stop", %{conn: conn} do
     key = {"sample", "f"}
 

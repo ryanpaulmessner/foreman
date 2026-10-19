@@ -52,7 +52,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     {:ok, input} =
       Requests.ask({"sample", "s-1"}, "session_waiting", %{
         "session" => session.session_id,
-        "facts" => %{"reason" => "input"}
+        "facts" => %{"reason" => "input", "tool" => "ask"}
       })
 
     send(view.pid, :reconcile)

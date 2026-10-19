@@ -40,34 +40,51 @@ defmodule Foreman.SessionWaiting do
            {:ok, facts} <- validate(params["facts"], nil),
            {:ok, facts} <- target(key, params["session"], facts, params["facts"]) do
         existing = pending(key, params["session"])
-        reason = facts["reason"]
 
-        case existing do
-          [%{facts: %{"reason" => ^reason}} = request] ->
-            if facts["target"] == "planning",
-              do: Sessions.signal(key, params["session"], :waiting)
-
-            {:ok, request}
-
-          _ ->
-            Enum.each(
-              existing,
-              &Requests.resolve(&1.id, :facts_changed, %{"reason" => "waiting_changed"})
-            )
-
-            with {:ok, request} <-
-                   Requests.create(key, "session_waiting", Map.put(params, "facts", facts)) do
-              if facts["target"] == "planning",
-                do: Sessions.signal(key, params["session"], :waiting)
-
-              {:ok, request}
-            end
-        end
+        if turn_ended?(facts),
+          do: wait_without_asking(key, params["session"], existing),
+          else: ask_or_reuse(key, params, facts, existing)
       else
         false -> {:error, :session_required}
         error -> error
       end
     end)
+  end
+
+  # Questions and permission prompts carry a tool; a background agent's prompt can
+  # outlive the main turn, so only tool-less waits end with it.
+  defp wait_without_asking(key, session, existing) do
+    for %{facts: facts} = request <- existing,
+        is_nil(facts["tool"]),
+        do: Requests.resolve(request.id, :facts_changed, %{"reason" => "session_idle"})
+
+    Sessions.signal(key, session, :waiting)
+  end
+
+  defp ask_or_reuse(key, params, facts, existing) do
+    reason = facts["reason"]
+
+    case existing do
+      [%{facts: %{"reason" => ^reason}} = request] ->
+        if facts["target"] == "planning",
+          do: Sessions.signal(key, params["session"], :waiting)
+
+        {:ok, request}
+
+      _ ->
+        Enum.each(
+          existing,
+          &Requests.resolve(&1.id, :facts_changed, %{"reason" => "waiting_changed"})
+        )
+
+        with {:ok, request} <-
+               Requests.create(key, "session_waiting", Map.put(params, "facts", facts)) do
+          if facts["target"] == "planning",
+            do: Sessions.signal(key, params["session"], :waiting)
+
+          {:ok, request}
+        end
+    end
   end
 
   @doc "UI-only action; no agent command exposes this boundary."
@@ -154,6 +171,9 @@ defmodule Foreman.SessionWaiting do
             r.repo_key == ^project and r.bead_id == ^ticket and r.session == ^session and
               r.kind == "session_waiting" and r.state == "pending"
       )
+
+  defp turn_ended?(facts),
+    do: facts["target"] == "planning" and facts["reason"] == "input" and is_nil(facts["tool"])
 
   defp target(key, id, facts, original) do
     case Sessions.get(key) do
