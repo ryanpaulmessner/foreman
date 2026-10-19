@@ -11,7 +11,8 @@ config :foreman, :role, role
 if config_env() not in [:test, :acceptance] do
   config :foreman,
     config_directory: System.get_env("FOREMAN_CONFIG_DIR", Path.expand("~/.config/foreman")),
-    discovery_root: System.get_env("FOREMAN_DISCOVERY_ROOT", Path.expand("~/dev"))
+    discovery_root: System.get_env("FOREMAN_DISCOVERY_ROOT", Path.expand("~/dev")),
+    coordinator_workdir: System.get_env("FOREMAN_COORDINATOR_WORKDIR", Path.expand("~/dev/music"))
 end
 
 # config/runtime.exs is executed for all environments, including
@@ -46,6 +47,10 @@ end
 
 # The tmux server holding coordinator-launched (pi) windows that Continue may type into;
 # "foreman" when the coordinator itself runs on the board-owned server.
+if socket = System.get_env("FOREMAN_PLANNING_TMUX_SOCKET") do
+  config :foreman, planning_tmux_socket: socket
+end
+
 if socket = System.get_env("FOREMAN_EXTERNAL_TMUX_SOCKET") do
   config :foreman, external_tmux_socket: socket
 end

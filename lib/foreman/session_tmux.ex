@@ -65,7 +65,32 @@ defmodule Foreman.SessionTmux do
     with :ok <- Foreman.Preview.allow_external_write(),
          {:ok, %{window: window}} <- observe(session, opts),
          {:ok, _} <- cmd(["select-window", "-t", window], opts),
-         do: :ok
+         do: switch_latest_client(window, opts)
+  end
+
+  # Selecting a window only changes what an attached client sees if that client
+  # is on the window's session; move the most recently active client there too.
+  defp switch_latest_client(window, opts) do
+    with {:ok, out} <- cmd(["list-clients", "-F", ~S(#{client_activity} #{client_name})], opts) do
+      latest =
+        out
+        |> String.split("\n", trim: true)
+        |> Enum.flat_map(fn line ->
+          with [activity, client] <- String.split(line, " ", parts: 2),
+               {activity, ""} <- Integer.parse(activity),
+               do: [{activity, client}],
+               else: (_ -> [])
+        end)
+        |> Enum.max_by(&elem(&1, 0), fn -> nil end)
+
+      case latest do
+        nil ->
+          :ok
+
+        {_, client} ->
+          with {:ok, _} <- cmd(["switch-client", "-c", client, "-t", window], opts), do: :ok
+      end
+    end
   end
 
   def external_target(window, opts \\ []) do
