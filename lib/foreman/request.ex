@@ -18,6 +18,7 @@ defmodule Foreman.Request do
   event(:decline)
   event(:withdraw)
   event(:continue)
+  event(:reply)
   event(:start)
   event(:facts_changed, source: :observed)
   event(:succeeded, source: :observed)
@@ -27,6 +28,7 @@ defmodule Foreman.Request do
   guard(:decision?)
   guard(:action?)
   guard(:usage_limit?)
+  guard(:inline_question?)
   transition(:ask, from: :new, to: :pending, do: [record: :request, notify: :pending])
   transition(:approve, from: :pending, to: :approved, guard: :action?, do: [enqueue: :job])
 
@@ -40,16 +42,30 @@ defmodule Foreman.Request do
   transition(:decline, from: :pending, to: :declined, do: [record: :note, notify: :asker])
   transition(:withdraw, from: :pending, to: :withdrawn)
   transition(:continue, from: :pending, to: :pending, guard: :usage_limit?, do: [send: :continue])
+  transition(:reply, from: :pending, to: :answered, guard: :inline_question?, do: [send: :answer])
   transition(:facts_changed, from: :pending, to: :superseded, do: [notify: :asker])
   transition(:start, from: :approved, to: :executing, do: [audit: :intent])
   transition(:succeeded, from: :executing, to: :done, do: [audit: :result, notify: :asker])
   transition(:failed, from: :executing, to: :failed, do: [audit: :reason, notify: :asker])
   transition(:orphaned, from: :executing, to: :failed, do: [audit: :unknown, notify: :asker])
   ignore([:facts_changed, :succeeded, :failed, :orphaned], from: :any)
-  invalid([:ask, :approve, :answer, :decline, :withdraw, :start, :continue], from: :any)
+  invalid([:ask, :approve, :answer, :decline, :withdraw, :start, :continue, :reply], from: :any)
 
   def usage_limit?(%{kind: "session_waiting", reason: "usage_limit"}, _), do: true
   def usage_limit?(_, _), do: false
+
+  @doc "A session's question prompt foreman can answer from the card: one single-select question."
+  def inline_question?(
+        %{
+          kind: "session_waiting",
+          reason: "input",
+          questions: [%{"multi" => false, "options" => [_ | _]} = question]
+        },
+        _
+      ),
+      do: Map.get(question, "preview", false) == false
+
+  def inline_question?(_, _), do: false
 
   def decision?(%{kind: "decision"}, _), do: true
   def decision?(_, _), do: false

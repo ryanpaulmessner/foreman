@@ -23,7 +23,9 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     %{request: request}
   end
 
-  test "waiting cards share attach and usage-only Continue on page and drawer", %{conn: conn} do
+  test "waiting cards share Open session and usage-only Continue on page and drawer", %{
+    conn: conn
+  } do
     session =
       Foreman.Repo.insert!(%Foreman.PlanningSession{
         project: "sample",
@@ -41,13 +43,15 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       })
 
     {:ok, view, _} = live(conn, "/needs-you")
-    assert has_element?(view, "#request-#{request.id} code", "tmux -L")
+    refute has_element?(view, "#request-#{request.id} code")
+    assert has_element?(view, "#open-#{request.id}", "Open session")
     assert has_element?(view, "#continue-#{request.id}", "Continue")
     assert has_element?(view, "#request-#{request.id}", "Codex")
     assert has_element?(view, "#request-#{request.id}", "14:00")
     refute has_element?(view, "#submit-approve-#{request.id}")
     render_click(view, "open-request-drawer")
     assert has_element?(view, "#drawer-continue-#{request.id}")
+    assert has_element?(view, "#drawer-open-#{request.id}")
 
     {:ok, input} =
       Requests.ask({"sample", "s-1"}, "session_waiting", %{
@@ -59,6 +63,181 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     render(view)
     refute has_element?(view, "#continue-#{input.id}")
     assert {:error, :invalid} = Foreman.SessionWaiting.continue(input.id)
+  end
+
+  describe "session waiting cards" do
+    setup do
+      Foreman.Beads.Projection.replace(
+        "sample",
+        Enum.map_join(
+          [{"s-1", "A ticket"}, {"s-2", "Pick a database"}, {"s-3", "Out of credit"}],
+          "\n",
+          fn {id, title} ->
+            Jason.encode!(%{id: id, title: title, issue_type: "task", status: "open"})
+          end
+        )
+      )
+
+      sessions =
+        for ticket <- ~w(s-1 s-2 s-3), into: %{} do
+          {ticket,
+           Foreman.Repo.insert!(%Foreman.PlanningSession{
+             project: "sample",
+             ticket: ticket,
+             workdir: "/tmp",
+             window: "@4#{String.last(ticket)}",
+             state: :running,
+             launched_at: DateTime.utc_now()
+           })}
+        end
+
+      %{sessions: sessions}
+    end
+
+    test "every reason gets a titled card with Open session and no bare attach command", %{
+      conn: conn,
+      sessions: sessions
+    } do
+      ask = fn ticket, facts ->
+        {:ok, request} =
+          Requests.ask({"sample", ticket}, "session_waiting", %{
+            "session" => sessions[ticket].session_id,
+            "facts" => facts
+          })
+
+        request
+      end
+
+      permission =
+        ask.("s-1", %{"reason" => "permission", "tool" => "p-1", "tool_name" => "Bash"})
+
+      question =
+        ask.("s-2", %{
+          "reason" => "input",
+          "tool" => "q-1",
+          "tool_name" => "AskUserQuestion",
+          "questions" => [Foreman.ScratchPrompt.question()]
+        })
+
+      limit = ask.("s-3", %{"reason" => "usage_limit", "provider" => "Anthropic"})
+      requests = [permission, question, limit]
+
+      {:ok, view, _} = live(conn, "/needs-you")
+      render_click(view, "open-request-drawer")
+
+      for request <- requests, prefix <- ["", "drawer-"] do
+        card = "##{prefix}request-#{request.id}"
+        assert has_element?(view, "#{card} ##{prefix}open-#{request.id}", "Open session")
+        assert has_element?(view, "#{card} h2", "Planning session")
+        refute has_element?(view, "#{card} code")
+        refute render(element(view, card)) =~ "tmux -L"
+      end
+
+      assert has_element?(view, "#request-#{permission.id}", "Permission needed")
+      assert has_element?(view, "#request-#{permission.id}", "Bash")
+      assert has_element?(view, "#request-#{permission.id}", "A ticket")
+      refute has_element?(view, "#answer-#{permission.id}")
+
+      assert has_element?(view, "#question-#{question.id}", "Which database?")
+      assert has_element?(view, "#answer-#{question.id}-0", "Postgres")
+      assert has_element?(view, "#answer-#{question.id}-1", "SQLite")
+      assert has_element?(view, "#other-text-#{question.id}")
+      assert has_element?(view, "#drawer-answer-#{question.id}-0")
+
+      assert has_element?(view, "#continue-#{limit.id}")
+      refute has_element?(view, "#continue-#{question.id}")
+    end
+
+    test "the coordinator's card is titled Coordinator", %{conn: conn} do
+      {:ok, request} =
+        Foreman.Repo.insert(%Foreman.Requests.Request{
+          repo_key: "__foreman__",
+          bead_id: "coordinator",
+          kind: "session_waiting",
+          actor: "user",
+          session: "c-1",
+          facts: %{"reason" => "permission", "target" => "planning", "tool_name" => "Edit"},
+          state: "pending"
+        })
+
+      {:ok, view, _} = live(conn, "/needs-you")
+      assert has_element?(view, "#request-#{request.id} h2", "Coordinator")
+      assert has_element?(view, "#open-#{request.id}")
+    end
+
+    test "Open session with no attached client says so and offers the attach command", %{
+      conn: conn,
+      sessions: sessions
+    } do
+      {session, _} = Foreman.ScratchPrompt.start(sessions["s-1"])
+
+      {:ok, request} =
+        Requests.ask({"sample", "s-1"}, "session_waiting", %{
+          "session" => session.session_id,
+          "facts" => %{"reason" => "permission", "tool" => "p-1", "tool_name" => "Bash"}
+        })
+
+      {:ok, view, _} = live(conn, "/needs-you")
+      refute has_element?(view, "#notice-#{request.id}")
+      view |> element("#open-#{request.id}") |> render_click()
+      assert has_element?(view, "#notice-#{request.id}", "No terminal is attached")
+      assert has_element?(view, "#attach-#{request.id}", "attach -t")
+      assert Requests.get(request.id).state == "pending"
+
+      render_click(view, "open-request-drawer")
+      view |> element("#drawer-open-#{request.id}") |> render_click()
+      assert has_element?(view, "#drawer-notice-#{request.id}", "No terminal is attached")
+    end
+
+    test "choosing an option on the card answers the pane; a changed pane refuses", %{
+      conn: conn,
+      sessions: sessions
+    } do
+      {session, received} = Foreman.ScratchPrompt.start(sessions["s-2"])
+
+      ask = fn tool ->
+        {:ok, request} =
+          Requests.ask({"sample", "s-2"}, "session_waiting", %{
+            "session" => session.session_id,
+            "facts" => %{
+              "reason" => "input",
+              "tool" => tool,
+              "tool_name" => "AskUserQuestion",
+              "questions" => [Foreman.ScratchPrompt.question()]
+            }
+          })
+
+        request
+      end
+
+      request = ask.("q-1")
+      {:ok, view, _} = live(conn, "/needs-you")
+
+      view
+      |> form("#answer-#{request.id}")
+      |> put_submitter("#answer-#{request.id}-0")
+      |> render_submit()
+
+      assert Foreman.ScratchPrompt.eventually(fn ->
+               Foreman.ScratchPrompt.received(received) == "1"
+             end)
+
+      assert Requests.get(request.id).state == "answered"
+      refute has_element?(view, "#pending-requests #request-#{request.id}")
+
+      stale = ask.("q-2")
+      send(view.pid, :reconcile)
+
+      view
+      |> form("#answer-#{stale.id}")
+      |> put_submitter("#answer-#{stale.id}-1")
+      |> render_submit()
+
+      assert has_element?(view, "#notice-#{stale.id}", "no longer on screen")
+      assert has_element?(view, "#open-#{stale.id}")
+      assert Requests.get(stale.id).state == "pending"
+      assert Foreman.ScratchPrompt.received(received) == "1"
+    end
   end
 
   test "shared shell reconciles notification candidates without request facts", %{

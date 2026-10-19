@@ -1,6 +1,6 @@
 defmodule Foreman.SessionWaitingTest do
   use Foreman.DataCase, async: false
-  alias Foreman.{Requests, Repo, Sessions}
+  alias Foreman.{Requests, Repo, Sessions, ScratchPrompt}
 
   setup do
     Foreman.Overlay.backfill("sample", [%{bead_id: "s-1", status: "open", issue_type: "task"}])
@@ -40,6 +40,42 @@ defmodule Foreman.SessionWaitingTest do
 
     assert Requests.get(request.id).state == "pending"
     assert DateTime.compare(Sessions.get({"sample", "s-1"}).last_activity_at, old) == :gt
+  end
+
+  test "question and tool-name facts are kept; malformed ones are dropped, not refused", %{
+    session: s
+  } do
+    questions = [%{"question" => "Which?", "options" => ["A", "B"], "multi" => false}]
+
+    {:ok, question} =
+      Requests.ask({"sample", "s-1"}, "session_waiting", %{
+        "session" => s.session_id,
+        "facts" => %{
+          "reason" => "input",
+          "tool" => "q-1",
+          "tool_name" => "AskUserQuestion",
+          "questions" => questions
+        }
+      })
+
+    assert question.facts["questions"] == questions
+    assert question.facts["tool_name"] == "AskUserQuestion"
+
+    {:ok, permission} =
+      Requests.ask({"sample", "s-1"}, "session_waiting", %{
+        "session" => s.session_id,
+        "facts" => %{
+          "reason" => "permission",
+          "tool" => "p-1",
+          "tool_name" => "Bash rm -rf /",
+          "title" => "Spoofed by a hook",
+          "questions" => [%{"question" => "x", "options" => [%{}], "multi" => "no"}]
+        }
+      })
+
+    refute Map.has_key?(permission.facts, "tool_name")
+    refute Map.has_key?(permission.facts, "questions")
+    refute Map.has_key?(permission.facts, "title")
   end
 
   test "a planning session's idle Stop waits without asking", %{session: s} do
@@ -217,6 +253,136 @@ defmodule Foreman.SessionWaitingTest do
     assert {:ok, _} = Sessions.signal({"sample", "s-1"}, s.session_id, :resumed)
     assert {:error, :invalid} = Foreman.SessionWaiting.continue(limited.id)
     assert File.read!(Path.join(dir, "received")) == "continue\n"
+  end
+
+  test "Open session switches the latest client to the pane, then brings the terminal forward",
+       %{session: s} do
+    {:ok, request} =
+      Requests.ask({"sample", "s-1"}, "session_waiting", %{
+        "session" => s.session_id,
+        "facts" => %{"reason" => "permission", "tool" => "p-1", "tool_name" => "Bash"}
+      })
+
+    clients = "1700000000\t/dev/ttys003\n1700000100\t/dev/ttys009\n"
+    test = self()
+
+    runner = fn
+      "tmux", args, _ ->
+        send(test, {:cmd, "tmux", args})
+
+        cond do
+          "list-windows" in args ->
+            {"sample\ts-1\t@42\trunning\t0\t#{s.session_id}\n", 0}
+
+          "display-message" in args ->
+            {"#{s.session_id} %7\n", 0}
+
+          "list-clients" in args ->
+            {Process.get(:clients, clients), 0}
+
+          true ->
+            {"", 0}
+        end
+
+      exe, args, _ ->
+        send(test, {:cmd, exe, args})
+        {"", 0}
+    end
+
+    assert :ok =
+             Foreman.SessionWaiting.open(request.id, runner: runner, platform: {:unix, :darwin})
+
+    calls = drain()
+
+    assert ["switch-client", "-c", "/dev/ttys009", "-t", "%7"] in Enum.map(
+             calls,
+             &Enum.take(elem(&1, 1), -5)
+           )
+
+    assert {"osascript", ["-e", ~s(tell application "Ghostty" to activate)]} in calls
+    assert Requests.get(request.id).state == "pending"
+
+    assert :ok =
+             Foreman.SessionWaiting.open(request.id,
+               runner: runner,
+               platform: {:unix, :linux},
+               app: "WezTerm"
+             )
+
+    refute Enum.any?(drain(), &(elem(&1, 0) == "osascript"))
+
+    Process.put(:clients, "")
+
+    assert {:error, :no_client} =
+             Foreman.SessionWaiting.open(request.id, runner: runner, platform: {:unix, :darwin})
+
+    calls = drain()
+    refute Enum.any?(calls, &(elem(&1, 0) == "osascript"))
+    refute Enum.any?(calls, &("switch-client" in elem(&1, 1)))
+  end
+
+  defp drain(calls \\ []) do
+    receive do
+      {:cmd, exe, args} -> drain([{exe, args} | calls])
+    after
+      0 -> Enum.reverse(calls)
+    end
+  end
+
+  test "an inline answer types into the question pane once, and a changed pane refuses",
+       %{session: s} do
+    {s, received} = ScratchPrompt.start(s)
+
+    ask = fn tool ->
+      Requests.ask({"sample", "s-1"}, "session_waiting", %{
+        "session" => s.session_id,
+        "facts" => %{
+          "reason" => "input",
+          "tool" => tool,
+          "tool_name" => "AskUserQuestion",
+          "questions" => [ScratchPrompt.question()]
+        }
+      })
+    end
+
+    {:ok, request} = ask.("q-1")
+
+    assert {:ok, answered} =
+             Foreman.SessionWaiting.reply(request.id, {:option, 1}, key_delay: 20)
+
+    assert answered.state == "answered"
+    assert answered.outcome == %{"reason" => "answered_in_foreman"}
+    assert eventually(fn -> ScratchPrompt.received(received) == "2" end)
+
+    # The pane moved on: a new request for the same question must not type.
+    {:ok, stale} = ask.("q-2")
+
+    assert {:error, :prompt_changed} =
+             Foreman.SessionWaiting.reply(stale.id, {:option, 0}, key_delay: 20)
+
+    assert Requests.get(stale.id).state == "pending"
+    assert ScratchPrompt.received(received) == "2"
+    assert {:error, :invalid} = Foreman.SessionWaiting.reply(request.id, {:option, 0})
+  end
+
+  test "an Other answer focuses the free-text row, types the text, then sends Enter",
+       %{session: s} do
+    {s, received} = ScratchPrompt.start(s)
+
+    {:ok, request} =
+      Requests.ask({"sample", "s-1"}, "session_waiting", %{
+        "session" => s.session_id,
+        "facts" => %{
+          "reason" => "input",
+          "tool" => "q-1",
+          "questions" => [ScratchPrompt.question()]
+        }
+      })
+
+    assert {:ok, _} =
+             Foreman.SessionWaiting.reply(request.id, {:other, "both, 2 of each"}, key_delay: 20)
+
+    assert eventually(fn -> ScratchPrompt.received(received) == "3both, 2 of each\r" end)
   end
 
   defp eventually(fun, attempts \\ 100)

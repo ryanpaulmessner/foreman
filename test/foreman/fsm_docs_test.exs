@@ -36,6 +36,7 @@ defmodule Foreman.FsmDocsTest do
         {"disclosure", Foreman.Initiatives.Disclosure},
         {"ticket_sheet", Foreman.TicketSheet},
         {"request_drawer", Foreman.RequestDrawer},
+        {"waiting_card", Foreman.WaitingCard},
         {"reload_machine", Foreman.Config.ReloadMachine},
         {"read_machine", Foreman.Beads.ReadMachine},
         {"read_lifecycle", Foreman.Forge.ReadLifecycle},

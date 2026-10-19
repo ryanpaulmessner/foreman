@@ -26,6 +26,68 @@ defmodule Foreman.SessionHooksTest do
     assert Foreman.SessionHooks.facts("PostToolUse", answered) == {:resumed, facts["tool"]}
   end
 
+  test "a question wait carries the question text and option labels, never answers" do
+    input = %{
+      "tool_name" => "AskUserQuestion",
+      "tool_input" => %{
+        "questions" => [
+          %{
+            "question" => "Which database?",
+            "header" => "DB",
+            "multiSelect" => false,
+            "options" => [
+              %{"label" => "Postgres", "description" => "Durable"},
+              %{"label" => "SQLite", "description" => "Small"}
+            ]
+          }
+        ],
+        "answers" => %{"Which database?" => "Postgres"}
+      }
+    }
+
+    for event <- ~w(PreToolUse PermissionRequest) do
+      assert {:waiting, facts} = Foreman.SessionHooks.facts(event, input)
+
+      assert facts["questions"] == [
+               %{
+                 "question" => "Which database?",
+                 "options" => ["Postgres", "SQLite"],
+                 "multi" => false,
+                 "preview" => false
+               }
+             ]
+
+      assert facts["tool_name"] == "AskUserQuestion"
+      refute inspect(facts) =~ "Durable"
+    end
+
+    previewed =
+      put_in(input, ["tool_input", "questions"], [
+        %{
+          "question" => "Layout?",
+          "options" => [%{"label" => "Wide", "description" => "", "preview" => "┌──┐ secret"}]
+        }
+      ])
+
+    assert {:waiting, %{"questions" => [%{"preview" => true, "options" => ["Wide"]}]} = facts} =
+             Foreman.SessionHooks.facts("PreToolUse", previewed)
+
+    refute inspect(facts) =~ "secret"
+  end
+
+  test "a permission wait names the tool and never carries its input" do
+    input = %{
+      "tool_name" => "Bash",
+      "tool_input" => %{"command" => "rm -rf /tmp/secret-path"}
+    }
+
+    assert {:waiting, %{"reason" => "permission", "tool_name" => "Bash"} = facts} =
+             Foreman.SessionHooks.facts("PermissionRequest", input)
+
+    refute inspect(facts) =~ "secret-path"
+    refute Map.has_key?(facts, "questions")
+  end
+
   test "API errors only report actual usage limits" do
     assert {:waiting,
             %{"reason" => "usage_limit", "provider" => "Anthropic", "reset_at" => "14:00"}} =

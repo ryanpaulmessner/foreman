@@ -68,6 +68,7 @@ defmodule Foreman.ConfigTest do
           "[board]\nswimlanes = false",
           "[board]\nstale_session_after = \"soon\"",
           "[board]\nstale_session_after = \"0h\"",
+          "[board]\nterminal_app = \"Ghostty\\\" to quit\"",
           "[[columns]]\ntitle = \"X\"\nstages = []",
           "[[repos]]\nkey = \"sample\"\npath = \"relative/path\"",
           "[[repos]]\nkey = \"sample\"\npath = \"~/dev/sample\"\nenabled = \"yes\"",

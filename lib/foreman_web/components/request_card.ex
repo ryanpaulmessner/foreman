@@ -37,20 +37,39 @@ defmodule ForemanWeb.RequestCard do
 
   def waiting_facts(assigns) do
     ~H"""
-    <p class="break-words font-medium">
-      {%{
-        "input" => "Input needed",
-        "permission" => "Permission needed",
-        "usage_limit" => "Usage limit"
-      }[@request.facts["reason"]]}
-      <span :if={@request.facts["provider"]}>{" · " <> @request.facts["provider"]}</span>
-      <span :if={@request.facts["reset_at"]}>{" · resets " <> @request.facts["reset_at"]}</span>
-    </p>
-    <code class="mt-3 block select-all break-all rounded-lg bg-sunken p-3 text-xs">
-      {@request.facts["attach"]}
-    </code>
+    <div class="space-y-1">
+      <h2 class="break-words text-lg font-semibold [overflow-wrap:anywhere]">
+        {session_title(@request)}
+      </h2>
+      <p
+        :if={@request.facts["title"]}
+        class="break-words text-sm text-foreground-softer [overflow-wrap:anywhere]"
+      >
+        {@request.facts["title"]}
+      </p>
+      <p class="break-words text-sm font-medium [overflow-wrap:anywhere]">
+        {waiting_reason(@request.facts)}
+        <span :if={@request.facts["reason"] == "permission" and @request.facts["tool_name"]}>
+          {" · " <> @request.facts["tool_name"]}
+        </span>
+        <span :if={@request.facts["provider"]}>{" · " <> @request.facts["provider"]}</span>
+        <span :if={@request.facts["reset_at"]}>{" · resets " <> @request.facts["reset_at"]}</span>
+      </p>
+    </div>
     """
   end
+
+  @doc "The waiting session in words: never a tmux target."
+  def session_title(%{repo_key: "__foreman__", bead_id: "coordinator"}), do: "Coordinator"
+  def session_title(%{facts: %{"target" => "planning"}}), do: "Planning session"
+  def session_title(%{session: session}) when is_binary(session), do: session
+  def session_title(_), do: "Session"
+
+  defp waiting_reason(%{"reason" => "input", "questions" => [_ | _]}), do: "Question"
+  defp waiting_reason(%{"reason" => "input"}), do: "Input needed"
+  defp waiting_reason(%{"reason" => "permission"}), do: "Permission needed"
+  defp waiting_reason(%{"reason" => "usage_limit"}), do: "Usage limit"
+  defp waiting_reason(_), do: "Waiting"
 
   attr :request, :any, required: true
 

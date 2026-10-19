@@ -290,7 +290,7 @@ defmodule Foreman.Requests do
     state = Enum.find(Machine.__fsm__(:states), &(to_string(&1) == request.state))
 
     with :ok <- validate(event, payload),
-         {next, effects} when next != :error <- Machine.step(state, event, %{kind: request.kind}) do
+         {next, effects} when next != :error <- Machine.step(state, event, context(request)) do
       if next == state do
         {:ok, request}
       else
@@ -327,6 +327,14 @@ defmodule Foreman.Requests do
       {:error, _} -> {:error, :invalid}
     end
   end
+
+  @doc false
+  def context(request),
+    do: %{
+      kind: request.kind,
+      reason: request.facts["reason"],
+      questions: request.facts["questions"]
+    }
 
   defp validate(:answer, payload) do
     if Decision.text?(payload["answer"]), do: :ok, else: {:error, :answer_required}

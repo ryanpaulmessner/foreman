@@ -44,7 +44,52 @@ defmodule ForemanWeb.NeedsYouLive do
   end
 
   def resolve(%{"id" => id, "action" => "continue"}), do: Foreman.SessionWaiting.continue(id)
+
+  def resolve(%{"id" => id, "action" => "open"}),
+    do: card(id, Foreman.SessionWaiting.open(id))
+
+  def resolve(%{"id" => id, "action" => "reply", "reply" => %{"choice" => choice} = reply}) do
+    choice =
+      case {choice, Integer.parse(choice)} do
+        {"other", _} -> {:other, reply["other"] || ""}
+        {_, {index, ""}} -> {:option, index}
+        _ -> :invalid
+      end
+
+    case Foreman.SessionWaiting.reply(id, choice) do
+      {:ok, request} -> {:ok, request}
+      error -> card(id, error)
+    end
+  end
+
   def resolve(_), do: {:error, :invalid_action}
+
+  # Session results the card explains itself; anything else is "Request not updated".
+  defp card(id, result) do
+    event =
+      case result do
+        :ok ->
+          :opened
+
+        {:error, :no_client} ->
+          :no_client
+
+        {:error, reason} when reason in [:window_gone, :prompt_changed, :tmux_unavailable] ->
+          reason
+
+        _ ->
+          nil
+      end
+
+    case event && Foreman.WaitingCard.step(:ready, event, %{}) do
+      {state, []} -> {:card, id, state}
+      _ -> if match?({:error, _}, result), do: result, else: {:error, :invalid}
+    end
+  end
+
+  @doc "A pending-stream entry: the request and its card notice."
+  def item(request, card \\ Foreman.WaitingCard.__fsm__(:initial)),
+    do: %{id: request.id, request: request, card: card}
 
   def handle_info(:reconcile, socket) do
     Process.send_after(self(), :reconcile, 3_000)
@@ -55,6 +100,14 @@ defmodule ForemanWeb.NeedsYouLive do
     do: {:noreply, socket |> refresh() |> ForemanWeb.TicketDetail.refresh()}
 
   defp result(socket, {:navigate, path}), do: push_navigate(socket, to: path)
+
+  defp result(socket, {:card, id, card}) do
+    case Requests.get(id) do
+      %{state: "pending"} = request -> stream_insert(socket, :pending, item(request, card))
+      _ -> refresh(socket)
+    end
+  end
+
   defp result(socket, {:ok, _}), do: refresh(socket)
 
   defp result(socket, {:error, _}),
@@ -78,7 +131,7 @@ defmodule ForemanWeb.NeedsYouLive do
       |> Enum.reduce(socket, fn {request, index}, socket ->
         if MapSet.member?(previous, request.id),
           do: socket,
-          else: stream_insert(socket, :pending, request, at: index)
+          else: stream_insert(socket, :pending, item(request), at: index)
       end)
 
     socket
@@ -108,7 +161,12 @@ defmodule ForemanWeb.NeedsYouLive do
         >
           No pending requests
         </div>
-        <.request_card :for={{id, request} <- @streams.pending} id={id} request={request} />
+        <.request_card
+          :for={{id, item} <- @streams.pending}
+          id={id}
+          request={item.request}
+          card={item.card}
+        />
       </div>
       <details id="recent-outcomes" class="max-w-3xl border-t border-base pt-4">
         <summary class="cursor-pointer text-sm font-medium text-foreground-softer">
@@ -139,6 +197,7 @@ defmodule ForemanWeb.NeedsYouLive do
 
   attr :prefix, :string, default: ""
   attr :event, :string, default: "resolve"
+  attr :card, :atom, default: :ready
 
   def request_card(%{request: %{kind: kind}} = assigns) when kind in ["push", "open_pr", "merge"],
     do: action_card(assigns)
@@ -147,7 +206,16 @@ defmodule ForemanWeb.NeedsYouLive do
   def request_card(assigns), do: decision_card(assigns)
 
   def waiting_card(assigns) do
-    assigns = assign(assigns, :form, to_form(%{}, as: :waiting))
+    question =
+      if Foreman.Request.inline_question?(Requests.context(assigns.request), nil),
+        do: hd(assigns.request.facts["questions"])
+
+    assigns =
+      assign(assigns,
+        form: to_form(%{}, as: :waiting),
+        other: to_form(%{"other" => ""}, as: :reply),
+        question: question
+      )
 
     ~H"""
     <article id={@id} class="rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
@@ -162,26 +230,126 @@ defmodule ForemanWeb.NeedsYouLive do
         <span class="ml-auto"><ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} /></span>
       </div>
       <ForemanWeb.RequestCard.waiting_facts request={@request} />
-      <.form
-        :if={@request.facts["reason"] == "usage_limit"}
-        for={@form}
-        id={@prefix <> "waiting-" <> @request.id}
-        phx-submit={@event}
-        phx-value-id={@request.id}
-        class="mt-4"
-      >
-        <Button.button
-          id={@prefix <> "continue-" <> @request.id}
-          type="submit"
-          name="action"
-          value="continue"
-          phx-disable-with="Continuing…"
-          variant="solid"
-          color="primary"
+      <%= if @question do %>
+        <h3
+          id={@prefix <> "question-" <> @request.id}
+          class="mt-4 whitespace-pre-wrap break-words font-medium"
+          phx-no-format
+        >{@question["question"]}</h3>
+        <.form
+          for={@form}
+          id={@prefix <> "answer-" <> @request.id}
+          phx-submit={@event}
+          phx-value-id={@request.id}
+          phx-value-action="reply"
+          class="mt-3 grid gap-2 sm:grid-cols-2"
         >
-          Continue
+          <Button.button
+            :for={{label, index} <- Enum.with_index(@question["options"])}
+            id={@prefix <> "answer-" <> @request.id <> "-" <> Integer.to_string(index)}
+            type="submit"
+            name="reply[choice]"
+            value={index}
+            phx-disable-with="Sending…"
+            class="h-auto min-h-10 justify-start whitespace-normal py-2 text-left [overflow-wrap:anywhere]"
+          >
+            {label}
+          </Button.button>
+        </.form>
+        <.form
+          for={@other}
+          id={@prefix <> "other-" <> @request.id}
+          phx-submit={@event}
+          phx-value-id={@request.id}
+          phx-value-action="reply"
+          class="mt-2 flex gap-2"
+        >
+          <input
+            id={@prefix <> "other-text-" <> @request.id}
+            type="text"
+            name="reply[other]"
+            required
+            maxlength="2000"
+            placeholder="Other"
+            aria-label="Other answer"
+            class="min-w-0 flex-1 rounded-lg border border-base bg-sunken px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+          />
+          <Button.button
+            id={@prefix <> "other-send-" <> @request.id}
+            type="submit"
+            name="reply[choice]"
+            value="other"
+            phx-disable-with="Sending…"
+          >
+            Send
+          </Button.button>
+        </.form>
+      <% else %>
+        <ul
+          :if={is_list(@request.facts["questions"])}
+          id={@prefix <> "questions-" <> @request.id}
+          class="mt-4 space-y-3"
+        >
+          <li :for={question <- @request.facts["questions"]} class="space-y-1">
+            <p class="whitespace-pre-wrap break-words font-medium" phx-no-format>{question["question"]}</p>
+            <p class="break-words text-sm text-foreground-softer">
+              {Enum.join(question["options"], " · ")}
+            </p>
+          </li>
+        </ul>
+      <% end %>
+      <div class="mt-4 flex flex-wrap items-center gap-2">
+        <Button.button
+          id={@prefix <> "open-" <> @request.id}
+          type="button"
+          phx-click={@event}
+          phx-value-id={@request.id}
+          phx-value-action="open"
+          phx-disable-with="Opening…"
+          variant={if(@question, do: "outline", else: "solid")}
+        >
+          <.icon name="hero-arrow-top-right-on-square" class="size-4" /> Open session
         </Button.button>
-      </.form>
+        <.form
+          :if={@request.facts["reason"] == "usage_limit"}
+          for={@form}
+          id={@prefix <> "waiting-" <> @request.id}
+          phx-submit={@event}
+          phx-value-id={@request.id}
+        >
+          <Button.button
+            id={@prefix <> "continue-" <> @request.id}
+            type="submit"
+            name="action"
+            value="continue"
+            phx-disable-with="Continuing…"
+          >
+            Continue
+          </Button.button>
+        </.form>
+      </div>
+      <div
+        :if={@card != :ready}
+        id={@prefix <> "notice-" <> @request.id}
+        role="status"
+        class="mt-3 space-y-2 text-sm text-foreground-softer"
+      >
+        <p>
+          {%{
+            unattached: "No terminal is attached to this session's tmux server. Attach with:",
+            window_gone: "Session window is gone.",
+            prompt_changed: "The question is no longer on screen. Open the session to answer it.",
+            tmux_unavailable: "tmux is unavailable."
+          }[@card]}
+        </p>
+        <code
+          :if={@card == :unattached and @request.facts["attach"]}
+          id={@prefix <> "attach-" <> @request.id}
+          class="block select-all break-all rounded-md bg-sunken px-2 py-1 font-mono text-xs"
+        >
+          {@request.facts["attach"]}
+        </code>
+      </div>
     </article>
     """
   end
