@@ -35,6 +35,7 @@ defmodule Foreman.Config.Schema do
           %{
             "key" => :key,
             "path" => :path,
+            "code_path" => :path,
             "prefix" => :key,
             "tickets" => {:one_of, ~w(files beads)},
             "github" => :github,
@@ -161,7 +162,6 @@ defmodule Foreman.Config.Schema do
   defp check(value, :app, field) do
     if Foreman.Terminal.app?(value), do: :ok, else: {:error, "#{field}: invalid value"}
   end
-
 
   defp check(value, :branch, field) do
     if Foreman.Requests.LocalRefs.branch_name?(value),

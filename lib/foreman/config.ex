@@ -1,7 +1,8 @@
 defmodule Foreman.Config do
   @moduledoc """
   TOML configuration boundary. Takes named file contents in precedence order;
-  filesystem reads belong in the runtime's Oban adapter. Keys remain strings.
+  filesystem reads belong in the runtime's Oban adapter. Keys remain strings. The one
+  exception: a repo's explicit `code_path` is checked against its `.git/config` at load.
 
   Tables merge recursively. Columns and views replace in full. Repos merge by key (a local
   entry can override just `enabled`); `repos = []` clears the inherited list.
@@ -106,15 +107,36 @@ defmodule Foreman.Config do
           |> Map.put_new("tickets", "beads")
           |> Map.put_new("forge", if(repo["github"], do: "github", else: "none"))
           |> Map.put_new("color", "zinc")
-          |> Map.update!("path", fn
-            "~/" <> relative -> Path.expand(relative, home)
-            path -> Path.expand(path)
+          |> Map.update!("path", &expand_path(&1, home))
+          |> then(fn
+            %{"code_path" => code_path} = repo ->
+              Map.put(repo, "code_path", expand_path(code_path, home))
+
+            repo ->
+              repo
           end)
         end)
       end)
 
-    with :ok <- Foreman.Config.Schema.unique(config["repos"], "path", "repos") do
+    with :ok <- Foreman.Config.Schema.unique(config["repos"], "path", "repos"),
+         :ok <- code_checkouts(config["repos"]) do
       {:ok, config}
     end
+  end
+
+  defp expand_path("~/" <> relative, home), do: Path.expand(relative, home)
+  defp expand_path(path, _home), do: Path.expand(path)
+
+  # Reads each explicit code_path's .git config (no git process): a separate code checkout
+  # must be a git repo whose origin is the configured github remote.
+  defp code_checkouts(repos) do
+    repos
+    |> Enum.with_index()
+    |> Enum.find_value(:ok, fn {repo, index} ->
+      case Foreman.CodeCheckout.check(repo) do
+        :ok -> nil
+        {:error, error} -> {:error, "repos[#{index}] (#{repo["key"]}): #{error}"}
+      end
+    end)
   end
 end

@@ -452,6 +452,28 @@ defmodule Foreman.OpenPrTest do
                snapshot["change_requests"]
     end
 
+    test "a project whose code lives in a separate checkout opens PRs against merge_base", %{
+      facts: facts,
+      fake: fake
+    } do
+      committed()
+
+      config =
+        Foreman.RuntimeState.config().config
+        |> update_in(
+          ["repos", Access.at(0)],
+          &Map.merge(&1, %{"path" => "/tmp/workspace", "code_path" => "/tmp/code"})
+        )
+
+      Repo.update_all("board_config", set: [config: config])
+      assert {:error, :human_merge_base_branch} = ask(facts)
+      assert {:ok, request} = ask(Map.put(facts, "base_branch", "staging"))
+      Requests.resolve(request.id, :approve, %{})
+      assert :ok = Foreman.Requests.OpenPrJob.run(request.id)
+      {:ok, snapshot} = Foreman.Forge.Fake.list("owner/repo", server: fake)
+      assert [%{"target_branch" => "staging"}] = snapshot["change_requests"]
+    end
+
     test "a stacked PR may target the head branch of an open PR", %{facts: facts, fake: fake} do
       committed()
 

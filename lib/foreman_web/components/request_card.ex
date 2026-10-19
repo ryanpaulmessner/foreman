@@ -80,11 +80,11 @@ defmodule ForemanWeb.RequestCard do
       <div
         :for={
           {label, key} <- [
-            {"Repository", "remote"},
-            {"Head branch", "head_branch"},
-            {"SHA", "expected_sha"},
-            {"Base branch", "base_branch"},
             {"Title", "title"},
+            {"Repository", "remote"},
+            {"Base branch", "base_branch"},
+            {"Head branch", "head_branch"},
+            {"Commit", "expected_sha"},
             {"Body", "body"}
           ]
         }
@@ -117,14 +117,14 @@ defmodule ForemanWeb.RequestCard do
   def push_facts(assigns) do
     ~H"""
     <dl class="grid min-w-0 grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
+      <dt class="text-foreground-softer">Destination</dt>
+      <dd class="min-w-0 break-all font-mono">{destination(@request.facts)}</dd>
       <div
         :for={
           {label, key} <- [
-            {"Repository", "remote"},
-            {"Worktree", "worktree"},
-            {"Local branch", "local_branch"},
-            {"SHA", "expected_sha"},
-            {"Remote branch", "remote_branch"}
+            {"Branch", "local_branch"},
+            {"Commit", "expected_sha"},
+            {"Worktree", "worktree"}
           ]
         }
         class="contents"
@@ -135,4 +135,6 @@ defmodule ForemanWeb.RequestCard do
     </dl>
     """
   end
+
+  defp destination(facts), do: "#{facts["remote"]} → #{facts["remote_branch"]}"
 end

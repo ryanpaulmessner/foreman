@@ -450,6 +450,8 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       assert has_element?(view, "#request-#{request.id} dd", text)
     end
 
+    assert has_element?(view, "#request-#{request.id} dt", "Destination")
+    assert has_element?(view, "#request-#{request.id} dd", "owner/repo → published")
     assert has_element?(view, "#submit-approve-#{request.id}", "Approve")
 
     view

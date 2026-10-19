@@ -24,12 +24,16 @@ defmodule Foreman.Requests.LocalRefs do
     end
   end
 
+  # `core.hookspath` is neutralised by the push job's `-c core.hooksPath=/dev/null` (command
+  # line wins) and `--no-verify`; `push.default` is inert because the job always pushes an
+  # explicit refspec. Both appear in real checkouts (ReportSystem sets them).
   @config_keys %{
     "core" =>
-      ~w(repositoryformatversion filemode bare logallrefupdates symlinks ignorecase precomposeunicode worktree),
+      ~w(repositoryformatversion filemode bare logallrefupdates symlinks ignorecase precomposeunicode worktree hookspath),
     "remote" => ~w(url fetch pushurl),
     "branch" => ~w(remote merge rebase pushremote description),
-    "user" => ~w(name email signingkey)
+    "user" => ~w(name email signingkey),
+    "push" => ~w(default)
   }
 
   @doc "Reject executable/includes/URL rewrites and unknown storage extensions before invoking git."
@@ -55,7 +59,7 @@ defmodule Foreman.Requests.LocalRefs do
         {:halt, :error}
 
       String.starts_with?(line, "[") ->
-        case Regex.run(~r/\A\[(core|remote|branch|user)(?: "[^"\\]+")?\]\z/i, line) do
+        case Regex.run(~r/\A\[(core|remote|branch|user|push)(?: "[^"\\]+")?\]\z/i, line) do
           [_, next] -> {:cont, {:ok, String.downcase(next)}}
           _ -> {:halt, :error}
         end

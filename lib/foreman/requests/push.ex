@@ -11,7 +11,7 @@ defmodule Foreman.Requests.Push do
   def validate(facts, row) when is_map(facts) do
     with {:ok, repo} <- configured(row.repo_key),
          :ok <- shape(facts),
-         :ok <- LocalRefs.same_repo(facts["worktree"], repo["path"]),
+         :ok <- LocalRefs.same_repo(facts["worktree"], Foreman.CodeCheckout.path(repo)),
          :ok <- unchanged(facts),
          %{remote: remote, snapshot: snapshot} <- Foreman.Forge.Store.get(row.repo_key),
          true <- remote == repo["github"] || {:error, :config_changed},

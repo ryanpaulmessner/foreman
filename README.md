@@ -392,6 +392,7 @@ terminal_app = "Ghostty" # macOS app Open session brings to the front (default G
 [[repos]]
 key = "sample"
 path = "~/dev/sample"
+code_path = "~/dev/sample/app" # optional separate code repo; defaults to path
 github = "example/sample" # optional
 forge = "github" # github | none; inferred from github if omitted
 tickets = "beads" # beads (default) | files
@@ -434,6 +435,13 @@ only the PR's `MERGED` state is read) and moves linked tickets to `merged`. Stac
 children are never retargeted; the Pull requests page shows the manual step. Human merge
 requires `forge = "github"` and a `github` remote; otherwise the config is rejected and the
 last good config stays in force.
+
+When a project's tickets and code live in different repos (tickets in a workspace repo, code
+in a separate nested repo with its own remote), set `code_path` to the code checkout. Tickets
+and planning sessions keep using `path`; `push` accepts only worktrees of `code_path` (and
+`code_path` itself) and pushes from there. `code_path` must be a git checkout whose `origin`
+is the repo's `github` remote (HTTPS or SSH form); otherwise the config is rejected and the
+last good config stays in force. Without `code_path` the code is in `path`, as before.
 
 Tables merge recursively. A supplied `columns` array replaces all inherited
 columns. Repo entries merge by `key`, preserving order; a local entry can contain

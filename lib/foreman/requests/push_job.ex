@@ -31,7 +31,7 @@ defmodule Foreman.Requests.PushJob do
            {:ok, repo} <- Push.configured(request.repo_key),
            true <- repo["github"] == facts["remote"] || {:error, :config_changed},
            :ok <- Push.shape(facts),
-           :ok <- LocalRefs.same_repo(facts["worktree"], repo["path"]),
+           :ok <- LocalRefs.same_repo(facts["worktree"], Foreman.CodeCheckout.path(repo)),
            {:ok, snapshot} <- adapter.list(facts["remote"], forge_options),
            {:ok, current_repo} <- Push.configured(request.repo_key),
            true <- current_repo == repo || {:error, :config_changed},

@@ -447,6 +447,43 @@ defmodule Foreman.PushTest do
     refute_receive :push_attempt
   end
 
+  test "a repo hooks path and push.default are tolerated; the job still runs no hook", %{
+    facts: facts,
+    path: path,
+    git: git
+  } do
+    # ReportSystem's checkout sets both. The job overrides hooksPath on the command line
+    # and always pushes an explicit refspec, so neither can change what is sent.
+    committed()
+    opts = job_options(path)
+    hooks = path <> "-hooks"
+    marker = path <> "-hook-ran"
+    File.mkdir_p!(hooks)
+    on_exit(fn -> Enum.each([hooks, marker], &File.rm_rf!/1) end)
+
+    for hook <- ~w(pre-push reference-transaction post-update) do
+      File.write!(Path.join(hooks, hook), "#!/bin/sh\ntouch #{marker}\n")
+      File.chmod!(Path.join(hooks, hook), 0o755)
+    end
+
+    git.(["config", "core.hooksPath", hooks])
+    git.(["config", "push.default", "current"])
+    {:ok, request} = Requests.ask({"sample", "s-1"}, "push", %{"facts" => facts})
+    Requests.resolve(request.id, :approve, %{})
+    assert :ok = Foreman.Requests.PushJob.run(request.id, opts)
+    assert %{state: "done"} = Requests.get(request.id)
+    assert_receive :push_attempt
+    refute File.exists?(marker)
+    # Control: the same hooks do fire for a plain push from this checkout.
+    {_, 0} =
+      System.cmd("git", ["push", path <> "-bare", "HEAD:refs/heads/control"],
+        cd: path,
+        stderr_to_stdout: true
+      )
+
+    assert File.exists?(marker)
+  end
+
   test "one-off default push advances a bare remote fast-forward", %{
     facts: facts,
     path: path,
@@ -683,6 +720,149 @@ defmodule Foreman.PushTest do
         refute_receive :push_attempt
         human!(%{"merge_policy" => "board"})
       end
+    end
+  end
+
+  describe "separate code checkout (code_path)" do
+    # The work project: tickets live in a workspace repo (path); the code is a separate
+    # repo (code_path) whose worktrees the builds use.
+    setup %{path: code} do
+      workspace = code <> "-workspace"
+      {_, 0} = System.cmd("git", ["init", "-b", "main", workspace], stderr_to_stdout: true)
+      on_exit(fn -> File.rm_rf!(workspace) end)
+
+      config =
+        Foreman.RuntimeState.config().config
+        |> update_in(
+          ["repos", Access.at(0)],
+          &Map.merge(&1, %{
+            "path" => workspace,
+            "code_path" => code,
+            "merge_policy" => "human",
+            "merge_base" => "staging"
+          })
+        )
+
+      Repo.update_all("board_config", set: [config: config])
+      %{workspace: workspace}
+    end
+
+    defp code_worktree(git, path) do
+      worktree = path <> "-fix-branch"
+      git.(["worktree", "add", "-b", "fix-branch", worktree])
+      on_exit(fn -> File.rm_rf!(worktree) end)
+      worktree
+    end
+
+    test "worktrees of code_path are accepted; the workspace and foreign repos are refused", %{
+      facts: facts,
+      git: git,
+      path: path,
+      workspace: workspace
+    } do
+      committed()
+      worktree = code_worktree(git, path)
+
+      facts =
+        facts
+        |> Map.merge(%{"worktree" => worktree, "local_branch" => "fix-branch"})
+        |> Map.put("remote_branch", "fix-branch")
+
+      assert {:ok, request} = Requests.ask({"sample", "s-1"}, "push", %{"facts" => facts})
+      assert request.facts["worktree"] == worktree
+      assert request.facts["remote"] == "owner/repo"
+
+      assert {:ok, _} =
+               Requests.ask({"sample", "s-1"}, "push", %{
+                 "facts" => Map.merge(facts, %{"worktree" => path, "local_branch" => "main"})
+               })
+
+      assert {:error, :foreign_worktree} =
+               Requests.ask({"sample", "s-1"}, "push", %{
+                 "facts" => Map.put(facts, "worktree", workspace)
+               })
+    end
+
+    test "human-merge rules still refuse the base and default branch", %{
+      facts: facts,
+      git: git,
+      path: path
+    } do
+      committed()
+      worktree = code_worktree(git, path)
+
+      for branch <- ["staging", "main"] do
+        assert {:error, :human_merge_base_branch} =
+                 Requests.ask({"sample", "s-1"}, "push", %{
+                   "facts" =>
+                     Map.merge(facts, %{
+                       "worktree" => worktree,
+                       "local_branch" => "fix-branch",
+                       "remote_branch" => branch
+                     })
+                 })
+      end
+    end
+
+    test "the job pushes from the code worktree to the configured remote", %{
+      facts: facts,
+      git: git,
+      path: path
+    } do
+      committed()
+      opts = job_options(path)
+      worktree = code_worktree(git, path)
+
+      facts =
+        Map.merge(facts, %{
+          "worktree" => worktree,
+          "local_branch" => "fix-branch",
+          "remote_branch" => "fix-branch"
+        })
+
+      {:ok, request} = Requests.ask({"sample", "s-1"}, "push", %{"facts" => facts})
+      Requests.resolve(request.id, :approve, %{})
+      assert :ok = Foreman.Requests.PushJob.run(request.id, opts)
+      assert %{state: "done"} = Requests.get(request.id)
+      assert_receive :push_attempt
+
+      assert {sha, 0} =
+               System.cmd("git", ["--git-dir", path <> "-bare", "rev-parse", "fix-branch"])
+
+      assert String.trim(sha) == facts["expected_sha"]
+    end
+
+    test "the job refuses a worktree that stops matching code_path after approval", %{
+      facts: facts,
+      git: git,
+      path: path,
+      workspace: workspace
+    } do
+      committed()
+      opts = job_options(path)
+      worktree = code_worktree(git, path)
+
+      facts =
+        Map.merge(facts, %{
+          "worktree" => worktree,
+          "local_branch" => "fix-branch",
+          "remote_branch" => "fix-branch"
+        })
+
+      {:ok, request} = Requests.ask({"sample", "s-1"}, "push", %{"facts" => facts})
+      Requests.resolve(request.id, :approve, %{})
+
+      config =
+        Foreman.RuntimeState.config().config
+        |> put_in(["repos", Access.at(0), "code_path"], workspace)
+
+      Repo.update_all("board_config", set: [config: config])
+      assert :ok = Foreman.Requests.PushJob.run(request.id, opts)
+
+      assert %{state: "failed", outcome: %{"reason" => "foreign_worktree"}} =
+               Requests.get(request.id)
+
+      refute_receive :push_attempt
     end
   end
 end

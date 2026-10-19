@@ -181,6 +181,122 @@ defmodule Foreman.ConfigTest do
     end
   end
 
+  describe "code_path" do
+    setup do
+      home =
+        Path.join(System.tmp_dir!(), "foreman-code-home-#{System.unique_integer([:positive])}")
+
+      code = Path.join(home, "dev/work/ReportSystem")
+      File.mkdir_p!(code)
+      on_exit(fn -> File.rm_rf!(home) end)
+      {_, 0} = System.cmd("git", ["init", "-b", "staging", code], stderr_to_stdout: true)
+
+      remote = fn url ->
+        System.cmd("git", ["-C", code, "remote", "remove", "origin"], stderr_to_stdout: true)
+        {_, 0} = System.cmd("git", ["-C", code, "remote", "add", "origin", url])
+      end
+
+      parse = fn extra ->
+        Foreman.Config.parse_layers(
+          [
+            {"defaults", File.read!("priv/foreman.defaults.toml")},
+            {"foreman.toml",
+             """
+             [[repos]]
+             key = "work"
+             path = "~/dev/work"
+             tickets = "files"
+             github = "AGarcia-IHS/ReportSystem"
+             merge_policy = "human"
+             merge_base = "staging"
+             """ <> extra}
+          ],
+          home: home
+        )
+      end
+
+      %{home: home, code: code, remote: remote, parse: parse}
+    end
+
+    test "absent code_path keeps the code in path", %{parse: parse, home: home} do
+      assert {:ok, config} = parse.("")
+      [repo] = config["repos"]
+      refute Map.has_key?(repo, "code_path")
+      assert Foreman.CodeCheckout.path(repo) == Path.join(home, "dev/work")
+    end
+
+    test "a ~-relative code checkout whose origin matches github loads expanded", %{
+      parse: parse,
+      code: code,
+      remote: remote
+    } do
+      for url <- [
+            "https://github.com/AGarcia-IHS/ReportSystem.git",
+            "https://github.com/agarcia-ihs/reportsystem",
+            "git@github.com:AGarcia-IHS/ReportSystem.git",
+            "ssh://git@github.com/AGarcia-IHS/ReportSystem.git"
+          ] do
+        remote.(url)
+        assert {:ok, config} = parse.("code_path = \"~/dev/work/ReportSystem\"\n"), url
+        [repo] = config["repos"]
+        assert repo["code_path"] == code
+        assert Foreman.CodeCheckout.path(repo) == code
+      end
+
+      assert {:ok, _} = parse.("code_path = #{inspect(code)}\n")
+    end
+
+    test "code_path must be a git checkout whose origin matches github", %{
+      parse: parse,
+      code: code,
+      home: home,
+      remote: remote
+    } do
+      remote.("https://github.com/someone-else/ReportSystem.git")
+      assert {:error, error} = parse.("code_path = #{inspect(code)}\n")
+      assert error =~ "repos[0] (work): code_path origin does not match github"
+
+      remote.("https://gitlab.com/AGarcia-IHS/ReportSystem.git")
+      assert {:error, error} = parse.("code_path = #{inspect(code)}\n")
+      assert error =~ "code_path origin does not match github"
+
+      System.cmd("git", ["-C", code, "remote", "remove", "origin"])
+      assert {:error, error} = parse.("code_path = #{inspect(code)}\n")
+      assert error =~ "code_path origin does not match github"
+
+      plain = Path.join(home, "plain")
+      File.mkdir_p!(plain)
+      assert {:error, error} = parse.("code_path = #{inspect(plain)}\n")
+      assert error =~ "repos[0] (work): code_path is not a git checkout"
+
+      assert {:error, error} = parse.("code_path = \"relative/ReportSystem\"\n")
+      assert error =~ "code_path: invalid value"
+    end
+
+    test "code_path requires a github remote", %{home: home, code: code} do
+      assert {:error, error} =
+               Foreman.Config.parse_layers(
+                 [
+                   {"defaults", File.read!("priv/foreman.defaults.toml")},
+                   {"foreman.toml",
+                    "[[repos]]\nkey = \"work\"\npath = \"~/dev/work\"\ncode_path = #{inspect(code)}\n"}
+                 ],
+                 home: home
+               )
+
+      assert error =~ "repos[0] (work): code_path requires a github remote"
+    end
+
+    test "a rejected code_path keeps the last good config", %{parse: parse, code: code} do
+      assert {:ok, good} = parse.("")
+      assert {:error, error} = rejected = parse.("code_path = #{inspect(code)}\n")
+      {loading, _} = good |> Foreman.Config.Reload.new() |> Foreman.Config.Reload.request()
+      {retained, _} = Foreman.Config.Reload.complete(loading, loading.generation, rejected)
+      assert retained.config == good
+      assert retained.error == error
+    end
+  end
+
   defp parse(text) do
     Foreman.Config.parse_layers(
       [
