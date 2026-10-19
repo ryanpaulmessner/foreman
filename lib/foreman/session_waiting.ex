@@ -7,7 +7,7 @@ defmodule Foreman.SessionWaiting do
 
   @impl true
   def validate(%{"reason" => reason} = facts, _)
-      when reason in ~w(input permission usage_limit) do
+      when reason in ~w(input permission usage_limit question) do
     if Enum.all?(
          [facts["provider"], facts["reset_at"]],
          &(is_nil(&1) or Foreman.Requests.Decision.text?(&1))
@@ -15,17 +15,23 @@ defmodule Foreman.SessionWaiting do
       {:ok,
        facts
        |> Map.take(
-         ~w(reason provider reset_at attach window pane pid target session_id snapshot tool tool_name questions title)
+         ~w(reason provider reset_at attach window pane pid target session_id snapshot tool tool_name questions question title)
        )
        |> Map.reject(fn {key, value} ->
-         key in ~w(tool_name questions title) and not display?(key, value)
-       end)}
+         key in ~w(tool_name questions question title) and not display?(key, value)
+       end)
+       |> chat_question()}
     else
       {:error, :invalid_facts}
     end
   end
 
   def validate(_, _), do: {:error, :invalid_facts}
+
+  # A chat question without usable text is an ordinary end of turn.
+  defp chat_question(%{"reason" => "question", "question" => _} = facts), do: facts
+  defp chat_question(%{"reason" => "question"} = facts), do: %{facts | "reason" => "input"}
+  defp chat_question(facts), do: Map.delete(facts, "question")
 
   # Display-only facts from newer hooks: a malformed value is dropped, never refused.
   defp display?("tool_name", name),
@@ -35,6 +41,7 @@ defmodule Foreman.SessionWaiting do
     do: Enum.all?(questions, &question?/1)
 
   defp display?("title", title), do: label?(title, 2_000)
+  defp display?("question", text), do: label?(text, 8_000)
   defp display?(_, _), do: false
 
   defp question?(%{"question" => text, "options" => options, "multi" => multi} = question)
@@ -90,10 +97,10 @@ defmodule Foreman.SessionWaiting do
   end
 
   defp ask_or_reuse(key, params, facts, existing) do
-    reason = facts["reason"]
+    identity = Map.take(facts, ~w(reason question))
 
-    case existing do
-      [%{facts: %{"reason" => ^reason}} = request] ->
+    case Enum.map(existing, &{&1, Map.take(&1.facts, ~w(reason question))}) do
+      [{request, ^identity}] ->
         if facts["target"] == "planning",
           do: Sessions.signal(key, params["session"], :waiting)
 
@@ -183,24 +190,21 @@ defmodule Foreman.SessionWaiting do
   end
 
   @doc """
-  UI-only: answers a single-select question prompt by typing into the session's
-  pane, then records the request answered. Refuses with `:prompt_changed` unless
-  the pane still shows that exact prompt. The answer itself is not stored.
+  UI-only: answers the session from its card by typing into its pane, then records
+  the request answered. A single-select question prompt takes `{:option, i}` or
+  `{:other, text}` and refuses with `:prompt_changed` unless the pane still shows
+  that exact prompt. A chat question takes `{:text, text}` and refuses with
+  `:prompt_busy` unless the pane shows Claude's empty, idle input. The answer
+  itself is not stored.
   """
   def reply(id, choice, opts \\ []) do
     transaction(fn ->
       with %Request{} = request <- Requests.get(id),
            _ <- lock(request.repo_key),
            %Request{state: "pending"} = request <- Requests.get(id),
-           {:answered, [send: :answer]} <-
+           {:answered, [send: effect]} <-
              Foreman.Request.step(:pending, :reply, Requests.context(request)),
-           [question] <- request.facts["questions"],
-           :ok <-
-             on_target(
-               request,
-               &SessionTmux.answer_session(&1, question, choice, opts),
-               &SessionTmux.answer_external(&1, question, choice, opts)
-             ) do
+           :ok <- type(effect, request, choice, opts) do
         Requests.resolve(id, :reply, %{"reason" => "answered_in_foreman"})
       else
         nil -> {:error, :not_found}
@@ -209,6 +213,24 @@ defmodule Foreman.SessionWaiting do
       end
     end)
   end
+
+  defp type(:answer, %{facts: %{"questions" => [question]}} = request, choice, opts),
+    do:
+      on_target(
+        request,
+        &SessionTmux.answer_session(&1, question, choice, opts),
+        &SessionTmux.answer_external(&1, question, choice, opts)
+      )
+
+  defp type(:prompt, request, {:text, text}, opts),
+    do:
+      on_target(
+        request,
+        &SessionTmux.reply_session(&1, text, opts),
+        &SessionTmux.reply_external(&1, text, opts)
+      )
+
+  defp type(_, _, _, _), do: {:error, :invalid}
 
   defp on_target(
          %Request{facts: %{"target" => "planning", "window" => window}} = request,

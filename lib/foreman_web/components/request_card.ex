@@ -66,6 +66,7 @@ defmodule ForemanWeb.RequestCard do
   def session_title(_), do: "Session"
 
   defp waiting_reason(%{"reason" => "input", "questions" => [_ | _]}), do: "Question"
+  defp waiting_reason(%{"reason" => "question"}), do: "Question"
   defp waiting_reason(%{"reason" => "input"}), do: "Input needed"
   defp waiting_reason(%{"reason" => "permission"}), do: "Permission needed"
   defp waiting_reason(%{"reason" => "usage_limit"}), do: "Usage limit"

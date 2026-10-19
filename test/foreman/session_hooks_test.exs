@@ -88,6 +88,34 @@ defmodule Foreman.SessionHooksTest do
     refute Map.has_key?(facts, "questions")
   end
 
+  test "a Stop that ends on a question carries only the question paragraph" do
+    message = "Ran the suite; 3 secret-ish details here.\n\nShall I commit it on feat/x?"
+
+    assert Foreman.SessionHooks.facts("Stop", %{"last_assistant_message" => message}) ==
+             {:waiting, %{"reason" => "question", "question" => "Shall I commit it on feat/x?"}}
+  end
+
+  @tag :tmp_dir
+  test "a Stop reads the transcript tail when the hook has no last message", %{tmp_dir: dir} do
+    path = Path.join(dir, "t.jsonl")
+
+    entry = %{
+      "type" => "assistant",
+      "message" => %{"content" => [%{"type" => "text", "text" => "Want me to push?"}]}
+    }
+
+    File.write!(path, Jason.encode!(entry) <> "\n")
+
+    assert {:waiting, %{"reason" => "question", "question" => "Want me to push?"}} =
+             Foreman.SessionHooks.facts("Stop", %{"transcript_path" => path})
+  end
+
+  test "a Stop that does not ask is a plain idle wait" do
+    for input <- [%{}, %{"last_assistant_message" => "Committed abc123."}] do
+      assert Foreman.SessionHooks.facts("Stop", input) == {:waiting, %{"reason" => "input"}}
+    end
+  end
+
   test "API errors only report actual usage limits" do
     assert {:waiting,
             %{"reason" => "usage_limit", "provider" => "Anthropic", "reset_at" => "14:00"}} =

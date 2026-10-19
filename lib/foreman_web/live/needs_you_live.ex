@@ -48,6 +48,13 @@ defmodule ForemanWeb.NeedsYouLive do
   def resolve(%{"id" => id, "action" => "open"}),
     do: card(id, Foreman.SessionWaiting.open(id))
 
+  def resolve(%{"id" => id, "action" => "reply", "reply" => %{"text" => text}}) do
+    case Foreman.SessionWaiting.reply(id, {:text, text}) do
+      {:ok, request} -> {:ok, request}
+      error -> card(id, error)
+    end
+  end
+
   def resolve(%{"id" => id, "action" => "reply", "reply" => %{"choice" => choice} = reply}) do
     choice =
       case {choice, Integer.parse(choice)} do
@@ -74,7 +81,8 @@ defmodule ForemanWeb.NeedsYouLive do
         {:error, :no_client} ->
           :no_client
 
-        {:error, reason} when reason in [:window_gone, :prompt_changed, :tmux_unavailable] ->
+        {:error, reason}
+        when reason in [:window_gone, :prompt_changed, :prompt_busy, :tmux_unavailable] ->
           reason
 
         _ ->
@@ -214,6 +222,7 @@ defmodule ForemanWeb.NeedsYouLive do
       assign(assigns,
         form: to_form(%{}, as: :waiting),
         other: to_form(%{"other" => ""}, as: :reply),
+        reply: to_form(%{"text" => ""}, as: :reply),
         question: question
       )
 
@@ -284,7 +293,42 @@ defmodule ForemanWeb.NeedsYouLive do
             Send
           </Button.button>
         </.form>
-      <% else %>
+      <% end %>
+      <%= if @request.facts["reason"] == "question" do %>
+        <p
+          id={@prefix <> "chat-question-" <> @request.id}
+          class="mt-4 max-h-64 overflow-y-auto whitespace-pre-wrap break-words font-medium [overflow-wrap:anywhere]"
+          phx-no-format
+        >{@request.facts["question"]}</p>
+        <.form
+          for={@reply}
+          id={@prefix <> "reply-" <> @request.id}
+          phx-submit={@event}
+          phx-value-id={@request.id}
+          phx-value-action="reply"
+          class="mt-3 flex gap-2"
+        >
+          <input
+            id={@prefix <> "reply-text-" <> @request.id}
+            type="text"
+            name="reply[text]"
+            required
+            maxlength="2000"
+            autocomplete="off"
+            aria-label="Reply"
+            class="min-w-0 flex-1 rounded-lg border border-base bg-sunken px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+          />
+          <Button.button
+            id={@prefix <> "reply-send-" <> @request.id}
+            type="submit"
+            variant="solid"
+            phx-disable-with="Sending…"
+          >
+            Reply
+          </Button.button>
+        </.form>
+      <% end %>
+      <%= if is_nil(@question) do %>
         <ul
           :if={is_list(@request.facts["questions"])}
           id={@prefix <> "questions-" <> @request.id}
@@ -306,7 +350,9 @@ defmodule ForemanWeb.NeedsYouLive do
           phx-value-id={@request.id}
           phx-value-action="open"
           phx-disable-with="Opening…"
-          variant={if(@question, do: "outline", else: "solid")}
+          variant={
+            if(@question || @request.facts["reason"] == "question", do: "outline", else: "solid")
+          }
         >
           <.icon name="hero-arrow-top-right-on-square" class="size-4" /> Open session
         </Button.button>
@@ -339,6 +385,7 @@ defmodule ForemanWeb.NeedsYouLive do
             unattached: "No terminal is attached to this session's tmux server. Attach with:",
             window_gone: "Session window is gone.",
             prompt_changed: "The question is no longer on screen. Open the session to answer it.",
+            prompt_busy: "The session is not at its prompt. Open the session to reply.",
             tmux_unavailable: "tmux is unavailable."
           }[@card]}
         </p>

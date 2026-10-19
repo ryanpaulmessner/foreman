@@ -12,6 +12,7 @@ stateDiagram-v2
     pending --> withdrawn: withdraw
     pending --> pending: continue [usage_limit?] / send(continue)
     pending --> answered: reply [inline_question?] / send(answer)
+    pending --> answered: reply [chat_question?] / send(prompt)
     pending --> superseded: facts_changed / notify(asker)
     approved --> executing: start / audit(intent)
     executing --> done: succeeded / audit(result), notify(asker)
@@ -43,6 +44,7 @@ stateDiagram-v2
 | pending | continue [usage_limit?] | -> pending | send(continue) |
 | pending | continue | invalid |  |
 | pending | reply [inline_question?] | -> answered | send(answer) |
+| pending | reply [chat_question?] | -> answered | send(prompt) |
 | pending | reply | invalid |  |
 | pending | start | invalid |  |
 | pending | facts_changed | -> superseded | notify(asker) |

@@ -95,6 +95,29 @@ defmodule Foreman.SessionWaitingTest do
     assert Sessions.get({"sample", "s-1"}).state == :waiting
   end
 
+  test "a chat question without usable text is an ordinary idle Stop", %{session: s} do
+    for question <- [nil, "", "  ", 7, String.duplicate("x", 8_001)] do
+      facts = %{"reason" => "question", "question" => question}
+
+      assert {:ok, %Foreman.PlanningSession{state: :waiting}} =
+               Requests.ask({"sample", "s-1"}, "session_waiting", %{
+                 "session" => s.session_id,
+                 "facts" => facts
+               })
+    end
+
+    assert Requests.pending() == []
+
+    # Question text never rides along on another reason.
+    {:ok, permission} =
+      Requests.ask({"sample", "s-1"}, "session_waiting", %{
+        "session" => s.session_id,
+        "facts" => %{"reason" => "permission", "tool" => "p-1", "question" => "Shall I?"}
+      })
+
+    refute Map.has_key?(permission.facts, "question")
+  end
+
   test "an external pi session waiting for input still asks" do
     Foreman.Overlay.backfill("sample", [%{bead_id: "s-2", status: "open", issue_type: "task"}])
     socket = "fm-external-#{System.unique_integer([:positive])}"
@@ -383,6 +406,137 @@ defmodule Foreman.SessionWaitingTest do
              Foreman.SessionWaiting.reply(request.id, {:other, "both, 2 of each"}, key_delay: 20)
 
     assert eventually(fn -> ScratchPrompt.received(received) == "3both, 2 of each\r" end)
+  end
+
+  defp chat_question(s) do
+    {:ok, request} =
+      Requests.ask({"sample", "s-1"}, "session_waiting", %{
+        "session" => s.session_id,
+        "facts" => %{"reason" => "question", "question" => "Shall I commit it?"}
+      })
+
+    request
+  end
+
+  test "a chat reply types into an idle prompt, then Enter, and answers the request",
+       %{session: s} do
+    {s, received} = ScratchPrompt.start_chat(s, :idle)
+    request = chat_question(s)
+
+    assert {:ok, answered} =
+             Foreman.SessionWaiting.reply(request.id, {:text, "yes, commit it"}, key_delay: 20)
+
+    assert answered.state == "answered"
+    assert answered.outcome == %{"reason" => "answered_in_foreman"}
+    assert eventually(fn -> ScratchPrompt.received(received) == "yes, commit it\r" end)
+
+    # Answered once: a second click types nothing.
+    assert {:error, :invalid} = Foreman.SessionWaiting.reply(request.id, {:text, "again"})
+    assert ScratchPrompt.received(received) == "yes, commit it\r"
+  end
+
+  test "a chat reply refuses a busy pane and types nothing", %{session: s} do
+    {s, received} = ScratchPrompt.start_chat(s, :busy)
+    request = chat_question(s)
+
+    assert {:error, :prompt_busy} =
+             Foreman.SessionWaiting.reply(request.id, {:text, "yes"}, key_delay: 20)
+
+    assert Requests.get(request.id).state == "pending"
+    assert ScratchPrompt.received(received) == ""
+
+    assert {:error, :answer_required} =
+             Foreman.SessionWaiting.reply(request.id, {:text, "  "}, key_delay: 20)
+
+    assert {:error, :invalid} = Foreman.SessionWaiting.reply(request.id, {:option, 0})
+  end
+
+  test "a chat reply sends the text and Enter as two separate send-keys calls", %{session: s} do
+    request = chat_question(s)
+    test = self()
+    rule = String.duplicate("─", 20)
+
+    runner = fn "tmux", args, _ ->
+      send(test, {:cmd, "tmux", args})
+
+      cond do
+        "list-windows" in args -> {"sample\ts-1\t@42\trunning\t0\t#{s.session_id}\n", 0}
+        "display-message" in args -> {"#{s.session_id} %7\n", 0}
+        "capture-pane" in args -> {"✻ Worked for 2s\n#{rule}\n❯ \n#{rule}\n  footer\n", 0}
+        true -> {"", 0}
+      end
+    end
+
+    assert {:ok, _} =
+             Foreman.SessionWaiting.reply(request.id, {:text, "ship\nit"},
+               runner: runner,
+               key_delay: 0
+             )
+
+    sends =
+      for {_, args} <- drain(),
+          "send-keys" in args,
+          do: Enum.drop_while(args, &(&1 != "send-keys"))
+
+    assert sends == [
+             ["send-keys", "-t", "%7", "-l", "--", "ship it"],
+             ["send-keys", "-t", "%7", "Enter"]
+           ]
+  end
+
+  test "a chat reply to an external session needs the same pane and process", %{session: _} do
+    Foreman.Overlay.backfill("sample", [%{bead_id: "s-2", status: "open", issue_type: "task"}])
+    socket = "fm-external-#{System.unique_integer([:positive])}"
+    dir = Path.join(System.tmp_dir!(), socket)
+    File.mkdir_p!(dir)
+    executable = Path.join(dir, "prompt")
+    File.write!(executable, ScratchPrompt.chat_script(:idle))
+    File.chmod!(executable, 0o700)
+
+    {_, 0} =
+      System.cmd(
+        "tmux",
+        ["-L", socket, "-f", "/dev/null", "new-session", "-d", "-s", "sample"] ++
+          ["-n", "build", "-c", dir, executable]
+      )
+
+    old = Application.get_env(:foreman, :external_tmux_socket)
+    Application.put_env(:foreman, :external_tmux_socket, socket)
+
+    on_exit(fn ->
+      if old,
+        do: Application.put_env(:foreman, :external_tmux_socket, old),
+        else: Application.delete_env(:foreman, :external_tmux_socket)
+
+      System.cmd("tmux", ["-L", socket, "kill-server"], stderr_to_stdout: true)
+      File.rm_rf!(dir)
+    end)
+
+    assert eventually(fn -> File.exists?(Path.join(dir, "ready")) end)
+
+    ask = fn ->
+      Requests.ask({"sample", "s-2"}, "session_waiting", %{
+        "session" => "pi-build",
+        "facts" => %{"reason" => "question", "question" => "Push now?", "window" => "build"}
+      })
+    end
+
+    {:ok, request} = ask.()
+    assert request.facts["target"] == "external"
+
+    # Same window name, different process: refused.
+    stale = %{request | facts: %{request.facts | "pid" => "1"}}
+
+    assert {:error, :window_gone} =
+             Foreman.SessionTmux.reply_external(stale.facts, "yes", key_delay: 20)
+
+    assert ScratchPrompt.received(Path.join(dir, "received")) == ""
+
+    assert {:ok, _} = Foreman.SessionWaiting.reply(request.id, {:text, "yes"}, key_delay: 20)
+
+    assert eventually(fn ->
+             ScratchPrompt.received(Path.join(dir, "received")) == "yes\r"
+           end)
   end
 
   defp eventually(fun, attempts \\ 100)

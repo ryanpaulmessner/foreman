@@ -42,6 +42,19 @@ defmodule Foreman.RequestMachineTest do
     end
   end
 
+  test "a reply to a chat question types into the session prompt" do
+    context = %{kind: "session_waiting", reason: "question", questions: nil}
+    assert Machine.step(:pending, :reply, context) == {:answered, [send: :prompt]}
+
+    for state <- Machine.__fsm__(:states), state != :pending do
+      assert {:error, _} = Machine.step(state, :reply, context)
+    end
+
+    for context <- [%{context | reason: "input"}, %{context | kind: "decision"}] do
+      assert {:error, _} = Machine.step(:pending, :reply, context)
+    end
+  end
+
   test "every request transition and its effects" do
     for {from, event, kind, to, effects} <- [
           {:new, :ask, "decision", :pending, [record: :request, notify: :pending]},

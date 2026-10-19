@@ -144,6 +144,54 @@ defmodule Foreman.CoordinatorTest do
     assert Foreman.Requests.pending() == []
   end
 
+  test "a coordinator Stop that ends on a question raises one question request" do
+    {:ok, s, :fresh} = Sessions.prepare_coordinator(:resume, window: "@123")
+    stop = %{"last_assistant_message" => "Reviewed clean.\n\nShall I commit it?"}
+
+    assert {200, %{id: id}} = coordinator_hook(s, "Stop", stop)
+    assert [%{id: ^id, facts: facts}] = Foreman.Requests.pending()
+    assert facts["reason"] == "question"
+    assert facts["question"] == "Shall I commit it?"
+    assert Sessions.coordinator().state == :waiting
+
+    # A repeated hook for the same turn does not duplicate the card.
+    assert {200, %{id: ^id}} = coordinator_hook(s, "Stop", stop)
+    assert [%{id: ^id}] = Foreman.Requests.pending()
+
+    assert {200, %{state: :running}} = coordinator_hook(s, "UserPromptSubmit", %{})
+    assert Foreman.Requests.get(id).state == "superseded"
+    assert Foreman.Requests.pending() == []
+  end
+
+  test "a later Stop without a question clears the question card; a new question replaces it" do
+    {:ok, s, :fresh} = Sessions.prepare_coordinator(:resume, window: "@123")
+
+    assert {200, %{id: first}} =
+             coordinator_hook(s, "Stop", %{"last_assistant_message" => "Push now?"})
+
+    assert {200, %{id: second}} =
+             coordinator_hook(s, "Stop", %{"last_assistant_message" => "Merge now?"})
+
+    assert first != second
+    assert Foreman.Requests.get(first).state == "superseded"
+
+    assert {200, %{state: :waiting}} =
+             coordinator_hook(s, "Stop", %{"last_assistant_message" => "Merged."})
+
+    assert Foreman.Requests.get(second).state == "superseded"
+    assert Foreman.Requests.pending() == []
+  end
+
+  test "background activity after a question Stop clears the card" do
+    {:ok, s, :fresh} = Sessions.prepare_coordinator(:resume, window: "@123")
+
+    assert {200, %{id: id}} =
+             coordinator_hook(s, "Stop", %{"last_assistant_message" => "Push now?"})
+
+    assert {200, %{state: :running}} = coordinator_hook(s, "PreToolUse", %{"tool_name" => "Bash"})
+    assert Foreman.Requests.get(id).state == "superseded"
+  end
+
   test "an idle coordinator Stop keeps a permission prompt that is still open" do
     {:ok, s, :fresh} = Sessions.prepare_coordinator(:resume, window: "@123")
     permission = %{"tool_name" => "Bash", "tool_input" => %{"command" => "ls"}}

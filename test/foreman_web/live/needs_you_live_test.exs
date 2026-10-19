@@ -238,6 +238,113 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       assert Requests.get(stale.id).state == "pending"
       assert Foreman.ScratchPrompt.received(received) == "1"
     end
+
+    defp chat_question(session, ticket) do
+      {:ok, request} =
+        Requests.ask({"sample", ticket}, "session_waiting", %{
+          "session" => session.session_id,
+          "facts" => %{"reason" => "question", "question" => "Tests pass.\nShall I commit it?"}
+        })
+
+      request
+    end
+
+    test "a chat question card shows the question, Open session and a Reply box", %{
+      conn: conn,
+      sessions: sessions
+    } do
+      request = chat_question(sessions["s-1"], "s-1")
+      {:ok, view, _} = live(conn, "/needs-you")
+      render_click(view, "open-request-drawer")
+
+      for prefix <- ["", "drawer-"] do
+        card = "##{prefix}request-#{request.id}"
+        assert has_element?(view, "#{card} h2", "Planning session")
+        assert has_element?(view, card, "Question")
+        assert has_element?(view, "##{prefix}chat-question-#{request.id}", "Shall I commit it?")
+
+        assert has_element?(
+                 view,
+                 "##{prefix}reply-#{request.id} ##{prefix}reply-text-#{request.id}"
+               )
+
+        assert has_element?(view, "##{prefix}reply-send-#{request.id}", "Reply")
+        assert has_element?(view, "##{prefix}open-#{request.id}", "Open session")
+        refute has_element?(view, "##{prefix}answer-#{request.id}")
+        refute has_element?(view, "#{card} code")
+      end
+    end
+
+    test "Reply types into an idle pane and answers the card", %{
+      conn: conn,
+      sessions: sessions
+    } do
+      {session, received} = Foreman.ScratchPrompt.start_chat(sessions["s-1"], :idle)
+      request = chat_question(session, "s-1")
+      {:ok, view, _} = live(conn, "/needs-you")
+
+      view
+      |> form("#reply-#{request.id}", %{"reply" => %{"text" => "yes, commit"}})
+      |> render_submit()
+
+      assert Foreman.ScratchPrompt.eventually(fn ->
+               Foreman.ScratchPrompt.received(received) == "yes, commit\r"
+             end)
+
+      assert Requests.get(request.id).state == "answered"
+      refute has_element?(view, "#pending-requests #request-#{request.id}")
+    end
+
+    test "Reply on a busy pane types nothing and keeps the card with Open session", %{
+      conn: conn,
+      sessions: sessions
+    } do
+      {session, received} = Foreman.ScratchPrompt.start_chat(sessions["s-2"], :busy)
+      request = chat_question(session, "s-2")
+      {:ok, view, _} = live(conn, "/needs-you")
+
+      view
+      |> form("#reply-#{request.id}", %{"reply" => %{"text" => "yes"}})
+      |> render_submit()
+
+      assert has_element?(view, "#notice-#{request.id}", "not at its prompt")
+      assert has_element?(view, "#open-#{request.id}")
+      assert has_element?(view, "#reply-text-#{request.id}")
+      assert Requests.get(request.id).state == "pending"
+      assert Foreman.ScratchPrompt.received(received) == ""
+
+      render_click(view, "open-request-drawer")
+
+      view
+      |> form("#drawer-reply-#{request.id}", %{"reply" => %{"text" => "yes"}})
+      |> render_submit()
+
+      assert has_element?(view, "#drawer-notice-#{request.id}", "not at its prompt")
+    end
+
+    test "a new question card reaches the browser notification snapshot", %{
+      conn: conn,
+      sessions: sessions
+    } do
+      {:ok, view, _} = live(conn, "/")
+      assert_push_event(view, "notification_snapshot", %{requests: before})
+      request = chat_question(sessions["s-1"], "s-1")
+      send(view.pid, :request_count_tick)
+      render(view)
+      id = request.id
+
+      refute Enum.any?(before, &(&1.id == id))
+      assert %{id: id, kind: "session_waiting", ticket: "s-1"} in next_snapshot(view, id)
+    end
+
+    # Mount and params each push a snapshot; take the first that has the request.
+    defp next_snapshot(view, id, attempts \\ 5) do
+      assert_push_event(view, "notification_snapshot", %{requests: requests})
+
+      if attempts > 1 and not Enum.any?(requests, &(&1.id == id)),
+        do: next_snapshot(view, id, attempts - 1),
+        else: requests
+    end
   end
 
   test "shared shell reconciles notification candidates without request facts", %{

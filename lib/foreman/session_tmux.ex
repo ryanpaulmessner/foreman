@@ -193,6 +193,32 @@ defmodule Foreman.SessionTmux do
     end
   end
 
+  @doc "Types a reply into a session's empty, idle chat prompt; otherwise `{:error, :prompt_busy}`."
+  def reply_session(session, text, opts \\ []) do
+    with :ok <- Foreman.Preview.allow_external_write(),
+         {:ok, pane} <- session_pane(session, opts),
+         do: type_reply(pane, text, &cmd(&1, opts), opts)
+  end
+
+  def reply_external(facts, text, opts \\ []) do
+    with :ok <- Foreman.Preview.allow_external_write(),
+         {:ok, current} <- external_pane(facts, opts) do
+      if Map.take(current, ~w(pane pid)) == Map.take(facts, ~w(pane pid)),
+        do: type_reply(facts["pane"], text, &external_cmd(&1, opts), opts),
+        else: {:error, :window_gone}
+    end
+  end
+
+  defp type_reply(pane, text, run, opts) do
+    with {:ok, [{:literal, text}, :enter]} <- Foreman.ChatPrompt.keys(text),
+         :ok <- prompt_idle(pane, run),
+         {:ok, _} <- tmux(run, ["send-keys", "-t", pane, "-l", "--", text]) do
+      # Claude reads typed text and Enter on separate renders; never coalesce them.
+      Process.sleep(Keyword.get(opts, :key_delay, 150))
+      with {:ok, _} <- tmux(run, ["send-keys", "-t", pane, "Enter"]), do: :ok
+    end
+  end
+
   defp external_pane(facts, opts) do
     case external_target(facts["window"], opts) do
       {:ok, current} -> {:ok, current}
@@ -247,6 +273,12 @@ defmodule Foreman.SessionTmux do
           error -> {:halt, error}
         end
       end)
+    end
+  end
+
+  defp prompt_idle(pane, run) do
+    with {:ok, screen} <- tmux(run, ["capture-pane", "-p", "-J", "-t", pane]) do
+      if Foreman.ChatPrompt.idle?(screen), do: :ok, else: {:error, :prompt_busy}
     end
   end
 

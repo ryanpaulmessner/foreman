@@ -57,7 +57,13 @@ defmodule Foreman.SessionHooks do
       {:waiting,
        %{"reason" => "permission", "tool" => tool(input), "tool_name" => input["tool_name"]}}
 
-  def facts("Stop", _), do: {:waiting, %{"reason" => "input"}}
+  # Only the closing question paragraph leaves the pane, never the rest of the turn.
+  def facts("Stop", input) do
+    case input |> Foreman.ChatQuestion.last_message() |> Foreman.ChatQuestion.question() do
+      {:ok, question} -> {:waiting, %{"reason" => "question", "question" => question}}
+      :none -> {:waiting, %{"reason" => "input"}}
+    end
+  end
 
   def facts("PreToolUse", %{"tool_name" => "AskUserQuestion"} = input),
     do: {:waiting, question(input)}

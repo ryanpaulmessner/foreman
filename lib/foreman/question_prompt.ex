@@ -36,18 +36,11 @@ defmodule Foreman.QuestionPrompt do
       when is_integer(index) and index >= 0 and index < length(options),
       do: {:ok, [{:literal, Integer.to_string(index + 1)}]}
 
-  def keys(%{"options" => options}, {:other, text}) when is_binary(text) do
-    case text |> String.replace(~r/[\x00-\x1f\x7f]+/u, " ") |> String.trim() do
-      "" ->
-        {:error, :answer_required}
-
-      text when byte_size(text) > 2_000 ->
-        {:error, :answer_required}
-
-      text ->
-        {:ok,
-         [{:literal, Integer.to_string(length(options) + 1)}, :focus, {:literal, text}, :enter]}
-    end
+  def keys(%{"options" => options}, {:other, text}) do
+    with {:ok, text} <- Foreman.ChatPrompt.typed(text),
+         do:
+           {:ok,
+            [{:literal, Integer.to_string(length(options) + 1)}, :focus, {:literal, text}, :enter]}
   end
 
   def keys(_, _), do: {:error, :answer_required}

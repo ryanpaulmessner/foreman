@@ -330,7 +330,7 @@ defmodule Foreman.Sessions do
       Enum.any?(pending, fn request ->
         request.facts["tool"] == tool or
           (tool == "activity" and is_nil(request.facts["tool"]) and
-             request.facts["reason"] in ["input", "usage_limit"])
+             request.facts["reason"] in ["input", "question", "usage_limit"])
       end)
 
   def reconcile(opts \\ []) do
