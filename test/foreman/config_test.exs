@@ -88,6 +88,99 @@ defmodule Foreman.ConfigTest do
     assert length(config["columns"]) == 5
   end
 
+  describe "merge policy" do
+    @work_repo """
+    [[repos]]
+    key = "work"
+    path = "~/dev/work"
+    prefix = "work"
+    tickets = "files"
+    """
+
+    test "the user's work repo shape loads as human merge on staging" do
+      assert {:ok, config} =
+               parse(
+                 @work_repo <>
+                   """
+                   github = "AGarcia-IHS/ReportSystem"
+                   forge = "github"
+                   merge_policy = "human"
+                   merge_base = "staging"
+                   """
+               )
+
+      [repo] = config["repos"]
+      assert %{"merge_policy" => "human", "merge_base" => "staging"} = repo
+      assert Foreman.MergePolicy.human?(repo, config)
+      assert Foreman.MergePolicy.base(repo, "main") == "staging"
+      assert Foreman.MergePolicy.protected_branches(repo, "main") == ["staging", "main"]
+    end
+
+    test "the default stays board merge, and a top-level value sets it for every repo" do
+      github = @work_repo <> "github = \"o/r\"\n"
+      assert {:ok, config} = parse(github)
+      refute Map.has_key?(config, "merge_policy")
+      refute Map.has_key?(hd(config["repos"]), "merge_policy")
+      assert Foreman.MergePolicy.policy(hd(config["repos"]), config) == "board"
+
+      assert {:ok, config} = parse("merge_policy = \"human\"\n" <> github)
+      assert Foreman.MergePolicy.policy(hd(config["repos"]), config) == "human"
+      assert Foreman.MergePolicy.base(hd(config["repos"]), "main") == "main"
+
+      assert {:ok, config} =
+               parse("merge_policy = \"human\"\n" <> github <> "merge_policy = \"board\"\n")
+
+      assert Foreman.MergePolicy.policy(hd(config["repos"]), config) == "board"
+    end
+
+    test "policy values and base names are validated at both levels" do
+      for text <- [
+            "merge_policy = \"auto\"",
+            "merge_policy = true",
+            @work_repo <> "merge_policy = \"squash\"",
+            @work_repo <> "merge_base = \"+staging\"",
+            @work_repo <> "merge_base = \"\""
+          ] do
+        assert {:error, error} = parse(text), text
+        assert error =~ "merge_"
+      end
+    end
+
+    test "human merge without a GitHub forge is a load error that keeps the last good config" do
+      assert {:ok, good} = parse(@work_repo)
+
+      for text <- [
+            @work_repo <> "merge_policy = \"human\"",
+            @work_repo <> "forge = \"none\"\ngithub = \"o/r\"\nmerge_policy = \"human\"",
+            "merge_policy = \"human\"\n" <> @work_repo
+          ] do
+        assert {:error, error} = rejected = parse(text)
+        assert error =~ "repos[0] (work): merge_policy \"human\" requires forge = \"github\""
+        {loading, _} = good |> Foreman.Config.Reload.new() |> Foreman.Config.Reload.request()
+        {retained, _} = Foreman.Config.Reload.complete(loading, loading.generation, rejected)
+        assert retained.config == good
+        assert retained.error == error
+      end
+    end
+
+    test "a local layer may set the policy on a repo whose forge is in the global file" do
+      global = @work_repo <> "github = \"AGarcia-IHS/ReportSystem\"\n"
+      local = "[[repos]]\nkey = \"work\"\nmerge_policy = \"human\"\nmerge_base = \"staging\"\n"
+
+      assert {:ok, config} =
+               Foreman.Config.parse_layers(
+                 [
+                   {"defaults", File.read!("priv/foreman.defaults.toml")},
+                   {"foreman.toml", global},
+                   {"foreman.local.toml", local}
+                 ],
+                 home: "/tmp/config-home"
+               )
+
+      assert Foreman.MergePolicy.human?(hd(config["repos"]), config)
+    end
+  end
+
   defp parse(text) do
     Foreman.Config.parse_layers(
       [

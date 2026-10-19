@@ -258,4 +258,100 @@ defmodule Foreman.MergeRequestTest do
     assert request.state == "pending"
     assert Repo.aggregate(Oban.Job, :count) == 0
   end
+
+  describe "human merge policy" do
+    defp human!(where) do
+      config = Foreman.RuntimeState.config().config
+
+      config =
+        case where do
+          :repo -> put_in(config, ["repos", Access.at(0), "merge_policy"], "human")
+          :top -> Map.put(config, "merge_policy", "human")
+        end
+
+      Repo.update_all("board_config", set: [config: config])
+    end
+
+    test "ask merge is refused at creation with a named reason, per repo or machine-wide", %{
+      facts: facts
+    } do
+      for where <- [:repo, :top] do
+        Repo.update_all("board_config",
+          set: [
+            config: %{
+              "repos" => [
+                %{
+                  "key" => "sample",
+                  "forge" => "github",
+                  "github" => "owner/repo",
+                  "enabled" => true
+                }
+              ]
+            }
+          ]
+        )
+
+        human!(where)
+
+        assert {:error, :human_merge_policy} =
+                 Requests.ask({"sample", "s-1"}, "merge", %{"facts" => facts})
+      end
+
+      # What `foreman ask merge` receives from the API: the refusal names its reason.
+      assert {422, %{error: :human_merge_policy}} =
+               Foreman.AgentCommands.execute(%{
+                 "action" => "ask",
+                 "repo" => "sample",
+                 "id" => "s-1",
+                 "request_kind" => "merge",
+                 "facts" => facts
+               })
+
+      assert Repo.aggregate(Foreman.Requests.Request, :count) == 0
+      assert Repo.aggregate(Oban.Job, :count) == 0
+    end
+
+    test "a pending ask is superseded when the repo moves to human merge", %{facts: facts} do
+      {:ok, request} = Requests.ask({"sample", "s-1"}, "merge", %{"facts" => facts})
+      human!(:repo)
+      Requests.reconcile_merges()
+
+      assert %{state: "superseded", outcome: %{"reason" => "human_merge_policy"}} =
+               Requests.get(request.id)
+
+      assert Repo.aggregate(Oban.Job, :count) == 0
+    end
+
+    test "the board cannot enqueue a merge action directly", %{snapshot: snapshot} do
+      human!(:repo)
+      {:ok, facts} = Foreman.Merge.prepare(snapshot, 5)
+      assert {:error, :human_merge_policy} = Foreman.Merge.enqueue("sample", "owner/repo", facts)
+      assert Repo.aggregate(Foreman.Merge.Record, :count) == 0
+    end
+
+    test "a merge job for a human-merge repo refuses before any forge write", %{
+      facts: facts,
+      snapshot: snapshot
+    } do
+      {:ok, request} = Requests.ask({"sample", "s-1"}, "merge", %{"facts" => facts})
+      {:ok, confirmation} = Foreman.Merge.prepare(snapshot, 5)
+      {:ok, executing} = Requests.confirm_merge(request.id, confirmation)
+      id = executing.outcome["result"]["action_id"]
+      # The job is forced past creation: the policy changes after confirmation.
+      human!(:repo)
+
+      fake = start_supervised!({Foreman.Forge.Fake, snapshot})
+      assert :ok = Foreman.Merge.MergeJob.run(id, Foreman.Forge.Fake, server: fake)
+
+      assert %{state: "failed", error: "human_merge_policy", merge_sha: nil} =
+               Foreman.Merge.get(id)
+
+      {:ok, live} = Foreman.Forge.Fake.list("owner/repo", server: fake)
+      assert [%{"state" => "open"}] = live["change_requests"]
+      Requests.reconcile_merges()
+
+      assert %{state: "failed", outcome: %{"reason" => "human_merge_policy"}} =
+               Requests.get(request.id)
+    end
+  end
 end

@@ -10,6 +10,7 @@ defmodule Foreman.Config.Schema do
            "stale_session_after" => :duration,
            "terminal_app" => :app
          }},
+      "merge_policy" => {:one_of, ~w(board human)},
       "views" =>
         {:nonempty_list,
          {:table,
@@ -38,6 +39,8 @@ defmodule Foreman.Config.Schema do
             "tickets" => {:one_of, ~w(files beads)},
             "github" => :github,
             "forge" => {:one_of, ~w(github none)},
+            "merge_policy" => {:one_of, ~w(board human)},
+            "merge_base" => :branch,
             "color" => :text,
             "enabled" => :boolean
           }}},
@@ -54,7 +57,8 @@ defmodule Foreman.Config.Schema do
              required(view, ~w(key title), "views[#{index}]")
            end),
          :ok <- required_repos(Map.get(config, "repos", []), complete?),
-         :ok <- required_config(config, complete?) do
+         :ok <- required_config(config, complete?),
+         :ok <- human_merge(config, complete?) do
       :ok
     end
   end
@@ -77,6 +81,23 @@ defmodule Foreman.Config.Schema do
         required(column, ~w(title stages), "columns[#{index}]")
       end)
     end
+  end
+
+  # Cross-field rule on the merged layers only: a local layer may set the policy for a
+  # repo whose forge is declared in the global file.
+  defp human_merge(_, false), do: :ok
+
+  defp human_merge(config, true) do
+    each(config["repos"], fn repo, index ->
+      forge = repo["forge"] || if(repo["github"], do: "github", else: "none")
+
+      if Foreman.MergePolicy.human?(repo, config) and
+           (forge != "github" or not is_binary(repo["github"])),
+         do:
+           {:error,
+            "repos[#{index}] (#{repo["key"]}): merge_policy \"human\" requires forge = \"github\" and a github remote"},
+         else: :ok
+    end)
   end
 
   defp required_repos(repos, complete?) do
@@ -139,6 +160,13 @@ defmodule Foreman.Config.Schema do
 
   defp check(value, :app, field) do
     if Foreman.Terminal.app?(value), do: :ok, else: {:error, "#{field}: invalid value"}
+  end
+
+
+  defp check(value, :branch, field) do
+    if Foreman.Requests.LocalRefs.branch_name?(value),
+      do: :ok,
+      else: {:error, "#{field}: invalid branch name"}
   end
 
   defp check(value, :duration, field), do: pattern(value, ~r/\A[1-9][0-9]*(s|m|h|d)\z/, field)

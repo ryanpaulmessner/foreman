@@ -94,4 +94,22 @@ defmodule Foreman.ConfigRuntimeTest do
 
     assert error =~ "speccing"
   end
+
+  test "human merge on a forge-none repo is rejected and the installed config stays", %{
+    root: root
+  } do
+    repo = Path.join(root, "work")
+    File.mkdir_p!(repo)
+    base = "[[repos]]\nkey = \"work\"\npath = \"#{repo}\"\ntickets = \"files\"\n"
+    File.write!(Path.join(root, "foreman.toml"), base <> "github = \"o/r\"\nforge = \"github\"\n")
+    assert :ok = ReloadJob.perform(%Oban.Job{})
+    accepted = Foreman.RuntimeState.config()
+    assert accepted.error == nil
+    File.write!(Path.join(root, "foreman.toml"), base <> "merge_policy = \"human\"\n")
+    assert :ok = ReloadJob.perform(%Oban.Job{})
+    rejected = Foreman.RuntimeState.config()
+    assert rejected.config == accepted.config
+    assert rejected.error =~ "merge_policy \"human\" requires forge = \"github\""
+    refute Foreman.MergePolicy.human_key?("work")
+  end
 end

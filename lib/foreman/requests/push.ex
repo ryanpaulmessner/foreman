@@ -15,7 +15,8 @@ defmodule Foreman.Requests.Push do
          :ok <- unchanged(facts),
          %{remote: remote, snapshot: snapshot} <- Foreman.Forge.Store.get(row.repo_key),
          true <- remote == repo["github"] || {:error, :config_changed},
-         :ok <- default_rule(facts, row, snapshot["default_branch"]) do
+         :ok <- default_rule(facts, row, snapshot["default_branch"]),
+         :ok <- human_rule(facts, repo, snapshot["default_branch"]) do
       {:ok,
        facts
        |> Map.take(["worktree", "local_branch", "expected_sha", "remote_branch"])
@@ -65,6 +66,17 @@ defmodule Foreman.Requests.Push do
   end
 
   def default_rule(_, _, _), do: {:error, :default_branch_unknown}
+
+  @doc """
+  Human-merge repos reach shared branches only through a PR a person merges: no push to the
+  PR base or the default branch, for any ticket (one-off tickets included).
+  """
+  def human_rule(facts, repo, default) do
+    if Foreman.MergePolicy.human?(repo) and
+         facts["remote_branch"] in Foreman.MergePolicy.protected_branches(repo, default),
+       do: {:error, :human_merge_base_branch},
+       else: :ok
+  end
 
   defp parent?(row) do
     linked =

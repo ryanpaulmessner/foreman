@@ -6,6 +6,7 @@ defmodule Foreman.Requests.Merge do
     with true <- (is_integer(facts["number"]) and facts["number"] > 0) || {:error, :invalid_facts},
          {:ok, _} <- Foreman.Requests.LocalRefs.sha(facts["expected_sha"]),
          {:ok, repo} <- Foreman.Requests.Push.configured(row.repo_key),
+         :ok <- board_merges(repo),
          true <- Foreman.Forge.adapter().capabilities().write || {:error, :read_only},
          facts = Map.put(Map.take(facts, ["number", "expected_sha"]), "remote", repo["github"]),
          :ok <- unchanged(row.repo_key, facts),
@@ -17,8 +18,14 @@ defmodule Foreman.Requests.Merge do
 
   def validate(_, _), do: {:error, :invalid_facts}
 
+  @doc "Human-merge repos are merged by a person on GitHub; the board never merges them."
+  def board_merges(repo) do
+    if Foreman.MergePolicy.human?(repo), do: {:error, :human_merge_policy}, else: :ok
+  end
+
   def unchanged(key, facts) do
     with {:ok, repo} <- Foreman.Requests.Push.configured(key),
+         :ok <- board_merges(repo),
          true <- repo["github"] == facts["remote"] || {:error, :config_changed},
          %{remote: remote, snapshot: snapshot} <- Foreman.Forge.Store.get(key),
          true <- remote == facts["remote"] || {:error, :config_changed},

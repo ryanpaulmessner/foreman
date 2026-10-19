@@ -107,6 +107,9 @@ defmodule ForemanWeb.PullRequestsLive do
     end
   end
 
+  def handle_event("merge-request", _, %{assigns: %{human_merge: true}} = socket),
+    do: {:noreply, assign(socket, merge_message: "Merge unavailable")}
+
   def handle_event("merge-request", %{"number" => number}, socket) do
     parsed = Integer.parse(number)
 
@@ -251,7 +254,16 @@ defmodule ForemanWeb.PullRequestsLive do
     stored = if panel, do: Foreman.Forge.Store.get(project)
     stored = if stored && stored.remote == repo["github"], do: stored
     snapshot = (stored && stored.snapshot) || %{}
-    prs = Foreman.Forge.Stack.order(snapshot["change_requests"] || [], snapshot["default_branch"])
+    human? = Foreman.MergePolicy.human?(repo)
+
+    # Human-merge repos stack on their configured base (ReportSystem: staging), not the
+    # forge default branch; board-merge repos keep the default branch.
+    stack_base =
+      if human?,
+        do: Foreman.MergePolicy.base(repo, snapshot["default_branch"]),
+        else: snapshot["default_branch"]
+
+    prs = Foreman.Forge.Stack.order(snapshot["change_requests"] || [], stack_base)
     previous = Map.get(socket.assigns, :stored)
 
     socket =
@@ -282,7 +294,8 @@ defmodule ForemanWeb.PullRequestsLive do
       project: project,
       panel: panel,
       stored: stored,
-      default_branch: snapshot["default_branch"],
+      default_branch: stack_base,
+      human_merge: human?,
       count: length(prs)
     )
     |> stream(:projects, Enum.map(repos, &%{id: &1["key"], repo: &1}), reset: true)
@@ -300,6 +313,10 @@ defmodule ForemanWeb.PullRequestsLive do
     socket = assign(socket, refresh_state: state)
     if effects == [status: :result], do: put_flash(socket, :info, status), else: socket
   end
+
+  # A detached stack root's parent was merged (or closed) on GitHub; its children still
+  # wait on it. Foreman never retargets in a human-merge repo.
+  defp manual_retarget?(pr), do: pr["detached"] == true and is_nil(pr["parent"])
 
   defp remote?(repo),
     do: repo["enabled"] && repo["forge"] == "github" && is_binary(repo["github"])
@@ -468,8 +485,29 @@ defmodule ForemanWeb.PullRequestsLive do
               <span data-parent={pr["parent"]}>
                 <Badge.badge>{status(pr)}</Badge.badge>
               </span>
+              <div
+                :if={@human_merge}
+                id={"human-merge-#{pr["number"]}"}
+                class="flex flex-col items-start gap-1 text-xs text-foreground-softer md:items-end"
+              >
+                <span :if={!manual_retarget?(pr)} data-role="waiting">
+                  Waiting for a person to merge on GitHub
+                </span>
+                <span :if={manual_retarget?(pr)} data-role="manual-retarget">
+                  Retarget onto {@default_branch} on GitHub
+                </span>
+                <a
+                  id={"pr-link-#{pr["number"]}"}
+                  href={pr["url"]}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center gap-1 font-medium text-foreground hover:underline"
+                >
+                  Open on GitHub <.icon name="hero-arrow-top-right-on-square" class="size-3.5" />
+                </a>
+              </div>
               <Button.button
-                :if={@capabilities.write}
+                :if={@capabilities.write && !@human_merge}
                 id={"merge-request-#{pr["number"]}"}
                 phx-click="merge-request"
                 phx-value-number={pr["number"]}

@@ -24,10 +24,15 @@ defmodule Foreman.Merge.MergeJob do
            opts = opts || Foreman.Forge.options(),
            true <- caps.write || {:error, :read_only},
            true <- Merge.configured?(row) || {:error, :config_changed},
+           # Human-merge repos are merged by a person on GitHub: refuse before any forge IO.
+           true <-
+             not Foreman.MergePolicy.human_key?(row.repo_key) || {:error, :human_merge_policy},
            {:ok, snapshot} <- adapter.list(row.remote, Keyword.put(opts, :tracked, [row.number])),
            :ok <- Merge.validate(snapshot, row),
            :ok <- weak_guard(row, adapter, caps, opts),
-           true <- Merge.configured?(row) || {:error, :config_changed} do
+           true <- Merge.configured?(row) || {:error, :config_changed},
+           true <-
+             not Foreman.MergePolicy.human_key?(row.repo_key) || {:error, :human_merge_policy} do
         adapter.merge(row.remote, row.number, row.head_sha, opts)
       end
 

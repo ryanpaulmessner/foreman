@@ -36,7 +36,7 @@ defmodule Foreman.Requests.OpenPrJob do
            {:ok, repo} <- Push.configured(request.repo_key),
            true <- repo["github"] == facts["remote"] || {:error, :config_changed},
            :ok <- OpenPr.shape(facts),
-           :ok <- OpenPr.guards(facts, adapter, opts),
+           :ok <- OpenPr.guards(facts, adapter, opts, repo),
            {:ok, current} <- Push.configured(request.repo_key),
            true <- current == repo || {:error, :config_changed},
            %{stage: :committed} <- Overlay.get({request.repo_key, request.bead_id}) do

@@ -37,6 +37,7 @@ defmodule Foreman.Requests.PushJob do
            true <- current_repo == repo || {:error, :config_changed},
            %{stage: :committed} = row <- Overlay.get({request.repo_key, request.bead_id}),
            :ok <- Push.default_rule(facts, row, snapshot["default_branch"]),
+           :ok <- Push.human_rule(facts, current_repo, snapshot["default_branch"]),
            :ok <- LocalRefs.safe_config(facts["worktree"]),
            :ok <- Push.unchanged(facts) do
         push(facts, forge_options, opts)

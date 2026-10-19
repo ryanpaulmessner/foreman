@@ -24,6 +24,9 @@ defmodule Foreman.Merge.RetargetJob do
            opts = opts || Foreman.Forge.options(),
            true <- (caps.write && caps.retarget) || {:error, :manual_retarget},
            true <- Merge.configured?(row) || {:error, :config_changed},
+           # Human-merge repos: a person retargets children on GitHub.
+           true <-
+             not Foreman.MergePolicy.human_key?(row.repo_key) || {:error, :human_merge_policy},
            {:ok, snapshot} <-
              adapter.list(row.remote, Keyword.put(opts, :tracked, [child["number"]])),
            :ok <- child_safe(snapshot, row),

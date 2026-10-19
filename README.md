@@ -382,6 +382,8 @@ No home config is created. Accepted config, last error, load time and physical
 store catalog live in Postgres so web-only nodes need no filesystem access.
 
 ```toml
+merge_policy = "board" # board (default) | human; default for every repo on this machine
+
 [board]
 swimlanes = "project" # project | epic | none
 stale_session_after = "2h" # positive integer with s, m, h, or d
@@ -393,6 +395,8 @@ path = "~/dev/sample"
 github = "example/sample" # optional
 forge = "github" # github | none; inferred from github if omitted
 tickets = "beads" # beads (default) | files
+merge_policy = "human" # optional; overrides the top-level value for this repo
+merge_base = "staging" # optional PR base; defaults to the forge default branch
 color = "violet"
 enabled = true
 
@@ -418,6 +422,18 @@ last good cached version; Settings names the file and error. File tickets reuse 
 existing repo/id identity, preserving stages, sessions, links and requests.
 A CLI write/recovery lock retains the cache and retries; the reader never removes
 that lock. Replacing the entire directory recovers on the periodic rescan.
+
+Under `merge_policy = "human"` every change reaches a shared branch through a GitHub PR
+that a person merges on GitHub. The board refuses `merge` requests at creation, and the
+merge and retarget jobs refuse before any forge write if the policy changed after
+confirmation; a pending merge request is superseded. Pushes to the PR base or the default
+branch are refused at creation and in the job, for one-off tickets too. `open_pr` must
+target the PR base (`merge_base`, else the forge default branch) or, for a stack, the head
+branch of another open PR. Forge sync observes the merge (merge commit, squash or rebase:
+only the PR's `MERGED` state is read) and moves linked tickets to `merged`. Stacked
+children are never retargeted; the Pull requests page shows the manual step. Human merge
+requires `forge = "github"` and a `github` remote; otherwise the config is rejected and the
+last good config stays in force.
 
 Tables merge recursively. A supplied `columns` array replaces all inherited
 columns. Repo entries merge by `key`, preserving order; a local entry can contain

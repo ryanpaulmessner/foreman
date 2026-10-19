@@ -616,4 +616,73 @@ defmodule Foreman.PushTest do
   test "creation refuses a ticket that is not committed", %{facts: facts} do
     assert {:error, :not_committed} = Requests.ask({"sample", "s-1"}, "push", %{"facts" => facts})
   end
+
+  describe "human merge policy" do
+    defp human!(extra \\ %{}) do
+      config = Foreman.RuntimeState.config().config
+
+      config =
+        update_in(
+          config,
+          ["repos", Access.at(0)],
+          &Map.merge(
+            &1,
+            Map.merge(%{"merge_policy" => "human", "merge_base" => "staging"}, extra)
+          )
+        )
+
+      Repo.update_all("board_config", set: [config: config])
+    end
+
+    test "push to the base or the default branch is refused at creation, one-off ticket included",
+         %{facts: facts} do
+      committed()
+      human!()
+      # s-1 has no epic: the default-branch exception for one-offs does not apply.
+      for branch <- ["staging", "main"] do
+        assert {:error, :human_merge_base_branch} =
+                 Requests.ask({"sample", "s-1"}, "push", %{
+                   "facts" => Map.put(facts, "remote_branch", branch)
+                 })
+      end
+
+      assert {:ok, request} = Requests.ask({"sample", "s-1"}, "push", %{"facts" => facts})
+      assert request.facts["remote_branch"] == "feature"
+    end
+
+    test "a machine-wide default without merge_base still protects the default branch", %{
+      facts: facts
+    } do
+      committed()
+      config = Foreman.RuntimeState.config().config |> Map.put("merge_policy", "human")
+      Repo.update_all("board_config", set: [config: config])
+
+      assert {:error, :human_merge_base_branch} =
+               Requests.ask({"sample", "s-1"}, "push", %{
+                 "facts" => Map.put(facts, "remote_branch", "main")
+               })
+    end
+
+    test "the job refuses a base-branch push forced past creation", %{facts: facts, path: path} do
+      committed()
+      opts = job_options(path)
+
+      for branch <- ["main", "staging"] do
+        {:ok, request} =
+          Requests.ask({"sample", "s-1"}, "push", %{
+            "facts" => Map.put(facts, "remote_branch", branch)
+          })
+
+        Requests.resolve(request.id, :approve, %{})
+        human!()
+        assert :ok = Foreman.Requests.PushJob.run(request.id, opts)
+
+        assert %{state: "failed", outcome: %{"reason" => "human_merge_base_branch"}} =
+                 Requests.get(request.id)
+
+        refute_receive :push_attempt
+        human!(%{"merge_policy" => "board"})
+      end
+    end
+  end
 end

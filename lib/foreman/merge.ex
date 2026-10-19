@@ -39,8 +39,12 @@ defmodule Foreman.Merge do
 
   def enqueue(key, remote, facts) do
     caps = Foreman.Forge.adapter().capabilities()
+    human? = Foreman.MergePolicy.human_key?(key)
 
     case Action.step(:confirming, :confirm, data(facts, caps)) do
+      _ when human? ->
+        {:error, :human_merge_policy}
+
       {:merging, _} ->
         Repo.transaction(fn ->
           now = DateTime.utc_now()

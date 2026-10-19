@@ -1,0 +1,170 @@
+{
+  "data": {
+    "repository": {
+      "defaultBranchRef": {
+        "name": "main"
+      },
+      "refs": {
+        "pageInfo": {
+          "hasNextPage": false,
+          "endCursor": null
+        },
+        "nodes": [
+          {
+            "name": "main",
+            "target": {
+              "oid": "0000000000000000000000000000000000000000"
+            }
+          },
+          {
+            "name": "staging",
+            "target": {
+              "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          },
+          {
+            "name": "work/bbb",
+            "target": {
+              "oid": "2222222222222222222222222222222222222222"
+            }
+          },
+          {
+            "name": "work/ddd",
+            "target": {
+              "oid": "4444444444444444444444444444444444444444"
+            }
+          },
+          {
+            "name": "work/aaa",
+            "target": {
+              "oid": "1111111111111111111111111111111111111111"
+            }
+          },
+          {
+            "name": "work/ccc",
+            "target": {
+              "oid": "3333333333333333333333333333333333333333"
+            }
+          }
+        ]
+      },
+      "pullRequests": {
+        "pageInfo": {
+          "hasNextPage": false
+        },
+        "nodes": [
+          {
+            "number": 12,
+            "title": "work-bbb Filter export (stacked on #11)",
+            "body": "Closes work-bbb.\n",
+            "headRefName": "work/bbb",
+            "baseRefName": "work/aaa",
+            "headRefOid": "2222222222222222222222222222222222222222",
+            "isDraft": false,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "url": "https://github.com/owner/report-scratch/pull/12",
+            "state": "OPEN",
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": null
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "number": 14,
+            "title": "work-ddd Export schedule (stacked on #12)",
+            "body": "Closes work-ddd.\n",
+            "headRefName": "work/ddd",
+            "baseRefName": "work/bbb",
+            "headRefOid": "4444444444444444444444444444444444444444",
+            "isDraft": false,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "url": "https://github.com/owner/report-scratch/pull/14",
+            "state": "OPEN",
+            "commits": {
+              "nodes": [
+                {
+                  "commit": {
+                    "statusCheckRollup": null
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "pr12": {
+        "number": 12,
+        "title": "work-bbb Filter export (stacked on #11)",
+        "body": "Closes work-bbb.\n",
+        "headRefName": "work/bbb",
+        "baseRefName": "work/aaa",
+        "headRefOid": "2222222222222222222222222222222222222222",
+        "isDraft": false,
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "url": "https://github.com/owner/report-scratch/pull/12",
+        "state": "OPEN",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": null
+              }
+            }
+          ]
+        }
+      },
+      "pr13": {
+        "number": 13,
+        "title": "work-ccc Audit log",
+        "body": "Closes work-ccc.\n",
+        "headRefName": "work/ccc",
+        "baseRefName": "staging",
+        "headRefOid": "3333333333333333333333333333333333333333",
+        "isDraft": false,
+        "mergeable": "UNKNOWN",
+        "mergeStateStatus": "UNKNOWN",
+        "url": "https://github.com/owner/report-scratch/pull/13",
+        "state": "MERGED",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": null
+              }
+            }
+          ]
+        }
+      },
+      "pr14": {
+        "number": 14,
+        "title": "work-ddd Export schedule (stacked on #12)",
+        "body": "Closes work-ddd.\n",
+        "headRefName": "work/ddd",
+        "baseRefName": "work/bbb",
+        "headRefOid": "4444444444444444444444444444444444444444",
+        "isDraft": false,
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "url": "https://github.com/owner/report-scratch/pull/14",
+        "state": "OPEN",
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "statusCheckRollup": null
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

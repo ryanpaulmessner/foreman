@@ -46,4 +46,35 @@ defmodule ForemanWeb.SettingsLiveTest do
     assert has_element?(view, "#config-error", "last good config")
     assert has_element?(view, "#repo-sample")
   end
+
+  test "a human-merge config error shows in Settings over the last good config", %{conn: conn} do
+    {:ok, config} =
+      Foreman.Config.parse_layers([{"defaults", File.read!("priv/foreman.defaults.toml")}])
+
+    config =
+      Map.put(config, "repos", [%{"key" => "work", "path" => "/tmp/work", "enabled" => true}])
+
+    {:error, error} =
+      Foreman.Config.parse_layers([
+        {"defaults", File.read!("priv/foreman.defaults.toml")},
+        {"foreman.toml",
+         "[[repos]]\nkey = \"work\"\npath = \"/tmp/work\"\nmerge_policy = \"human\"\n"}
+      ])
+
+    Foreman.Repo.insert_all("board_config", [
+      %{
+        id: 1,
+        config: config,
+        error: error,
+        source: "/tmp/settings",
+        discovered: [],
+        loaded_at: DateTime.utc_now()
+      }
+    ])
+
+    {:ok, view, _} = live(conn, "/settings")
+    assert has_element?(view, "#config-error", "requires forge = \"github\"")
+    assert has_element?(view, "#config-error", "last good config")
+    assert has_element?(view, "#repo-work")
+  end
 end

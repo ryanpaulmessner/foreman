@@ -418,4 +418,76 @@ defmodule Foreman.OpenPrTest do
   test "creation refuses uncommitted tickets", %{facts: facts} do
     assert {:error, :not_committed} = ask(facts)
   end
+
+  describe "human merge policy" do
+    setup %{fake: fake} do
+      config =
+        Foreman.RuntimeState.config().config
+        |> update_in(
+          ["repos", Access.at(0)],
+          &Map.merge(&1, %{"merge_policy" => "human", "merge_base" => "staging"})
+        )
+
+      Repo.update_all("board_config", set: [config: config])
+      # Non-default base: main is the forge default but unused; staging is the PR base.
+      Agent.update(fake, &put_in(&1, ["branches", "staging"], String.duplicate("c", 40)))
+      {:ok, snapshot} = Foreman.Forge.Fake.list("owner/repo", server: fake)
+      Foreman.Forge.Store.replace("sample", "owner/repo", snapshot)
+      :ok
+    end
+
+    test "open_pr targets the configured base and never the unused default", %{
+      facts: facts,
+      fake: fake
+    } do
+      committed()
+      assert {:error, :human_merge_base_branch} = ask(facts)
+      assert {:ok, request} = ask(Map.put(facts, "base_branch", "staging"))
+      Requests.resolve(request.id, :approve, %{})
+      assert :ok = Foreman.Requests.OpenPrJob.run(request.id)
+      assert %{state: "done"} = Requests.get(request.id)
+      {:ok, snapshot} = Foreman.Forge.Fake.list("owner/repo", server: fake)
+
+      assert [%{"target_branch" => "staging", "source_branch" => "feature"}] =
+               snapshot["change_requests"]
+    end
+
+    test "a stacked PR may target the head branch of an open PR", %{facts: facts, fake: fake} do
+      committed()
+
+      Agent.update(fake, fn snapshot ->
+        snapshot
+        |> put_in(["branches", "parent"], String.duplicate("d", 40))
+        |> Map.put("change_requests", [
+          %{
+            "number" => 1,
+            "source_branch" => "parent",
+            "target_branch" => "staging",
+            "state" => "open"
+          }
+        ])
+      end)
+
+      {:ok, snapshot} = Foreman.Forge.Fake.list("owner/repo", server: fake)
+      Foreman.Forge.Store.replace("sample", "owner/repo", snapshot)
+      assert {:ok, _} = ask(Map.put(facts, "base_branch", "parent"))
+    end
+
+    test "the job refuses a wrong base forced past creation", %{facts: facts, fake: fake} do
+      committed()
+      config = Foreman.RuntimeState.config().config
+      board = put_in(config, ["repos", Access.at(0), "merge_policy"], "board")
+      Repo.update_all("board_config", set: [config: board])
+      {:ok, request} = ask(facts)
+      Requests.resolve(request.id, :approve, %{})
+      Repo.update_all("board_config", set: [config: config])
+      assert :ok = Foreman.Requests.OpenPrJob.run(request.id)
+
+      assert %{state: "failed", outcome: %{"reason" => "human_merge_base_branch"}} =
+               Requests.get(request.id)
+
+      {:ok, snapshot} = Foreman.Forge.Fake.list("owner/repo", server: fake)
+      assert snapshot["change_requests"] == []
+    end
+  end
 end

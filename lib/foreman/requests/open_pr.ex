@@ -13,7 +13,9 @@ defmodule Foreman.Requests.OpenPr do
            |> Map.take(~w(head_branch expected_sha base_branch title body))
            |> Map.put("remote", repo["github"]),
          :ok <- capable(Foreman.Forge.adapter()),
-         :ok <- observed_guards(row.repo_key, facts) do
+         :ok <- observed_guards(row.repo_key, facts),
+         {:ok, snapshot} <- snapshot(row.repo_key, facts),
+         :ok <- human_base(repo, snapshot, facts) do
       {:ok, facts}
     end
   end
@@ -64,11 +66,33 @@ defmodule Foreman.Requests.OpenPr do
          byte_size(facts["body"]) <= 65_536, do: :ok, else: {:error, :invalid_facts}
   end
 
-  def guards(facts, adapter, opts) do
+  @doc """
+  Human-merge repos open PRs only against the configured base (`merge_base`, else the forge
+  default branch) or, for a stack, against the head branch of another open PR.
+  """
+  def human_base(repo, snapshot, facts) do
+    base = Foreman.MergePolicy.base(repo, snapshot["default_branch"])
+
+    stack_parent? =
+      Enum.any?(
+        snapshot["change_requests"] || [],
+        &(&1["state"] == "open" and &1["source_branch"] == facts["base_branch"] and
+            &1["source_branch"] != facts["head_branch"])
+      )
+
+    cond do
+      not Foreman.MergePolicy.human?(repo) -> :ok
+      facts["base_branch"] == base or stack_parent? -> :ok
+      true -> {:error, :human_merge_base_branch}
+    end
+  end
+
+  def guards(facts, adapter, opts, repo \\ nil) do
     with :ok <- capable(adapter),
          {:ok, _} <- branch(adapter, facts, "base_branch", :base_missing, opts),
          {:ok, snapshot} <- adapter.list(facts["remote"], opts),
          :ok <- no_open_pr(snapshot, facts),
+         :ok <- if(repo, do: human_base(repo, snapshot, facts), else: :ok),
          :ok <- unchanged(facts, adapter, opts) do
       :ok
     end
