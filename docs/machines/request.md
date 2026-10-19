@@ -11,6 +11,7 @@ stateDiagram-v2
     pending --> declined: decline / record(note), notify(asker)
     pending --> withdrawn: withdraw
     pending --> pending: continue [usage_limit?] / send(continue)
+    pending --> answered: reply [inline_question?] / send(answer)
     pending --> superseded: facts_changed / notify(asker)
     approved --> executing: start / audit(intent)
     executing --> done: succeeded / audit(result), notify(asker)
@@ -26,6 +27,7 @@ stateDiagram-v2
 | new | decline | invalid |  |
 | new | withdraw | invalid |  |
 | new | continue | invalid |  |
+| new | reply | invalid |  |
 | new | start | invalid |  |
 | new | facts_changed | ignored |  |
 | new | succeeded | ignored |  |
@@ -40,6 +42,8 @@ stateDiagram-v2
 | pending | withdraw | -> withdrawn |  |
 | pending | continue [usage_limit?] | -> pending | send(continue) |
 | pending | continue | invalid |  |
+| pending | reply [inline_question?] | -> answered | send(answer) |
+| pending | reply | invalid |  |
 | pending | start | invalid |  |
 | pending | facts_changed | -> superseded | notify(asker) |
 | pending | succeeded | ignored |  |
@@ -51,6 +55,7 @@ stateDiagram-v2
 | approved | decline | invalid |  |
 | approved | withdraw | invalid |  |
 | approved | continue | invalid |  |
+| approved | reply | invalid |  |
 | approved | start | -> executing | audit(intent) |
 | approved | facts_changed | ignored |  |
 | approved | succeeded | ignored |  |
@@ -62,6 +67,7 @@ stateDiagram-v2
 | answered | decline | invalid |  |
 | answered | withdraw | invalid |  |
 | answered | continue | invalid |  |
+| answered | reply | invalid |  |
 | answered | start | invalid |  |
 | answered | facts_changed | ignored |  |
 | answered | succeeded | ignored |  |
@@ -73,6 +79,7 @@ stateDiagram-v2
 | declined | decline | invalid |  |
 | declined | withdraw | invalid |  |
 | declined | continue | invalid |  |
+| declined | reply | invalid |  |
 | declined | start | invalid |  |
 | declined | facts_changed | ignored |  |
 | declined | succeeded | ignored |  |
@@ -84,6 +91,7 @@ stateDiagram-v2
 | withdrawn | decline | invalid |  |
 | withdrawn | withdraw | invalid |  |
 | withdrawn | continue | invalid |  |
+| withdrawn | reply | invalid |  |
 | withdrawn | start | invalid |  |
 | withdrawn | facts_changed | ignored |  |
 | withdrawn | succeeded | ignored |  |
@@ -95,6 +103,7 @@ stateDiagram-v2
 | superseded | decline | invalid |  |
 | superseded | withdraw | invalid |  |
 | superseded | continue | invalid |  |
+| superseded | reply | invalid |  |
 | superseded | start | invalid |  |
 | superseded | facts_changed | ignored |  |
 | superseded | succeeded | ignored |  |
@@ -106,6 +115,7 @@ stateDiagram-v2
 | executing | decline | invalid |  |
 | executing | withdraw | invalid |  |
 | executing | continue | invalid |  |
+| executing | reply | invalid |  |
 | executing | start | invalid |  |
 | executing | facts_changed | ignored |  |
 | executing | succeeded | -> done | audit(result), notify(asker) |
@@ -117,6 +127,7 @@ stateDiagram-v2
 | done | decline | invalid |  |
 | done | withdraw | invalid |  |
 | done | continue | invalid |  |
+| done | reply | invalid |  |
 | done | start | invalid |  |
 | done | facts_changed | ignored |  |
 | done | succeeded | ignored |  |
@@ -128,6 +139,7 @@ stateDiagram-v2
 | failed | decline | invalid |  |
 | failed | withdraw | invalid |  |
 | failed | continue | invalid |  |
+| failed | reply | invalid |  |
 | failed | start | invalid |  |
 | failed | facts_changed | ignored |  |
 | failed | succeeded | ignored |  |

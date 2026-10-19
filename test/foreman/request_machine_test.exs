@@ -20,6 +20,28 @@ defmodule Foreman.RequestMachineTest do
     end
   end
 
+  test "an inline reply answers a single single-select question wait only" do
+    question = %{"question" => "Which?", "options" => ["A", "B"], "multi" => false}
+    context = %{kind: "session_waiting", reason: "input", questions: [question]}
+    assert Machine.step(:pending, :reply, context) == {:answered, [send: :answer]}
+
+    for state <- Machine.__fsm__(:states), state != :pending do
+      assert {:error, _} = Machine.step(state, :reply, context)
+    end
+
+    for context <- [
+          %{context | questions: nil},
+          %{context | questions: [%{question | "multi" => true}]},
+          %{context | questions: [Map.put(question, "preview", true)]},
+          %{context | questions: [question, question]},
+          %{context | questions: [%{question | "options" => []}]},
+          %{context | reason: "permission"},
+          %{context | kind: "decision"}
+        ] do
+      assert {:error, _} = Machine.step(:pending, :reply, context)
+    end
+  end
+
   test "every request transition and its effects" do
     for {from, event, kind, to, effects} <- [
           {:new, :ask, "decision", :pending, [record: :request, notify: :pending]},

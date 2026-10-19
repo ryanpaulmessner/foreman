@@ -385,6 +385,7 @@ store catalog live in Postgres so web-only nodes need no filesystem access.
 [board]
 swimlanes = "project" # project | epic | none
 stale_session_after = "2h" # positive integer with s, m, h, or d
+terminal_app = "Ghostty" # macOS app Open session brings to the front (default Ghostty)
 
 [[repos]]
 key = "sample"

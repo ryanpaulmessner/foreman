@@ -31,7 +31,10 @@ defmodule ForemanWeb.RequestDrawer do
       |> Enum.reduce(socket, fn {request, index}, socket ->
         if MapSet.member?(previous, request.id),
           do: socket,
-          else: stream_insert(socket, :drawer_requests, request, at: index)
+          else:
+            stream_insert(socket, :drawer_requests, ForemanWeb.NeedsYouLive.item(request),
+              at: index
+            )
       end)
       |> assign(:drawer_ids, ids)
     else
@@ -49,9 +52,25 @@ defmodule ForemanWeb.RequestDrawer do
   defp handle_event("drawer-resolve", params, socket) do
     socket =
       case ForemanWeb.NeedsYouLive.resolve(params) do
-        {:navigate, path} -> push_navigate(socket, to: path)
-        {:ok, _} -> assign(socket, :drawer_error, nil)
-        {:error, _} -> assign(socket, :drawer_error, "Request not updated")
+        {:navigate, path} ->
+          push_navigate(socket, to: path)
+
+        {:ok, _} ->
+          assign(socket, :drawer_error, nil)
+
+        {:card, id, card} ->
+          case Foreman.Requests.get(id) do
+            %{state: "pending"} = request ->
+              socket
+              |> assign(:drawer_error, nil)
+              |> stream_insert(:drawer_requests, ForemanWeb.NeedsYouLive.item(request, card))
+
+            _ ->
+              socket
+          end
+
+        {:error, _} ->
+          assign(socket, :drawer_error, "Request not updated")
       end
 
     {:halt, ForemanWeb.RequestCount.refresh(socket)}
@@ -115,9 +134,10 @@ defmodule ForemanWeb.RequestDrawer do
           No pending requests
         </div>
         <ForemanWeb.NeedsYouLive.request_card
-          :for={{id, request} <- @streams.drawer_requests}
+          :for={{id, item} <- @streams.drawer_requests}
           id={id}
-          request={request}
+          request={item.request}
+          card={item.card}
           prefix="drawer-"
           event="drawer-resolve"
         />

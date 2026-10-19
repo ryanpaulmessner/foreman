@@ -49,15 +49,18 @@ defmodule Foreman.SessionHooks do
   end
 
   def facts("PermissionRequest", %{"tool_name" => "AskUserQuestion"} = input),
-    do: {:waiting, %{"reason" => "input", "tool" => tool(input)}}
+    do: {:waiting, question(input)}
 
+  # The tool name only: permission input can hold command text and secrets.
   def facts("PermissionRequest", input),
-    do: {:waiting, %{"reason" => "permission", "tool" => tool(input)}}
+    do:
+      {:waiting,
+       %{"reason" => "permission", "tool" => tool(input), "tool_name" => input["tool_name"]}}
 
   def facts("Stop", _), do: {:waiting, %{"reason" => "input"}}
 
   def facts("PreToolUse", %{"tool_name" => "AskUserQuestion"} = input),
-    do: {:waiting, %{"reason" => "input", "tool" => tool(input)}}
+    do: {:waiting, question(input)}
 
   def facts("PreToolUse", _), do: {:resumed, "activity"}
 
@@ -94,6 +97,34 @@ defmodule Foreman.SessionHooks do
   end
 
   def facts(_, _), do: :ignore
+
+  defp question(input) do
+    %{
+      "reason" => "input",
+      "tool" => tool(input),
+      "tool_name" => "AskUserQuestion",
+      "questions" => questions(input["tool_input"])
+    }
+  end
+
+  # Question text and option labels only; descriptions, preview text and answers
+  # stay out. A question with previews draws a side-by-side layout where a digit
+  # only moves the pointer, so it is flagged rather than answered from the card.
+  defp questions(%{"questions" => questions}) when is_list(questions) do
+    for %{"question" => text} = question <- questions, is_binary(text) do
+      options = Enum.filter(List.wrap(question["options"]), &is_map/1)
+
+      %{
+        "question" => text,
+        "options" => for(%{"label" => label} <- options, is_binary(label), do: label),
+        "multi" => question["multiSelect"] == true,
+        "preview" => Enum.any?(options, &Map.has_key?(&1, "preview"))
+      }
+    end
+  end
+
+  defp questions(_), do: []
+
   # PermissionRequest does not expose tool_use_id in this Claude version.
   # Hash only name/input, never the response or sensitive command text in the DB.
   defp tool(%{"tool_name" => "AskUserQuestion", "tool_input" => input}) do

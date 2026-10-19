@@ -13,16 +13,42 @@ defmodule Foreman.SessionWaiting do
          &(is_nil(&1) or Foreman.Requests.Decision.text?(&1))
        ) do
       {:ok,
-       Map.take(
-         facts,
-         ~w(reason provider reset_at attach window pane pid target session_id snapshot tool)
-       )}
+       facts
+       |> Map.take(
+         ~w(reason provider reset_at attach window pane pid target session_id snapshot tool tool_name questions title)
+       )
+       |> Map.reject(fn {key, value} ->
+         key in ~w(tool_name questions title) and not display?(key, value)
+       end)}
     else
       {:error, :invalid_facts}
     end
   end
 
   def validate(_, _), do: {:error, :invalid_facts}
+
+  # Display-only facts from newer hooks: a malformed value is dropped, never refused.
+  defp display?("tool_name", name),
+    do: is_binary(name) and Regex.match?(~r/\A[A-Za-z0-9_.:-]{1,128}\z/, name)
+
+  defp display?("questions", questions) when is_list(questions) and length(questions) in 1..4,
+    do: Enum.all?(questions, &question?/1)
+
+  defp display?("title", title), do: label?(title, 2_000)
+  defp display?(_, _), do: false
+
+  defp question?(%{"question" => text, "options" => options, "multi" => multi} = question)
+       when is_boolean(multi) and is_list(options) and length(options) <= 10,
+       do:
+         Enum.all?(Map.keys(question), &(&1 in ~w(question options multi preview))) and
+           is_boolean(Map.get(question, "preview", false)) and label?(text, 2_000) and
+           Enum.all?(options, &label?(&1, 500))
+
+  defp question?(_), do: false
+
+  defp label?(text, max),
+    do: is_binary(text) and String.trim(text) != "" and byte_size(text) <= max
+
   @impl true
   def enqueue(_), do: {:error, :not_executable}
 
@@ -38,7 +64,9 @@ defmodule Foreman.SessionWaiting do
 
       with true <- Foreman.Requests.Decision.text?(params["session"]),
            {:ok, facts} <- validate(params["facts"], nil),
-           {:ok, facts} <- target(key, params["session"], facts, params["facts"]) do
+           # Only the board names the ticket; a hook cannot.
+           {:ok, facts} <-
+             target(key, params["session"], Map.delete(facts, "title"), params["facts"]) do
         existing = pending(key, params["session"])
 
         if turn_ended?(facts),
@@ -134,6 +162,74 @@ defmodule Foreman.SessionWaiting do
     end)
   end
 
+  @doc """
+  UI-only: shows the waiting session in the user's tmux client and brings the
+  terminal app forward. The request stays pending; the session's hooks resolve it.
+  """
+  def open(id, opts \\ []) do
+    with %Request{kind: "session_waiting", state: "pending"} = request <- Requests.get(id),
+         :ok <-
+           on_target(
+             request,
+             &SessionTmux.open_session(&1, opts),
+             &SessionTmux.open_external(&1, opts)
+           ) do
+      Foreman.Terminal.activate(opts)
+    else
+      nil -> {:error, :not_found}
+      %Request{} -> {:error, :invalid}
+      error -> error
+    end
+  end
+
+  @doc """
+  UI-only: answers a single-select question prompt by typing into the session's
+  pane, then records the request answered. Refuses with `:prompt_changed` unless
+  the pane still shows that exact prompt. The answer itself is not stored.
+  """
+  def reply(id, choice, opts \\ []) do
+    transaction(fn ->
+      with %Request{} = request <- Requests.get(id),
+           _ <- lock(request.repo_key),
+           %Request{state: "pending"} = request <- Requests.get(id),
+           {:answered, [send: :answer]} <-
+             Foreman.Request.step(:pending, :reply, Requests.context(request)),
+           [question] <- request.facts["questions"],
+           :ok <-
+             on_target(
+               request,
+               &SessionTmux.answer_session(&1, question, choice, opts),
+               &SessionTmux.answer_external(&1, question, choice, opts)
+             ) do
+        Requests.resolve(id, :reply, %{"reason" => "answered_in_foreman"})
+      else
+        nil -> {:error, :not_found}
+        {:error, reason} when is_atom(reason) -> {:error, reason}
+        _ -> {:error, :invalid}
+      end
+    end)
+  end
+
+  defp on_target(
+         %Request{facts: %{"target" => "planning", "window" => window}} = request,
+         planning,
+         _
+       ) do
+    case Sessions.get({request.repo_key, request.bead_id}) do
+      %PlanningSession{session_id: id, window: ^window, state: state} = session
+      when id == request.session and state in [:starting, :running, :waiting] ->
+        planning.(session)
+
+      _ ->
+        {:error, :window_gone}
+    end
+  end
+
+  defp on_target(%Request{facts: %{"target" => "external"} = facts}, _, external),
+    do: external.(facts)
+
+  defp on_target(_, _, _), do: {:error, :window_gone}
+
   def reconcile_external do
     Repo.all(from r in Request, where: r.kind == "session_waiting" and r.state == "pending")
     |> Enum.filter(&(&1.facts["target"] == "external"))
@@ -180,12 +276,14 @@ defmodule Foreman.SessionWaiting do
       %PlanningSession{session_id: ^id, state: state, window: window} = s
       when state in [:starting, :running, :waiting] and not is_nil(window) ->
         {:ok,
-         Map.merge(facts, %{
+         facts
+         |> Map.merge(%{
            "target" => "planning",
            "session_id" => id,
            "window" => window,
            "attach" => SessionTmux.attach_command(s)
-         })}
+         })
+         |> put_title(key)}
 
       _ when key == {"__foreman__", "coordinator"} ->
         {:error, :unknown_session}
@@ -195,10 +293,24 @@ defmodule Foreman.SessionWaiting do
           {:error, :unknown_session}
         else
           with {:ok, target} <- SessionTmux.external_target(original["window"]) do
-            {:ok, Map.merge(facts, target)}
+            {:ok, facts |> Map.merge(target) |> put_title(key)}
           end
         end
     end
+  end
+
+  # The ticket's title, so the card names the session in words.
+  defp put_title(facts, {project, ticket}) do
+    title =
+      Repo.one(
+        from b in "beads",
+          where: b.repo_key == ^project and b.bead_id == ^ticket,
+          select: fragment("?->>'title'", b.raw)
+      )
+
+    if is_binary(title) and title != "",
+      do: Map.put(facts, "title", String.slice(title, 0, 200)),
+      else: facts
   end
 
   defp transaction(fun) do

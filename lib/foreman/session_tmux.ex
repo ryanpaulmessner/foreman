@@ -161,6 +161,135 @@ defmodule Foreman.SessionTmux do
     end
   end
 
+  @doc """
+  Shows a board-launched session's pane in the most recently active attached client:
+  switch-client to a pane target changes session, window and pane together.
+  """
+  def open_session(session, opts \\ []) do
+    with :ok <- Foreman.Preview.allow_external_write(),
+         {:ok, pane} <- session_pane(session, opts),
+         do: show(pane, &cmd(&1, opts))
+  end
+
+  def open_external(facts, opts \\ []) do
+    with :ok <- Foreman.Preview.allow_external_write(),
+         {:ok, current} <- external_pane(facts, opts),
+         do: show(current["pane"], &external_cmd(&1, opts))
+  end
+
+  @doc "Answers a question prompt that is still on screen; otherwise `{:error, :prompt_changed}`."
+  def answer_session(session, question, choice, opts \\ []) do
+    with :ok <- Foreman.Preview.allow_external_write(),
+         {:ok, pane} <- session_pane(session, opts),
+         do: answer(pane, question, choice, &cmd(&1, opts), opts)
+  end
+
+  def answer_external(facts, question, choice, opts \\ []) do
+    with :ok <- Foreman.Preview.allow_external_write(),
+         {:ok, current} <- external_pane(facts, opts) do
+      if Map.take(current, ~w(pane pid)) == Map.take(facts, ~w(pane pid)),
+        do: answer(facts["pane"], question, choice, &external_cmd(&1, opts), opts),
+        else: {:error, :prompt_changed}
+    end
+  end
+
+  defp external_pane(facts, opts) do
+    case external_target(facts["window"], opts) do
+      {:ok, current} -> {:ok, current}
+      _ -> {:error, :window_gone}
+    end
+  end
+
+  defp session_pane(session, opts) do
+    with {:ok, %{window: window}} when window == session.window <- observe(session, opts),
+         {:ok, identity} <-
+           cmd(["display-message", "-p", "-t", window, ~S(#{@foreman-session} #{pane_id})], opts),
+         [id, pane] when id == session.session_id <- String.split(String.trim(identity), " ") do
+      {:ok, pane}
+    else
+      {:error, :tmux_unavailable} -> {:error, :tmux_unavailable}
+      _ -> {:error, :window_gone}
+    end
+  end
+
+  defp show(pane, run) do
+    with {:ok, output} <-
+           tmux(run, ["list-clients", "-F", "\#{client_activity}\t\#{client_name}"]) do
+      clients =
+        for line <- String.split(output, "\n", trim: true),
+            [activity, name] <- [String.split(line, "\t", parts: 2)],
+            {activity, ""} <- [Integer.parse(activity)],
+            do: {activity, name}
+
+      case clients do
+        [] ->
+          {:error, :no_client}
+
+        clients ->
+          {_, client} = Enum.max(clients)
+
+          with {:ok, _} <- tmux(run, ["switch-client", "-c", client, "-t", pane]), do: :ok
+      end
+    end
+  end
+
+  defp answer(pane, question, choice, run, opts) do
+    with {:ok, keys} <- Foreman.QuestionPrompt.keys(question, choice),
+         :ok <- prompt_shown(pane, question, run) do
+      keys
+      |> Enum.with_index()
+      |> Enum.reduce_while(:ok, fn {key, index}, :ok ->
+        # Claude reads each keystroke batch on its own render; never coalesce them.
+        if index > 0, do: Process.sleep(Keyword.get(opts, :key_delay, 150))
+
+        case send_key(pane, key, question, run, opts) do
+          :ok -> {:cont, :ok}
+          error -> {:halt, error}
+        end
+      end)
+    end
+  end
+
+  defp prompt_shown(pane, question, run) do
+    with {:ok, screen} <- tmux(run, ["capture-pane", "-p", "-J", "-t", pane]) do
+      if Foreman.QuestionPrompt.shown?(screen, question),
+        do: :ok,
+        else: {:error, :prompt_changed}
+    end
+  end
+
+  defp send_key(pane, {:literal, text}, _, run, _),
+    do: with({:ok, _} <- tmux(run, ["send-keys", "-t", pane, "-l", "--", text]), do: :ok)
+
+  defp send_key(pane, :enter, _, run, _),
+    do: with({:ok, _} <- tmux(run, ["send-keys", "-t", pane, "Enter"]), do: :ok)
+
+  # The free-text row must hold the pointer before any text is typed, or the
+  # text's digits would pick options.
+  defp send_key(pane, :focus, question, run, opts) do
+    # Bounded: the caller holds the project lock that hooks also take.
+    Enum.reduce_while(1..6, {:error, :prompt_changed}, fn attempt, _ ->
+      if attempt > 1, do: Process.sleep(Keyword.get(opts, :key_delay, 150))
+
+      case tmux(run, ["capture-pane", "-p", "-J", "-t", pane]) do
+        {:ok, screen} ->
+          if Foreman.QuestionPrompt.other_focused?(screen, question),
+            do: {:halt, :ok},
+            else: {:cont, {:error, :prompt_changed}}
+
+        error ->
+          {:halt, error}
+      end
+    end)
+  end
+
+  defp tmux(run, args) do
+    case run.(args) do
+      {:ok, output} -> {:ok, output}
+      _ -> {:error, :tmux_unavailable}
+    end
+  end
+
   defp digest(content), do: :crypto.hash(:sha256, content) |> Base.encode16()
 
   defp external_socket(opts),
@@ -170,7 +299,7 @@ defmodule Foreman.SessionTmux do
   defp external_cmd(args, opts) do
     prefix = ["-N", "-L", external_socket(opts)]
 
-    case System.cmd("tmux", prefix ++ args, stderr_to_stdout: true) do
+    case runner(opts).("tmux", prefix ++ args, stderr_to_stdout: true) do
       {out, 0} -> {:ok, out}
       _ -> {:error, :tmux_unavailable}
     end
@@ -414,8 +543,11 @@ defmodule Foreman.SessionTmux do
 
   defp quote_arg(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 
+  # Tests pass a stub with System.cmd/3's shape; production always runs tmux.
+  defp runner(opts), do: Keyword.get(opts, :runner, &System.cmd/3)
+
   defp cmd(args, opts) do
-    case System.cmd("tmux", ["-u", "-N", "-L", socket(opts), "-f", "/dev/null"] ++ args,
+    case runner(opts).("tmux", ["-u", "-N", "-L", socket(opts), "-f", "/dev/null"] ++ args,
            stderr_to_stdout: true,
            # tmux otherwise takes PATH from this client, overriding the clean
            # server/session environment. Never send the web service environment.
