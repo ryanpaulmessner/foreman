@@ -157,22 +157,10 @@ defmodule ForemanWeb.InitiativesLive do
         &epic_rows(&1, socket.assigns.expanded, data.filters, 0, "")
       )
 
-    groups = Enum.group_by(data.orphans, & &1.repo) |> Enum.sort()
+    unplanned = project_rows(data.orphans, socket.assigns.expanded, "unplanned", "")
 
-    unplanned =
-      if expanded?(socket.assigns.expanded, "unplanned") do
-        Enum.flat_map(groups, fn {repo, tickets} ->
-          id = "project-" <> repo
-
-          [%{id: id, kind: :project, repo: repo, count: length(tickets), depth: 0}] ++
-            if(expanded?(socket.assigns.expanded, id),
-              do: Enum.map(tickets, &ticket_row(&1, 1, id)),
-              else: []
-            )
-        end)
-      else
-        []
-      end
+    standalone =
+      project_rows(data.standalone, socket.assigns.expanded, "standalone", "standalone-")
 
     socket
     |> assign(
@@ -186,6 +174,7 @@ defmodule ForemanWeb.InitiativesLive do
       epic_count: length(active),
       done_count: length(finished),
       orphan_count: length(data.orphans),
+      standalone_count: length(data.standalone),
       advanced_count: Filters.advanced_count(filters, data.views),
       form: to_form(socket.assigns.filters, as: :filters)
     )
@@ -193,6 +182,26 @@ defmodule ForemanWeb.InitiativesLive do
     |> stream(:epics, rows, reset: true)
     |> stream(:done, done_rows, reset: true)
     |> stream(:unplanned, unplanned, reset: true)
+    |> stream(:standalone, standalone, reset: true)
+  end
+
+  defp project_rows(tickets, expanded, section, prefix) do
+    if expanded?(expanded, section) do
+      tickets
+      |> Enum.group_by(& &1.repo)
+      |> Enum.sort()
+      |> Enum.flat_map(fn {repo, tickets} ->
+        id = prefix <> "project-" <> repo
+
+        [%{id: id, kind: :project, repo: repo, count: length(tickets), depth: 0}] ++
+          if(expanded?(expanded, id),
+            do: Enum.map(tickets, &ticket_row(&1, 1, id)),
+            else: []
+          )
+      end)
+    else
+      []
+    end
   end
 
   defp epic_rows(epic, expanded, filters, depth, prefix) do
@@ -300,7 +309,7 @@ defmodule ForemanWeb.InitiativesLive do
       <header class="flex items-center justify-between gap-4">
         <h1 class="text-[22px] font-semibold text-foreground">Initiatives</h1>
         <span class="text-xs text-foreground-softer">
-          {@draft_count} drafts · {@epic_count} active · {@done_count} done · {@orphan_count} unplanned
+          {@draft_count} drafts · {@epic_count} active · {@done_count} done · {@standalone_count} standalone · {@orphan_count} unplanned
         </span>
       </header>
       <section
@@ -527,48 +536,22 @@ defmodule ForemanWeb.InitiativesLive do
           columns={@columns}
         />
       </section>
-      <section id="unplanned-panel" class="bb-initiative-panel">
-        <button
-          id="toggle-unplanned"
-          class="bb-section-title w-full text-left"
-          phx-click="toggle"
-          phx-value-id="unplanned"
-          aria-expanded={to_string(expanded?(@expanded, "unplanned"))}
-        >
-          <.icon
-            name={
-              if expanded?(@expanded, "unplanned"),
-                do: "hero-chevron-down",
-                else: "hero-chevron-right"
-            }
-            class="size-4"
-          />Unplanned <span class="text-foreground-softer">{@orphan_count}</span>
-        </button>
-        <div id="unplanned" phx-update="stream">
-          <div :for={{id, row} <- @streams.unplanned} id={id} data-bead={Map.get(row, :bead_id)}>
-            <%= if row.kind == :project do %>
-              <button
-                id={"toggle-" <> row.id}
-                class="flex w-full items-center gap-3 border-t border-base px-5 py-3 text-left"
-                phx-click="toggle"
-                phx-value-id={row.id}
-                aria-expanded={to_string(expanded?(@expanded, row.id))}
-              >
-                <.icon
-                  name={
-                    if expanded?(@expanded, row.id),
-                      do: "hero-chevron-down",
-                      else: "hero-chevron-right"
-                  }
-                  class="size-3"
-                />{row.repo}<span class="text-xs text-foreground-softer">{row.count}</span>
-              </button>
-            <% else %>
-              <.ticket row={row} uri={@page_uri} />
-            <% end %>
-          </div>
-        </div>
-      </section>
+      <.parentless_section
+        id="standalone"
+        title="Standalone work"
+        count={@standalone_count}
+        rows={@streams.standalone}
+        expanded={@expanded}
+        uri={@page_uri}
+      />
+      <.parentless_section
+        id="unplanned"
+        title="Unplanned"
+        count={@orphan_count}
+        rows={@streams.unplanned}
+        expanded={@expanded}
+        uri={@page_uri}
+      />
       <ForemanWeb.TicketDetail.sheet
         ticket={@ticket}
         state={@sheet_state}
@@ -578,6 +561,60 @@ defmodule ForemanWeb.InitiativesLive do
         streams={@streams}
       />
     </Layouts.app>
+    """
+  end
+
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+  attr :count, :integer, required: true
+  attr :rows, :any, required: true
+  attr :expanded, :map, required: true
+  attr :uri, :string, required: true
+
+  defp parentless_section(assigns) do
+    ~H"""
+    <section id={@id <> "-panel"} class="bb-initiative-panel">
+      <button
+        id={"toggle-" <> @id}
+        class="bb-section-title w-full text-left"
+        phx-click="toggle"
+        phx-value-id={@id}
+        aria-expanded={to_string(expanded?(@expanded, @id))}
+      >
+        <.icon
+          name={
+            if expanded?(@expanded, @id),
+              do: "hero-chevron-down",
+              else: "hero-chevron-right"
+          }
+          class="size-4"
+        />{@title} <span id={@id <> "-count"} class="text-foreground-softer">{@count}</span>
+      </button>
+      <div id={@id} phx-update="stream">
+        <div :for={{id, row} <- @rows} id={id} data-bead={Map.get(row, :bead_id)}>
+          <%= if row.kind == :project do %>
+            <button
+              id={"toggle-" <> row.id}
+              class="flex w-full items-center gap-3 border-t border-base px-5 py-3 text-left"
+              phx-click="toggle"
+              phx-value-id={row.id}
+              aria-expanded={to_string(expanded?(@expanded, row.id))}
+            >
+              <.icon
+                name={
+                  if expanded?(@expanded, row.id),
+                    do: "hero-chevron-down",
+                    else: "hero-chevron-right"
+                }
+                class="size-3"
+              />{row.repo}<span class="text-xs text-foreground-softer">{row.count}</span>
+            </button>
+          <% else %>
+            <.ticket row={row} uri={@uri} />
+          <% end %>
+        </div>
+      </div>
+    </section>
     """
   end
 

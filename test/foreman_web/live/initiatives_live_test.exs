@@ -506,7 +506,7 @@ defmodule ForemanWeb.InitiativesLiveTest do
     {:ok, view, _} = live(conn, "/?view=all")
     assert has_element?(view, "#toggle-done[aria-expanded=false]")
     assert has_element?(view, "#done-count", "3")
-    assert has_element?(view, "#epics-panel + #done-panel + #unplanned-panel")
+    assert has_element?(view, "#epics-panel + #done-panel + #standalone-panel + #unplanned-panel")
     assert ids(view, "#epics [data-kind=epic]") == ["e", "shipping", "ticketed"]
     refute has_element?(view, "[data-bead='done.2']")
     refute has_element?(view, "[data-bead=shipped]")
@@ -869,6 +869,97 @@ defmodule ForemanWeb.InitiativesLiveTest do
            )
 
     refute has_element?(view, "#unplanned [data-bead=missing] time")
+  end
+
+  test "parentless buckets separate untouched work from active work and exclude closed", %{
+    conn: conn
+  } do
+    rows =
+      [
+        b("untouched", "task"),
+        b("claimed", "task", [], "in_progress"),
+        b("closed", "task", [], "closed")
+      ] ++
+        Enum.map(~w(dispatched building reported in_review committed), fn stage ->
+          Map.put(b(stage, "task"), :created_at, "2026-10-20T10:00:00Z")
+        end)
+
+    Foreman.Beads.Projection.replace("sample", Enum.map_join(rows, "\n", &Jason.encode!/1))
+
+    for stage <- ~w(dispatched building reported in_review committed) do
+      Foreman.Overlay.apply_event({"sample", stage}, {:dispatch, %{window: stage}})
+      Foreman.Repo.query!("UPDATE tickets SET stage = $1 WHERE bead_id = $2", [stage, stage])
+    end
+
+    Foreman.Overlay.apply_event({"sample", "closed"}, {:dispatch, %{window: "closed"}})
+
+    data = Foreman.Initiatives.snapshot()
+    assert Enum.map(data.orphans, & &1.id) == ["untouched"]
+
+    {:ok, view, _} = live(conn, "/?view=all")
+    assert has_element?(view, "#standalone-panel + #unplanned-panel")
+    assert has_element?(view, "#standalone-count", "6")
+    assert has_element?(view, "#unplanned-count", "1")
+    view |> element("#toggle-unplanned") |> render_click()
+    view |> element("#toggle-project-sample") |> render_click()
+    view |> element("#toggle-standalone") |> render_click()
+    view |> element("#toggle-standalone-project-sample") |> render_click()
+    assert ids(view, "#unplanned [data-bead]") == ["untouched"]
+
+    assert ids(view, "#standalone [data-bead]") ==
+             ~w(building committed dispatched in_review reported claimed)
+
+    assert has_element?(view, "#standalone [data-bead=committed] time[title][datetime]")
+    refute has_element?(view, "[data-bead=closed]")
+  end
+
+  test "In flight includes standalone review, committed and tracker-claimed work", %{conn: conn} do
+    rows =
+      [b("claimed", "task", [], "in_progress"), b("untouched", "task")] ++
+        Enum.map(~w(dispatched building reported in_review committed), &b(&1, "task"))
+
+    Foreman.Beads.Projection.replace("sample", Enum.map_join(rows, "\n", &Jason.encode!/1))
+
+    for stage <- ~w(dispatched building reported in_review committed) do
+      Foreman.Overlay.apply_event({"sample", stage}, {:dispatch, %{window: stage}})
+      Foreman.Repo.query!("UPDATE tickets SET stage = $1 WHERE bead_id = $2", [stage, stage])
+    end
+
+    {:ok, view, _} = live(conn, "/?view=in-flight")
+    assert has_element?(view, "#standalone-count", "6")
+    assert has_element?(view, "#unplanned-count", "0")
+    view |> element("#toggle-standalone") |> render_click()
+    view |> element("#toggle-standalone-project-sample") |> render_click()
+
+    assert ids(view, "#standalone [data-bead]") ==
+             ~w(building claimed committed dispatched in_review reported)
+
+    view |> form("#initiative-filters", filters: %{q: "committed"}) |> render_change()
+    assert ids(view, "#standalone [data-bead]") == ["committed"]
+    assert has_element?(view, "#standalone-count", "1")
+  end
+
+  test "reconciliation moves dispatched and closed tickets out of their former buckets", %{
+    conn: conn
+  } do
+    {:ok, view, _} = live(conn, "/?view=all")
+    view |> element("#toggle-unplanned") |> render_click()
+    view |> element("#toggle-project-sample") |> render_click()
+    view |> element("#toggle-standalone") |> render_click()
+    assert has_element?(view, "#unplanned [data-bead=o]")
+
+    Foreman.Overlay.apply_event({"sample", "o"}, {:dispatch, %{window: "worker"}})
+    send(view.pid, :reconcile)
+    refute has_element?(view, "#unplanned [data-bead=o]")
+    assert has_element?(view, "#unplanned-count", "0")
+    assert has_element?(view, "#standalone-count", "1")
+    view |> element("#toggle-standalone-project-sample") |> render_click()
+    assert has_element?(view, "#standalone [data-bead=o]")
+
+    Foreman.Beads.Projection.replace("sample", Jason.encode!(b("o", "chore", [], "closed")))
+    send(view.pid, :reconcile)
+    refute has_element?(view, "#standalone [data-bead=o]")
+    assert has_element?(view, "#standalone-count", "0")
   end
 
   defp ids(view, selector),

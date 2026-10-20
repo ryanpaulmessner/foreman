@@ -122,18 +122,27 @@ defmodule Foreman.Initiatives do
       |> Enum.filter(&matches?(&1, filters))
       |> Enum.sort_by(&Foreman.Beads.Id.sort_key(&1.key))
 
+    parentless =
+      tree.orphans
+      |> Enum.reject(&(&1.status == "closed"))
+      |> Enum.sort_by(fn ticket ->
+        case ticket.created_at do
+          nil -> {1, 0}
+          time -> {0, -DateTime.to_unix(time, :microsecond)}
+        end
+      end)
+
     %{
       drafts: drafts,
       epics: Enum.filter(tree.epics, &epic_matches?(&1, filters)),
       orphans:
-        tree.orphans
-        |> Enum.filter(&matches?(&1, filters))
-        |> Enum.sort_by(fn ticket ->
-          case ticket.created_at do
-            nil -> {1, 0}
-            time -> {0, -DateTime.to_unix(time, :microsecond)}
-          end
-        end),
+        parentless
+        |> Enum.reject(&standalone?/1)
+        |> Enum.filter(&matches?(&1, filters)),
+      standalone:
+        parentless
+        |> Enum.filter(&standalone?/1)
+        |> Enum.filter(&matches?(&1, filters_for_standalone_in_flight(filters))),
       repos: repos,
       columns: config["columns"],
       views: views,
@@ -142,6 +151,16 @@ defmodule Foreman.Initiatives do
       labels: beads |> Enum.flat_map(& &1.labels) |> Enum.uniq() |> Enum.sort()
     }
   end
+
+  defp filters_for_standalone_in_flight(%{"view" => "in-flight"} = filters),
+    do: Map.put(filters, "stages", [])
+
+  defp filters_for_standalone_in_flight(filters), do: filters
+
+  # Unplanned = never started (queued, not claimed). Anything else that is not
+  # closed (in flight, or finished but still open) is Standalone work, so no
+  # open ticket disappears from both lists.
+  defp standalone?(ticket), do: ticket.status == "in_progress" or ticket.stage != :queued
 
   def matches?(b, filters) do
     Enum.all?(filters, fn
