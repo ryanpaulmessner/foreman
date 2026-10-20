@@ -722,7 +722,13 @@ defmodule ForemanWeb.InitiativesLive do
       </span>
       <span class="bb-ticket-title min-w-0 flex-1 text-sm">{@row.title}</span>
       <Badge.badge class="bb-ticket-stage" color={stage_color(@row.stage)}>{@row.stage}</Badge.badge>
-      <span class="text-xs text-foreground-softer">{@row.type} · {@row.status}</span>
+      <span class="text-xs text-foreground-softer">
+        {@row.type} · {@row.status}<span :if={@row.created_at}> · <time
+            id={"age-" <> @row.id}
+            datetime={DateTime.to_iso8601(@row.created_at)}
+            title={"Created " <> Calendar.strftime(@row.created_at, "%B %-d, %Y")}
+          >{ForemanWeb.TicketAge.format(DateTime.to_date(@row.created_at))}</time></span>
+      </span>
       <Badge.badge :if={@row.stale} color="warning">stale</Badge.badge>
     </.link>
     """

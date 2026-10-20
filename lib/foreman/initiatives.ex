@@ -75,6 +75,7 @@ defmodule Foreman.Initiatives do
           title: raw["title"],
           type: raw["issue_type"],
           status: raw["status"],
+          created_at: created_at(raw["created_at"] || raw["created"]),
           labels: raw["labels"] || [],
           stage: stage,
           spec_link: epic && epic.spec_link,
@@ -124,7 +125,15 @@ defmodule Foreman.Initiatives do
     %{
       drafts: drafts,
       epics: Enum.filter(tree.epics, &epic_matches?(&1, filters)),
-      orphans: Enum.filter(tree.orphans, &matches?(&1, filters)),
+      orphans:
+        tree.orphans
+        |> Enum.filter(&matches?(&1, filters))
+        |> Enum.sort_by(fn ticket ->
+          case ticket.created_at do
+            nil -> {1, 0}
+            time -> {0, -DateTime.to_unix(time, :microsecond)}
+          end
+        end),
       repos: repos,
       columns: config["columns"],
       views: views,
@@ -173,6 +182,21 @@ defmodule Foreman.Initiatives do
       matches?(%{epic | stale: Enum.any?(epic.planned ++ epic.fallout, & &1.stale)}, filters) or
         Enum.any?(epic.planned ++ epic.fallout, &matches?(&1, filters)) or
         Enum.any?(epic.children, &epic_matches?(&1, filters))
+
+  defp created_at(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, time, _offset} ->
+        time
+
+      _ ->
+        case Date.from_iso8601(value) do
+          {:ok, date} -> DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
+          _ -> nil
+        end
+    end
+  end
+
+  defp created_at(_), do: nil
 
   defp stage_atom(value),
     do:

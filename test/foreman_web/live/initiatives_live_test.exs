@@ -799,6 +799,78 @@ defmodule ForemanWeb.InitiativesLiveTest do
     refute has_element?(view, "#advanced-filter-count")
   end
 
+  test "Unplanned sorts newest first with stable ties and missing dates last", %{conn: conn} do
+    rows = [
+      b("a-missing", "task"),
+      Map.put(b("b-old", "task"), :created, "2026-01-01"),
+      Map.put(b("c-new", "task"), :created_at, "2026-10-20T10:00:00Z"),
+      Map.put(b("d-tie", "task"), :created_at, "2026-10-20T12:00:00+02:00"),
+      b("e-missing", "task"),
+      Map.put(b("f-earlier", "task"), :created_at, "2026-10-20T09:00:00Z")
+    ]
+
+    assert {:ok, _} =
+             Foreman.Beads.Projection.replace(
+               "sample",
+               Enum.map_join(rows, "\n", &Jason.encode!/1)
+             )
+
+    {:ok, view, _} = live(conn, "/")
+    view |> element("#toggle-unplanned") |> render_click()
+    view |> element("#toggle-project-sample") |> render_click()
+
+    assert ids(view, "#unplanned [data-bead]") ==
+             ~w(c-new d-tie f-earlier b-old a-missing e-missing)
+
+    send(view.pid, :reconcile)
+
+    assert ids(view, "#unplanned [data-bead]") ==
+             ~w(c-new d-tie f-earlier b-old a-missing e-missing)
+  end
+
+  test "ticket ages and full-date tooltips appear on Unplanned and epic children", %{conn: conn} do
+    today = Date.utc_today()
+
+    rows = [
+      b("e", "epic"),
+      Map.put(
+        b("child", "task", [%{depends_on_id: "e", type: "parent-child"}]),
+        :created_at,
+        Date.to_iso8601(Date.add(today, -35)) <> "T12:00:00Z"
+      ),
+      Map.put(b("orphan", "task"), :created, Date.to_iso8601(today)),
+      b("missing", "task")
+    ]
+
+    assert {:ok, _} =
+             Foreman.Beads.Projection.replace(
+               "sample",
+               Enum.map_join(rows, "\n", &Jason.encode!/1)
+             )
+
+    {:ok, view, _} = live(conn, "/")
+    view |> element("#epics [data-bead=e] button") |> render_click()
+    view |> element("#toggle-unplanned") |> render_click()
+    view |> element("#toggle-project-sample") |> render_click()
+
+    child_date = Calendar.strftime(Date.add(today, -35), "%B %-d, %Y")
+    today_date = Calendar.strftime(today, "%B %-d, %Y")
+
+    assert has_element?(
+             view,
+             "#epics [data-bead=child] time[title='Created #{child_date}']",
+             "5w"
+           )
+
+    assert has_element?(
+             view,
+             "#unplanned [data-bead=orphan] time[title='Created #{today_date}']",
+             "today"
+           )
+
+    refute has_element?(view, "#unplanned [data-bead=missing] time")
+  end
+
   defp ids(view, selector),
     do:
       view
