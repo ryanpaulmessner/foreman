@@ -3,10 +3,11 @@ id: fm-c2w
 title: "foreman MVP: an epic-first work board for every local repo"
 type: epic
 status: open
-priority: 2
+priority: 0
 parent: null
 blocked_by: []
 related: []
+supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-18

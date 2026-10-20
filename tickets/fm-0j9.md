@@ -3,7 +3,7 @@ id: fm-0j9
 title: "Environment variables and secrets: tracked per project and environment, values in a real secret store"
 type: epic
 status: in_progress
-priority: 2
+priority: 1
 parent: null
 blocked_by: []
 related: []

@@ -3,10 +3,11 @@ id: fm-zgd
 title: "Approvals inbox: push, PR, merge and build questions on the board"
 type: epic
 status: open
-priority: 2
+priority: 1
 parent: null
 blocked_by: []
 related: []
+supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-18
