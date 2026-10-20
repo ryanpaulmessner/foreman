@@ -14,7 +14,8 @@ defmodule Foreman.DevserveTest do
     with open(os.path.join(os.environ['DEVSERVE_CONFIG_DIR'], 'argv.json'), 'w') as f:
         json.dump({'args': sys.argv[1:], 'owner': os.environ.get('FOREMAN_SESSION')}, f)
     if sys.argv[1] == 'ls':
-        print(json.dumps({'previews': [], 'main_units': [{'unit':'foreman-web.service'}]}))
+        previews = json.loads(os.environ.get('FAKE_PREVIEWS', '[]'))
+        print(json.dumps({'previews': previews, 'main_units': [{'unit':'foreman-web.service'}]}))
     if sys.argv[1] == 'logs':
         print('x' * 20000)
     """)
@@ -53,6 +54,37 @@ defmodule Foreman.DevserveTest do
   test "logs are bounded", %{dir: _dir} do
     assert {:ok, logs} = Devserve.logs("devserve-test.service")
     assert byte_size(logs) == 16_384
+  end
+
+  test "preview links use localhost, so Microsoft sign-in accepts any port" do
+    row = fn url ->
+      %{
+        "unit" => "devserve-app-x-1.service",
+        "worktree" => "/w",
+        "state" => "running",
+        "missing" => false,
+        "url" => url
+      }
+    end
+
+    with_previews([row.("http://127.0.0.1:5110"), row.("http://localhost:5112")], fn ->
+      assert {:ok, [%{"url" => "http://localhost:5110"}, %{"url" => "http://localhost:5112"}]} =
+               Devserve.list()
+    end)
+
+    with_previews([row.("http://example.com:5110")], fn ->
+      assert {:error, "Invalid devserve registry"} = Devserve.list()
+    end)
+  end
+
+  defp with_previews(rows, fun) do
+    System.put_env("FAKE_PREVIEWS", Jason.encode!(rows))
+
+    try do
+      fun.()
+    after
+      System.delete_env("FAKE_PREVIEWS")
+    end
   end
 
   defp read_args(dir), do: dir |> Path.join("argv.json") |> File.read!() |> Jason.decode!()

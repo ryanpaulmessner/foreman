@@ -9,7 +9,7 @@ defmodule Foreman.Previews.Devserve do
     with {:ok, text} <- command(["ls", "--json"], [], 1_048_576),
          {:ok, %{"previews" => rows}} when is_list(rows) <- Jason.decode(text),
          true <- Enum.all?(rows, &valid?/1) do
-      {:ok, rows}
+      {:ok, Enum.map(rows, &localhost_url/1)}
     else
       {:error, reason} when is_binary(reason) -> {:error, reason}
       _ -> {:error, "Invalid devserve registry"}
@@ -49,11 +49,17 @@ defmodule Foreman.Previews.Devserve do
   defp safe_url?(url) when is_binary(url) do
     uri = URI.parse(url)
 
-    uri.scheme == "http" and uri.host == "127.0.0.1" and is_integer(uri.port) and
+    uri.scheme == "http" and uri.host in ["127.0.0.1", "localhost"] and is_integer(uri.port) and
       uri.port in 1024..65535 and is_nil(uri.userinfo)
   end
 
   defp safe_url?(_), do: false
+
+  # Links say localhost: Microsoft sign-in accepts a localhost return address on
+  # any port, but not 127.0.0.1, so a preview's SSO works without registering it.
+  defp localhost_url(%{"url" => url} = row) do
+    %{row | "url" => url |> URI.parse() |> Map.put(:host, "localhost") |> URI.to_string()}
+  end
 
   defp command(args, env \\ [], limit \\ 16_384) do
     with executable when is_binary(executable) <- System.find_executable("devserve"),
