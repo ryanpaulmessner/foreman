@@ -127,8 +127,31 @@ defmodule Foreman.Requests do
 
   def pending_count, do: Repo.aggregate(from(r in Request, where: r.state == "pending"), :count)
 
-  def pending,
-    do: Repo.all(from r in Request, where: r.state == "pending", order_by: [r.inserted_at, r.id])
+  @doc "Pending requests by their ticket's priority (missing last), then oldest first."
+  def pending do
+    from(r in Request, where: r.state == "pending", order_by: [r.inserted_at, r.id])
+    |> Repo.all()
+    |> with_priority()
+    |> Enum.sort_by(&Foreman.Priority.rank(&1.priority))
+  end
+
+  @doc "Fills each request's ticket priority. Epic requests may name the draft slug."
+  def with_priority(requests) do
+    aliases =
+      Repo.all(
+        from e in "epics",
+          where: not is_nil(e.beads_epic_id),
+          select: {{e.repo_key, e.bead_id}, {e.repo_key, e.beads_epic_id}}
+      )
+      |> Map.new()
+
+    target = fn r -> Map.get(aliases, {r.repo_key, r.bead_id}, {r.repo_key, r.bead_id}) end
+    priorities = requests |> Enum.map(target) |> Foreman.Priority.for_keys()
+
+    Enum.map(requests, fn r ->
+      %{r | priority: get_in(priorities, [target.(r), :priority])}
+    end)
+  end
 
   def recent,
     do:

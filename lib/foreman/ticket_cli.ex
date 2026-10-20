@@ -135,7 +135,7 @@ defmodule Foreman.TicketCLI do
                   &(get_in(tickets, [&1, :facts, "status"]) == "closed")
                 )))
       end)
-      |> Enum.sort_by(& &1.facts["id"])
+      |> Enum.sort_by(&order(verb, &1.facts))
       |> Enum.map(&output/1)
 
     {:ok, rows}
@@ -244,6 +244,13 @@ defmodule Foreman.TicketCLI do
     do:
       {:error,
        "usage: foreman new|show|ls|ready|update|close|reopen|dep|note|tree|renumber|check [arguments]"}
+
+  defp order("ready", facts),
+    do:
+      {Foreman.Priority.rank(facts["priority"]), is_nil(facts["created"]), facts["created"],
+       facts["id"]}
+
+  defp order(_, facts), do: facts["id"]
 
   defp save(root, before, tickets, id) do
     with :ok <- TicketStore.save(root, before, tickets), do: {:ok, output(tickets[id])}

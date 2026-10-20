@@ -5,6 +5,8 @@ defmodule Foreman.Initiatives.Tree do
   discovery and its descendants win over planned membership. Each ticket counts
   once per epic; sub-epics are containers, not tickets in the denominator.
   Cycles are bounded by visited sets. Unresolved discovery links are not orphans.
+  Epics, sub-epics and their tickets sort by their own priority (P0 first), then id;
+  top-level epics by priority, then derived stage, then id.
   """
   def build(beads, links \\ []) do
     nodes = Map.new(beads, &{&1.key, &1})
@@ -29,7 +31,7 @@ defmodule Foreman.Initiatives.Tree do
           members
           |> Enum.map(&nodes[&1])
           |> Enum.reject(&(is_nil(&1) or &1.type == "epic"))
-          |> Enum.sort_by(&Foreman.Beads.Id.sort_key(&1.key))
+          |> Enum.sort_by(&{priority_rank(&1), Foreman.Beads.Id.sort_key(&1.key)})
 
         {epic.key,
          Map.merge(epic, %{
@@ -83,6 +85,8 @@ defmodule Foreman.Initiatives.Tree do
 
   def stage(tracked, _), do: tracked
 
+  defp priority_rank(node), do: Foreman.Priority.rank(Map.get(node, :priority))
+
   defp stage_rank(:building), do: 0
   defp stage_rank(:shipping), do: 1
   defp stage_rank(:ticketed), do: 2
@@ -125,7 +129,8 @@ defmodule Foreman.Initiatives.Tree do
   defp nest(epics, memberships, parents, visited) do
     epics
     |> Enum.sort_by(fn epic ->
-      {stage_rank(memberships[epic.key].stage), Foreman.Beads.Id.sort_key(epic.key)}
+      {priority_rank(epic), stage_rank(memberships[epic.key].stage),
+       Foreman.Beads.Id.sort_key(epic.key)}
     end)
     |> Enum.reduce({[], visited}, fn epic, {acc, visited} ->
       if MapSet.member?(visited, epic.key) do
@@ -135,7 +140,7 @@ defmodule Foreman.Initiatives.Tree do
           memberships
           |> Map.values()
           |> Enum.filter(&(parents[&1.key] == epic.key))
-          |> Enum.sort_by(&Foreman.Beads.Id.sort_key(&1.key))
+          |> Enum.sort_by(&{priority_rank(&1), Foreman.Beads.Id.sort_key(&1.key)})
 
         {children, visited} = nest(children, memberships, parents, MapSet.put(visited, epic.key))
         {acc ++ [Map.put(memberships[epic.key], :children, children)], visited}

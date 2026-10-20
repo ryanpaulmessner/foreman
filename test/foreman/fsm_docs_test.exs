@@ -21,7 +21,7 @@ defmodule Foreman.FsmDocsTest do
              "| pr_open | cr_merged | -> merged | record(merge), emit(stage), suggest(close_bead) |"
 
     assert text =~ "| abandoned | cr_merged | ignored |  |"
-    assert length(String.split(String.trim(text), "\n")) == 135
+    assert length(String.split(String.trim(text), "\n")) == 145
   end
 
   for {name, module} <- [
@@ -47,7 +47,8 @@ defmodule Foreman.FsmDocsTest do
         {"schedule_machine", Foreman.Beads.ScheduleMachine},
         {"sync_machine", Foreman.Beads.SyncMachine},
         {"watch_machine", Foreman.Config.WatchMachine},
-        {"reader_machine", Foreman.TicketFiles.ReaderMachine}
+        {"reader_machine", Foreman.TicketFiles.ReaderMachine},
+        {"priority_override", Foreman.PriorityOverride}
       ] do
     test "#{name} documentation matches the committed golden" do
       module = unquote(module)

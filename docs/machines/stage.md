@@ -22,6 +22,7 @@ stateDiagram-v2
     pr_open --> done: bead_closed / flag(closed_with_open_cr), emit(stage)
     live --> done: bead_closed / emit(stage)
     done --> queued: bead_reopened / emit(stage)
+    queued --> queued: jump / emit(stage)
     state "after_report: reported, in_review, committed, pr_open, merged" as after_report
     state "live: queued, dispatched, building, reported, in_review, committed, pr_open, merged" as live
     state "pre_pr: queued, dispatched, building, reported, in_review, committed" as pre_pr
@@ -44,6 +45,7 @@ stateDiagram-v2
 | queued | cr_merged | ignored |  |
 | queued | bead_closed | -> done | emit(stage) |
 | queued | bead_reopened | ignored |  |
+| queued | jump | stay | emit(stage) |
 | dispatched | dispatch [new_session?] | -> dispatched | record(session), append(redispatched), emit(stage) |
 | dispatched | dispatch | invalid |  |
 | dispatched | progress | -> building | append(progress), emit(stage) |
@@ -58,6 +60,7 @@ stateDiagram-v2
 | dispatched | cr_merged | ignored |  |
 | dispatched | bead_closed | -> done | emit(stage) |
 | dispatched | bead_reopened | ignored |  |
+| dispatched | jump | ignored |  |
 | building | dispatch [new_session?] | -> dispatched | record(session), append(redispatched), emit(stage) |
 | building | dispatch | invalid |  |
 | building | progress | -> building | append(progress), emit(stage) |
@@ -72,6 +75,7 @@ stateDiagram-v2
 | building | cr_merged | ignored |  |
 | building | bead_closed | -> done | emit(stage) |
 | building | bead_reopened | ignored |  |
+| building | jump | ignored |  |
 | reported | dispatch | invalid |  |
 | reported | progress | stay | append(progress), emit(stage) |
 | reported | report | invalid |  |
@@ -85,6 +89,7 @@ stateDiagram-v2
 | reported | cr_merged | ignored |  |
 | reported | bead_closed | -> done | emit(stage) |
 | reported | bead_reopened | ignored |  |
+| reported | jump | ignored |  |
 | in_review | dispatch | invalid |  |
 | in_review | progress | stay | append(progress), emit(stage) |
 | in_review | report | invalid |  |
@@ -98,6 +103,7 @@ stateDiagram-v2
 | in_review | cr_merged | ignored |  |
 | in_review | bead_closed | -> done | emit(stage) |
 | in_review | bead_reopened | ignored |  |
+| in_review | jump | ignored |  |
 | committed | dispatch | invalid |  |
 | committed | progress | stay | append(progress), emit(stage) |
 | committed | report | invalid |  |
@@ -111,6 +117,7 @@ stateDiagram-v2
 | committed | cr_merged | ignored |  |
 | committed | bead_closed | -> done | emit(stage) |
 | committed | bead_reopened | ignored |  |
+| committed | jump | ignored |  |
 | pr_open | dispatch | invalid |  |
 | pr_open | progress | stay | append(progress), emit(stage) |
 | pr_open | report | invalid |  |
@@ -125,6 +132,7 @@ stateDiagram-v2
 | pr_open | cr_merged | -> merged | record(merge), emit(stage), suggest(close_bead) |
 | pr_open | bead_closed | -> done | flag(closed_with_open_cr), emit(stage) |
 | pr_open | bead_reopened | ignored |  |
+| pr_open | jump | ignored |  |
 | merged | dispatch | invalid |  |
 | merged | progress | stay | append(progress), emit(stage) |
 | merged | report | invalid |  |
@@ -138,6 +146,7 @@ stateDiagram-v2
 | merged | cr_merged | ignored |  |
 | merged | bead_closed | -> done | emit(stage) |
 | merged | bead_reopened | ignored |  |
+| merged | jump | ignored |  |
 | done | dispatch | invalid |  |
 | done | progress | invalid |  |
 | done | report | invalid |  |
@@ -151,6 +160,7 @@ stateDiagram-v2
 | done | cr_merged | ignored |  |
 | done | bead_closed | ignored |  |
 | done | bead_reopened | -> queued | emit(stage) |
+| done | jump | ignored |  |
 | abandoned | dispatch | invalid |  |
 | abandoned | progress | invalid |  |
 | abandoned | report | invalid |  |
@@ -164,3 +174,4 @@ stateDiagram-v2
 | abandoned | cr_merged | ignored |  |
 | abandoned | bead_closed | ignored |  |
 | abandoned | bead_reopened | ignored |  |
+| abandoned | jump | ignored |  |

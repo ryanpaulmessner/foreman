@@ -28,6 +28,17 @@ defmodule ForemanWeb.EpicLive do
   def handle_event("close-ticket", params, socket),
     do: {:noreply, ForemanWeb.TicketDetail.close(socket, params)}
 
+  def handle_event("epic-priority", params, socket) do
+    key = socket.assigns.epic_priority && socket.assigns.epic_tracker_key
+    {:noreply, socket |> ForemanWeb.TicketDetail.set_priority(key, params) |> refresh()}
+  end
+
+  def handle_event("ticket-priority", params, socket),
+    do: {:noreply, socket |> ForemanWeb.TicketDetail.priority(params) |> refresh()}
+
+  def handle_event("ticket-jump", params, socket),
+    do: {:noreply, socket |> ForemanWeb.TicketDetail.jump(params) |> refresh()}
+
   def handle_info(:reconcile, socket) do
     Process.send_after(self(), :reconcile, 3_000)
     {:noreply, refresh(socket)}
@@ -42,6 +53,8 @@ defmodule ForemanWeb.EpicLive do
     |> ForemanWeb.TicketDetail.refresh()
     |> assign(
       epic: epic && summary(epic),
+      epic_priority: epic && Map.get(Foreman.Priority.for_keys([epic.key]), epic.key),
+      epic_tracker_key: epic && epic.key,
       planning_session: Foreman.Sessions.get(socket.assigns.epic_key),
       launchable: Foreman.Sessions.launchable?(epic),
       repos: Foreman.RuntimeState.repos()
@@ -84,7 +97,19 @@ defmodule ForemanWeb.EpicLive do
               <Badge.badge color="info">{@epic.stage}</Badge.badge>
               <Badge.badge>epic</Badge.badge>
               <Badge.badge>bd: {@epic.status}</Badge.badge>
+              <ForemanWeb.TicketDetail.priority_badge
+                :if={@epic_priority}
+                id="epic-priority"
+                priority={@epic_priority.priority}
+                changed={@epic_priority.changed_on_board}
+              />
             </div>
+            <ForemanWeb.TicketDetail.priority_controls
+              :if={@epic_priority}
+              id="epic-priority-controls"
+              priority={@epic_priority}
+              event="epic-priority"
+            />
             <h1 id="epic-title" class="text-2xl font-semibold">{@epic.title}</h1>
             <p class="text-xs text-foreground-softer">
               {@epic.planned_count} planned · {@epic.fallout_count} fallout
@@ -169,6 +194,10 @@ defmodule ForemanWeb.EpicLive do
                       {ticket.title}
                     </p>
                     <div class="flex flex-wrap gap-1">
+                      <ForemanWeb.TicketDetail.priority_badge
+                        priority={ticket.priority}
+                        changed={ticket.priority_changed}
+                      />
                       <Badge.badge color={stage_color(ticket.stage)}>{ticket.stage}</Badge.badge>
                       <Badge.badge>{ticket.status}</Badge.badge>
                     </div>

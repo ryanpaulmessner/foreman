@@ -92,6 +92,12 @@ defmodule ForemanWeb.InitiativesLive do
   def handle_event("close-ticket", params, socket),
     do: {:noreply, ForemanWeb.TicketDetail.close(socket, params)}
 
+  def handle_event("ticket-priority", params, socket),
+    do: {:noreply, socket |> ForemanWeb.TicketDetail.priority(params) |> refresh()}
+
+  def handle_event("ticket-jump", params, socket),
+    do: {:noreply, socket |> ForemanWeb.TicketDetail.jump(params) |> refresh()}
+
   def handle_event("toggle-filters", _, socket) do
     {state, []} = Disclosure.step(socket.assigns.filter_disclosure, :toggle, %{})
     {:noreply, assign(socket, :filter_disclosure, state)}
@@ -674,6 +680,10 @@ defmodule ForemanWeb.InitiativesLive do
                     {row.title}
                   </.link>
                   <span class="font-mono text-xs text-foreground-softer">{row.bead_id}</span>
+                  <ForemanWeb.TicketDetail.priority_badge
+                    priority={Map.get(row, :priority)}
+                    changed={Map.get(row, :priority_changed, false)}
+                  />
                   <Badge.badge :if={row.stale} color="warning" class="ml-2">stale</Badge.badge>
                 </div>
               </div>
@@ -758,6 +768,10 @@ defmodule ForemanWeb.InitiativesLive do
         {@row.bead_id}
       </span>
       <span class="bb-ticket-title min-w-0 flex-1 text-sm">{@row.title}</span>
+      <ForemanWeb.TicketDetail.priority_badge
+        priority={Map.get(@row, :priority)}
+        changed={Map.get(@row, :priority_changed, false)}
+      />
       <Badge.badge class="bb-ticket-stage" color={stage_color(@row.stage)}>{@row.stage}</Badge.badge>
       <span class="text-xs text-foreground-softer">
         {@row.type} · {@row.status}<span :if={@row.created_at}> · <time

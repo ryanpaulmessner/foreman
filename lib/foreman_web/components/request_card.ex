@@ -175,6 +175,10 @@ defmodule ForemanWeb.RequestCard do
     >
       <.icon name="hero-ticket" class="size-3.5" />{@request.bead_id}
     </.link>
+    <ForemanWeb.TicketDetail.priority_badge
+      :if={Map.get(@request, :priority)}
+      priority={@request.priority}
+    />
     """
   end
 

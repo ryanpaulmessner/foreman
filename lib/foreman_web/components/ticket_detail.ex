@@ -1,7 +1,7 @@
 defmodule ForemanWeb.TicketDetail do
   use ForemanWeb, :html
   import Phoenix.LiveView, only: [stream: 4, push_patch: 2]
-  alias Fluxon.Components.{Sheet, Badge, Tabs}
+  alias Fluxon.Components.{Sheet, Badge, Button, Tabs}
 
   def load(socket, params, uri) do
     key = Foreman.TicketSheet.key(params["ticket"])
@@ -13,6 +13,7 @@ defmodule ForemanWeb.TicketDetail do
           Map.merge(ticket, %{
             launchable: Foreman.Sessions.launchable?(Foreman.Sessions.target(key)),
             planning_session: Foreman.Sessions.get(key),
+            priority: Map.get(Foreman.Priority.for_keys([key]), key),
             files?:
               Enum.any?(
                 Foreman.RuntimeState.repos(),
@@ -79,6 +80,107 @@ defmodule ForemanWeb.TicketDetail do
       end
 
     refresh(socket)
+  end
+
+  @doc "Board priority change for the open ticket: an override, never a file write. The caller refreshes."
+  def priority(socket, params), do: set_priority(socket, socket.assigns.ticket_key, params)
+
+  @doc "Board priority change for `key` (a ticket or an epic) from a `priority_controls` form."
+  def set_priority(socket, key, %{"priority" => %{"value" => value}}) when not is_nil(key) do
+    result =
+      case Integer.parse(value) do
+        {priority, ""} -> Foreman.Priority.set(key, priority, "user")
+        _ -> {:error, :invalid_priority}
+      end
+
+    flash_error(socket, result, "Priority not changed")
+  end
+
+  def set_priority(socket, _key, _params),
+    do: flash_error(socket, {:error, :invalid_priority}, "Priority not changed")
+
+  @doc "Jump to front: P0 plus the board event the coordinator reads first. The caller refreshes."
+  def jump(socket, _params) do
+    result =
+      case socket.assigns.ticket_key do
+        nil -> {:error, :not_found}
+        key -> Foreman.Priority.jump(key, "user")
+      end
+
+    flash_error(socket, result, "Not moved to the front")
+  end
+
+  defp flash_error(socket, {:ok, _}, _), do: socket
+  defp flash_error(socket, _, message), do: Phoenix.LiveView.put_flash(socket, :error, message)
+
+  attr :id, :string, default: nil
+  attr :priority, :any, required: true, doc: "0..4, or nil when the ticket has none"
+  attr :changed, :boolean, default: false, doc: "set on the board, not yet in the ticket file"
+
+  @doc "P0..P4. P0 and P1 stand out; other levels stay quiet."
+  def priority_badge(assigns) do
+    ~H"""
+    <Badge.badge
+      :if={@priority in Foreman.Priority.levels()}
+      id={@id}
+      data-priority={@priority}
+      color={priority_color(@priority)}
+      variant={if @priority in [0, 1], do: "solid", else: "outline"}
+      title={if @changed, do: "Priority changed on board"}
+    >
+      P{@priority}<.icon :if={@changed} name="hero-pencil-micro" class="size-3" />
+      <span
+        :if={@changed}
+        class="sr-only"
+      >
+        changed on board
+      </span>
+    </Badge.badge>
+    """
+  end
+
+  defp priority_color(0), do: "danger"
+  defp priority_color(1), do: "warning"
+  defp priority_color(_), do: "primary"
+
+  attr :id, :string, required: true
+  attr :priority, :any, required: true, doc: "`Foreman.Priority.for_keys/1` entry"
+  attr :event, :string, required: true
+  attr :jump, :boolean, default: false
+
+  @doc "Priority select, plus Jump to front when the item is a queued ticket."
+  def priority_controls(assigns) do
+    assigns =
+      assign(assigns,
+        form: to_form(%{"value" => to_string(assigns.priority.priority)}, as: :priority),
+        set?: assigns.priority.priority in Foreman.Priority.levels()
+      )
+
+    ~H"""
+    <div id={@id} class="flex flex-wrap items-center gap-2">
+      <.form for={@form} id={@id <> "-form"} phx-change={@event} class="w-28">
+        <.input
+          field={@form[:value]}
+          id={@id <> "-value"}
+          type="select"
+          aria-label="Priority"
+          prompt={if !@set?, do: "Priority"}
+          options={Enum.map(Foreman.Priority.levels(), &{"P#{&1}", to_string(&1)})}
+        />
+      </.form>
+      <Button.button
+        :if={@jump}
+        id={@id <> "-jump"}
+        type="button"
+        size="sm"
+        variant="outline"
+        phx-click="ticket-jump"
+        data-confirm="Set P0 and tell the coordinator to take this next?"
+      >
+        <.icon name="hero-arrow-up-circle" class="size-4" /> Jump to front
+      </Button.button>
+    </div>
+    """
   end
 
   attr :ticket, :any, required: true
@@ -158,7 +260,18 @@ defmodule ForemanWeb.TicketDetail do
           ]["total"]}
         </Badge.badge>
         <Badge.badge>{@ticket.raw["issue_type"] || "ticket"}</Badge.badge>
-        <Badge.badge :if={@ticket.raw["priority"] != nil}>P{@ticket.raw["priority"]}</Badge.badge>
+        <.priority_badge
+          :if={@ticket.priority}
+          id="ticket-priority"
+          priority={@ticket.priority.priority}
+          changed={@ticket.priority.changed_on_board}
+        />
+        <Badge.badge
+          :if={@ticket.priority && @ticket.priority.changed_on_board}
+          id="ticket-priority-changed"
+        >
+          Changed on board<span :if={@ticket.priority.file in Foreman.Priority.levels()}> · file P{@ticket.priority.file}</span>
+        </Badge.badge>
       </div>
       <ForemanWeb.PreviewControls.controls
         :if={@ticket.preview}
@@ -166,6 +279,13 @@ defmodule ForemanWeb.TicketDetail do
         terminal={@ticket.stage in [:merged, :done, :abandoned, "merged", "done", "abandoned"]}
       />
       <div id="ticket-actions" class="flex flex-wrap gap-2">
+        <.priority_controls
+          :if={@ticket.priority}
+          id="ticket-priority-controls"
+          priority={@ticket.priority}
+          event="ticket-priority"
+          jump={@ticket.stage in [:queued, "queued"] and @ticket.raw["status"] != "closed"}
+        />
         <ForemanWeb.PlanningSession.launch_button
           id="ticket-launch"
           key={@ticket.key}

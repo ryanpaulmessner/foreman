@@ -50,6 +50,7 @@ defmodule Foreman.Initiatives do
     threshold = stale_seconds(config["board"]["stale_session_after"] || "2h")
 
     cr_links = Foreman.Forge.Store.open_links()
+    priority_overrides = Foreman.Priority.override_map(keys)
 
     beads =
       Repo.all(
@@ -67,9 +68,13 @@ defmodule Foreman.Initiatives do
                 tickets[key] || if(raw["status"] == "closed", do: "done", else: "queued")
               )
 
+        override = priority_overrides[key]
+
         %{
           key: key,
           crs: Map.get(cr_links, key, []),
+          priority: override || raw["priority"],
+          priority_changed: not is_nil(override),
           repo: repo,
           id: raw["id"],
           title: raw["title"],
@@ -126,10 +131,13 @@ defmodule Foreman.Initiatives do
       tree.orphans
       |> Enum.reject(&(&1.status == "closed"))
       |> Enum.sort_by(fn ticket ->
-        case ticket.created_at do
-          nil -> {1, 0}
-          time -> {0, -DateTime.to_unix(time, :microsecond)}
-        end
+        age =
+          case ticket.created_at do
+            nil -> {1, 0}
+            time -> {0, -DateTime.to_unix(time, :microsecond)}
+          end
+
+        {Foreman.Priority.rank(ticket.priority), age}
       end)
 
     %{

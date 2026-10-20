@@ -75,6 +75,22 @@ defmodule ForemanWeb.NeedsYouLive do
   def handle_event("close-ticket", params, socket),
     do: {:noreply, ForemanWeb.TicketDetail.close(socket, params)}
 
+  def handle_event("ticket-priority", params, socket),
+    do:
+      {:noreply,
+       socket
+       |> ForemanWeb.TicketDetail.priority(params)
+       |> refresh()
+       |> ForemanWeb.TicketDetail.refresh()}
+
+  def handle_event("ticket-jump", params, socket),
+    do:
+      {:noreply,
+       socket
+       |> ForemanWeb.TicketDetail.jump(params)
+       |> refresh()
+       |> ForemanWeb.TicketDetail.refresh()}
+
   @doc "Resolves a shared request form, regardless of its page or drawer location."
   def resolve(%{"id" => id, "decision" => params, "action" => "answer"}) do
     answer = if params["choice"] in [nil, ""], do: params["note"], else: params["choice"]
@@ -164,8 +180,12 @@ defmodule ForemanWeb.NeedsYouLive do
 
   defp result(socket, {:card, id, card}) do
     case Requests.get(id) do
-      %{state: "pending"} = request -> stream_insert(socket, :pending, item(request, card))
-      _ -> refresh(socket)
+      %{state: "pending"} = request ->
+        [request] = Requests.with_priority([request])
+        stream_insert(socket, :pending, item(request, card))
+
+      _ ->
+        refresh(socket)
     end
   end
 

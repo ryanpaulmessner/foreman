@@ -236,6 +236,12 @@ defmodule ForemanWeb.PullRequestsLive do
   def handle_event("close-ticket", params, socket),
     do: {:noreply, ForemanWeb.TicketDetail.close(socket, params)}
 
+  def handle_event("ticket-priority", params, socket),
+    do: {:noreply, socket |> ForemanWeb.TicketDetail.priority(params) |> refresh()}
+
+  def handle_event("ticket-jump", params, socket),
+    do: {:noreply, socket |> ForemanWeb.TicketDetail.jump(params) |> refresh()}
+
   defp close_approval_route(socket) do
     if socket.assigns.approval_request do
       socket

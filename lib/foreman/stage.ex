@@ -42,6 +42,7 @@ defmodule Foreman.Stage do
   event(:cr_merged, source: :observed)
   event(:bead_closed, source: :observed)
   event(:bead_reopened, source: :observed)
+  event(:jump, source: :observed)
 
   effects([:record, :append, :link, :unlink, :flag, :suggest, :emit])
   guard(:new_session?)
@@ -92,8 +93,9 @@ defmodule Foreman.Stage do
 
   transition(:bead_closed, from: :live, to: :done, do: [emit: :stage])
   transition(:bead_reopened, from: :done, to: :queued, do: [emit: :stage])
+  transition(:jump, from: :queued, to: :stay, do: [emit: :stage])
 
-  ignore([:cr_opened, :cr_closed, :cr_merged, :bead_closed, :bead_reopened], from: :any)
+  ignore([:cr_opened, :cr_closed, :cr_merged, :bead_closed, :bead_reopened, :jump], from: :any)
 
   invalid([:dispatch, :progress, :report, :review, :request_changes, :commit, :abandon, :revive],
     from: :any

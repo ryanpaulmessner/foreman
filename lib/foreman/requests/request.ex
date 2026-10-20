@@ -26,6 +26,8 @@ defmodule Foreman.Requests.Request do
     field :state, :string
     field :outcome, :map, default: %{}
     field :note, :string
+    # The ticket's effective priority, filled for the Needs you list only.
+    field :priority, :integer, virtual: true
     timestamps(type: :utc_datetime_usec)
   end
 end

@@ -81,7 +81,14 @@ defmodule Foreman.AgentCommands do
           is_nil(request["stage"]) or row.stage == request["stage"],
           do: row
 
-    {200, %{items: Enum.sort_by(rows, &{&1.repo, Foreman.Beads.Id.sort_key(&1.id)})}}
+    in_scope = &(is_nil(request["project"]) or &1.repo == request["project"])
+
+    {200,
+     %{
+       jumps: Enum.filter(Foreman.Priority.pending_jumps(), in_scope),
+       priority_overrides: Enum.filter(Foreman.Priority.overrides(), in_scope),
+       items: Enum.sort_by(rows, &{&1.repo, Foreman.Beads.Id.sort_key(&1.id)})
+     }}
   end
 
   defp command(%{"project" => "__foreman__", "id" => "coordinator", "action" => action} = request)
