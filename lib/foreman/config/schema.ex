@@ -9,6 +9,7 @@ defmodule Foreman.Config.Schema do
            "swimlanes" => {:one_of, ~w(project epic none)},
            "stale_session_after" => :duration,
            "terminal_app" => :app,
+           "tmux_session" => :key,
            "os_notifications" => :boolean
          }},
       "merge_policy" => {:one_of, ~w(board human)},

@@ -559,8 +559,28 @@ defmodule Foreman.SessionTmux do
       window.identity == session.session_id
   end
 
-  defp tmux_project(s),
-    do: if(Foreman.Sessions.coordinator?(s), do: "coordinator", else: s.project)
+  # `board.tmux_session` in foreman.toml puts every launched session in one tmux
+  # session (one window each); without it, coordinators go to "coordinator" and
+  # other launches to a tmux session named after their project.
+  defp tmux_project(s) do
+    case configured_tmux_session() do
+      name when is_binary(name) -> name
+      _ -> if(Foreman.Sessions.coordinator?(s), do: "coordinator", else: s.project)
+    end
+  end
+
+  defp configured_tmux_session do
+    Application.get_env(:foreman, :tmux_session) || board_tmux_session()
+  end
+
+  defp board_tmux_session do
+    case Foreman.RuntimeState.config() do
+      %{config: %{"board" => %{"tmux_session" => name}}} -> name
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
 
   defp validate(s) do
     if Regex.match?(~r/\A[a-zA-Z0-9_-]+\z/, s.project) and
