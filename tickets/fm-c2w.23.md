@@ -2,7 +2,7 @@
 id: fm-c2w.23
 title: "Ticket priority on the board: see it, change it, and jump an item to the front of the queue"
 type: feature
-status: open
+status: closed
 priority: 1
 parent: fm-c2w
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-19
-closed: null
-close_reason: null
+closed: 2026-10-20
+close_reason: "5c5b6a1 on main; migration 20261020201243 applied to foreman_dev before merge; review clean"
 ---
 
 User 2026-10-19: 'we should also be able to assign priority to tickets, so if a high priority item comes through we can jump it to the front of the queue.' Ticket files already have priority (0-4; foreman new --priority works) but nothing on the board uses it.
