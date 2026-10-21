@@ -2,7 +2,7 @@
 id: fm-49x.2
 title: "PR history and Shipped / On staging from git containment"
 type: feature
-status: open
+status: in_progress
 priority: 2
 parent: fm-49x
 blocked_by: ["fm-49x.1"]
@@ -32,3 +32,6 @@ Produces PR link rows and containment results (per PR: in_production, in_staging
 - [ ] A ticket with two merged PRs, one in production and one not, is not Shipped.
 - [ ] Fetch failure (no network): the job logs one warning, keeps the last cached results, and the page still renders.
 - [ ] Backfill run once is idempotent (second run adds nothing).
+
+## Notes
+- 2026-10-21 user: 2026-10-21 Ryan: 'I can't really tell where any given item is in its process; is it in PR, merged to staging, in prod? … worked today/yesterday/Monday?' Added to this slice: a per-row progress strip (Building -> PR open -> On staging -> In production, or Done / Closed, not done) and the last-activity day on the row (Today / Yesterday / weekday).
