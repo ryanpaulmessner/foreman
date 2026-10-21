@@ -85,7 +85,7 @@ defmodule Foreman.Week do
         from e in "stage_events",
           where:
             e.repo_key in ^keys and e.inserted_at >= ^window.start_at and
-              e.inserted_at < ^window.end_at,
+              e.inserted_at < ^window.end_at and e.source != "backfill",
           select: %{
             key: {e.repo_key, e.bead_id},
             inserted_at: type(e.inserted_at, :utc_datetime_usec)

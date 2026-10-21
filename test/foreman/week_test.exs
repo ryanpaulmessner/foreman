@@ -25,20 +25,23 @@ defmodule Foreman.WeekTest do
     # Projection bootstraps stages; this fixture supplies its own activity history.
     Foreman.Repo.query!("DELETE FROM stage_events")
 
-    for {id, time, outcome} <- [
-          {"stage", now, "accepted"},
-          {"rejected", now, "rejected"},
-          {"old", ~U[2026-10-18 12:00:00Z], "accepted"},
-          {"boundary", ~U[2026-10-19 03:00:00Z], "accepted"},
-          {"future", ~U[2026-10-26 05:00:00Z], "accepted"}
+    # A projection backfill row (written when the board adopts or re-syncs a
+    # repo) is not work: "inactive" must stay off the page.
+    for {id, time, outcome, source} <- [
+          {"stage", now, "accepted", "claimed"},
+          {"rejected", now, "rejected", "claimed"},
+          {"old", ~U[2026-10-18 12:00:00Z], "accepted", "claimed"},
+          {"boundary", ~U[2026-10-19 03:00:00Z], "accepted", "claimed"},
+          {"future", ~U[2026-10-26 05:00:00Z], "accepted", "claimed"},
+          {"inactive", now, "row", "backfill"}
         ] do
       Foreman.Repo.insert_all("stage_events", [
         %{
           repo_key: "work",
           bead_id: id,
           machine: "ticket",
-          event: "progress",
-          source: "claimed",
+          event: if(source == "backfill", do: "backfill", else: "progress"),
+          source: source,
           actor: "pi",
           to_stage: "building",
           outcome: outcome,
@@ -80,7 +83,7 @@ defmodule Foreman.WeekTest do
     expected =
       Foreman.Repo.query!("""
         SELECT DISTINCT bead_id FROM (
-          SELECT bead_id, inserted_at FROM stage_events WHERE repo_key = 'work'
+          SELECT bead_id, inserted_at FROM stage_events WHERE repo_key = 'work' AND source <> 'backfill'
           UNION ALL SELECT bead_id, inserted_at FROM approval_requests WHERE repo_key = 'work'
           UNION ALL SELECT r.bead_id, e.inserted_at FROM request_events e
             JOIN approval_requests r ON e.request_id = r.id WHERE r.repo_key = 'work'
@@ -117,6 +120,21 @@ defmodule Foreman.WeekTest do
 
     Foreman.Repo.insert_all("epic_links", [
       %{repo_key: "work", bead_id: "child", epic_repo_key: "other", epic_bead_id: "epic"}
+    ])
+
+    # The projection's backfill rows do not count as work; give the child a real event.
+    Foreman.Repo.insert_all("stage_events", [
+      %{
+        repo_key: "work",
+        bead_id: "child",
+        machine: "ticket",
+        event: "progress",
+        source: "claimed",
+        actor: "pi",
+        to_stage: "building",
+        outcome: "accepted",
+        inserted_at: DateTime.utc_now()
+      }
     ])
 
     model = Foreman.Week.snapshot()
