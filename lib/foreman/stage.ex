@@ -92,6 +92,9 @@ defmodule Foreman.Stage do
   )
 
   transition(:bead_closed, from: :live, to: :done, do: [emit: :stage])
+  # A ticket closed with its PR still open keeps the link (and its preview) until the PR ends.
+  transition(:cr_merged, from: :done, to: :stay, do: [unlink: :cr, emit: :stage])
+  transition(:cr_closed, from: :done, to: :stay, do: [unlink: :cr, emit: :stage])
   transition(:bead_reopened, from: :done, to: :queued, do: [emit: :stage])
   transition(:jump, from: :queued, to: :stay, do: [emit: :stage])
 

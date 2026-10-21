@@ -205,7 +205,7 @@ defmodule Foreman.Overlay do
 
                    Enum.each(effects, &effect(&1, key, row, event_id, payload, actor))
                    if stage in [:done, :abandoned], do: Foreman.Requests.supersede(key)
-                   if stage in [:merged, :done, :abandoned], do: Foreman.Previews.cleanup(key)
+                   if Foreman.Previews.ended?(key, stage), do: Foreman.Previews.cleanup(key)
                    notify(key)
                    {:ok, %{stage: get(key).stage, effects: effects}}
                end

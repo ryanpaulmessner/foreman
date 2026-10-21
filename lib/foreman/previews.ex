@@ -53,7 +53,8 @@ defmodule Foreman.Previews do
       ])
 
       with :ok <- Foreman.Preview.allow_external_write(),
-           %{stage: stage} when stage not in [:merged, :done, :abandoned] <- Overlay.get(key),
+           %{stage: stage} <- Overlay.get(key),
+           false <- ended?(key, stage),
            path when is_binary(path) <- worktree(key),
            true <- File.dir?(path) do
         Repo.insert_all("previews", [%{worktree: path, repo_key: repo, bead_id: id}],
@@ -97,6 +98,18 @@ defmodule Foreman.Previews do
 
       enqueue()
     end)
+  end
+
+  @doc """
+  True when a ticket's preview should end: merged or abandoned, or done with no open PR.
+  A ticket closed while its PR is still open keeps its preview for testing until the PR ends.
+  """
+  def ended?({repo, id}, stage) do
+    stage in [:merged, :abandoned] or
+      (stage == :done and
+         not Repo.exists?(
+           from c in "overlay_cr_links", where: c.repo_key == ^repo and c.bead_id == ^id
+         ))
   end
 
   def cleanup({repo, id}) do
@@ -196,7 +209,7 @@ defmodule Foreman.Previews do
     row = get(row.id)
     terminal = row.repo_key && Overlay.get({row.repo_key, row.bead_id})
 
-    if terminal && terminal.stage in [:merged, :done, :abandoned] &&
+    if terminal && ended?({row.repo_key, row.bead_id}, terminal.stage) &&
          (row.state != :stopped || not is_nil(metadata)),
        do: transition!(row, :stop)
 

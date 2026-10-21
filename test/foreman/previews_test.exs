@@ -56,6 +56,23 @@ defmodule Foreman.PreviewsTest do
     end
   end
 
+  test "a ticket closed with its PR open keeps its preview until the PR merges", %{key: key} do
+    Repo.update_all("tickets", set: [stage: "pr_open"])
+    assert {:ok, _} = Foreman.Overlay.apply_event(key, {:cr_opened, %{number: 42}})
+    assert {:ok, %{stage: :done}} = Foreman.Overlay.apply_event(key, :bead_closed)
+
+    assert {:ok, _} = Previews.start(key)
+    assert :ok = Previews.reconcile(Foreman.FakeDevserve)
+    assert Previews.for_ticket(key).state == :running
+
+    assert {:ok, %{stage: :done}} = Foreman.Overlay.apply_event(key, {:cr_merged, %{number: 42}})
+    assert Previews.for_ticket(key).state == :stopping
+    assert :ok = Previews.reconcile(Foreman.FakeDevserve)
+    assert Previews.for_ticket(key).state == :stopped
+    assert {:ok, []} = Foreman.FakeDevserve.list()
+    assert {:error, :unavailable} = Previews.start(key)
+  end
+
   test "orphan registry entries are listed and stoppable without touching main units" do
     Process.put(:devserve_previews, [
       %{

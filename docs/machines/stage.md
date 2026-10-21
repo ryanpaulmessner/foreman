@@ -21,6 +21,8 @@ stateDiagram-v2
     pr_open --> merged: cr_merged / record(merge), emit(stage)
     pr_open --> done: bead_closed / flag(closed_with_open_cr), emit(stage)
     live --> done: bead_closed / emit(stage)
+    done --> done: cr_merged / unlink(cr), emit(stage)
+    done --> done: cr_closed / unlink(cr), emit(stage)
     done --> queued: bead_reopened / emit(stage)
     queued --> queued: jump / emit(stage)
     state "after_report: reported, in_review, committed, pr_open, merged" as after_report
@@ -156,8 +158,8 @@ stateDiagram-v2
 | done | abandon | invalid |  |
 | done | revive | invalid |  |
 | done | cr_opened | ignored |  |
-| done | cr_closed | ignored |  |
-| done | cr_merged | ignored |  |
+| done | cr_closed | stay | unlink(cr), emit(stage) |
+| done | cr_merged | stay | unlink(cr), emit(stage) |
 | done | bead_closed | ignored |  |
 | done | bead_reopened | -> queued | emit(stage) |
 | done | jump | ignored |  |
