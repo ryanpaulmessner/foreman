@@ -133,6 +133,9 @@ defmodule Foreman.CLI do
 
         if request["action"] in ["ask", "wait"], do: 0, else: code
 
+      {:error, message} when is_binary(message) ->
+        warn(args, message)
+
       {:error, _} ->
         warn(args, "usage: foreman <verb> <id> [options]; see docs/sessions/bb-cli.md")
     end
@@ -172,6 +175,12 @@ defmodule Foreman.CLI do
 
     0
   end
+
+  defp format(%{"id" => id, "url" => url}),
+    do:
+      id <>
+        " " <>
+        String.trim_trailing(System.get_env("FOREMAN_URL", "http://127.0.0.1:4747"), "/") <> url
 
   defp format(%{"warning" => warning}), do: "warning: " <> warning
 
@@ -246,7 +255,10 @@ defmodule Foreman.CLI do
     end
   end
 
-  def parse(args, defaults \\ []) do
+  def parse(args, defaults \\ [])
+  def parse(["answer" | args], defaults), do: Foreman.AnswerCLI.parse(args, defaults)
+
+  def parse(args, defaults) do
     {opts, args, invalid} = OptionParser.parse(args, strict: @switches)
 
     {kind, args} =

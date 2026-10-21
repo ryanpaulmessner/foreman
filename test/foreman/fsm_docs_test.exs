@@ -25,6 +25,8 @@ defmodule Foreman.FsmDocsTest do
   end
 
   for {name, module} <- [
+        {"state", Foreman.Answers.State},
+        {"expansion", Foreman.Answers.Expansion},
         {"stage", Foreman.Stage},
         {"request", Foreman.Request},
         {"request_wait", Foreman.RequestWait},

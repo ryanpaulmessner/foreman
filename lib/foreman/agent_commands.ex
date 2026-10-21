@@ -58,6 +58,26 @@ defmodule Foreman.AgentCommands do
 
   defp write(request), do: write(Map.put(request, "request_id", Ecto.UUID.generate()))
 
+  defp command(%{"action" => "answer", "payload" => attrs} = request) when is_map(attrs) do
+    result =
+      if request["update"],
+        do: Foreman.Answers.update(request["update"], attrs),
+        else: Foreman.Answers.create(attrs)
+
+    case result do
+      {:ok, answer} ->
+        {200, %{id: answer.id, url: "/answers?id=" <> answer.id}}
+
+      {:error, :not_found} ->
+        {404, %{error: "answer_not_found"}}
+
+      {:error, _} ->
+        {422, %{error: "invalid_answer: question, body and actor are required; at most 20 links"}}
+    end
+  end
+
+  defp command(%{"action" => "answer"}), do: {422, %{error: "invalid_answer"}}
+
   defp command(%{"action" => "coordinator"} = request) do
     case Foreman.Sessions.coordinator_command(request) do
       {:ok, body} -> {200, body}

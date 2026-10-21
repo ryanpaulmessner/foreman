@@ -44,6 +44,14 @@ defmodule ForemanWeb.Layouts do
             </button>
           </div>
           <.link
+            id="answers-link"
+            navigate={~p"/answers"}
+            class={["bb-nav", @active == :answers && "bb-nav-active"]}
+            aria-current={@active == :answers && "page"}
+          >
+            <.icon name="hero-chat-bubble-left-right" class="size-4" /> Answers
+          </.link>
+          <.link
             navigate={~p"/"}
             class={["bb-nav", @active in [:initiatives, :epic] && "bb-nav-active"]}
             aria-current={@active in [:initiatives, :epic] && "page"}

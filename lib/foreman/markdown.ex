@@ -133,6 +133,15 @@ defmodule Foreman.Markdown do
       is_nil(uri.path) or uri.path == "" ->
         url
 
+      opts[:resolve_path] ->
+        case opts[:resolve_path].(URI.decode(uri.path)) do
+          resolved when is_binary(resolved) ->
+            resolved <> if(uri.fragment, do: "#" <> URI.encode(uri.fragment), else: "")
+
+          _ ->
+            ""
+        end
+
       opts[:repo] && String.downcase(Path.extname(uri.path)) == ".md" ->
         case relative_path(URI.decode(uri.path), opts[:path] || "README.md") do
           {:ok, path} ->

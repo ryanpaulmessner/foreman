@@ -117,6 +117,39 @@ The ask's envelope UUID is also its durable request ID. An offline spool warning
 `not_found`; a warning is not a successful ask. Replaying the same envelope creates
 one request. Answers and declines are browser actions, not agent command verbs.
 
+## Saved answers (fm-5fq)
+
+```sh
+foreman answer --question "Why is this card stale?" --body-file answer.md \
+  --repo sample --ticket fm-1 --link docs/spec.md --link https://example.com
+foreman answer --update <answer-uuid> --body-file revised-answer.md
+```
+
+`answer` stores a reference answer, not a reply to an approval request. It prints the
+answer UUID and its `/answers?id=<uuid>` URL. `--json` prints `{id,url}`; the URL in
+JSON is board-relative. `--actor` and `--session` use the normal environment defaults.
+Question and a readable, nonempty UTF-8 body file are required for a new answer.
+The file is limited to 1 MiB. Repo, ticket and up to 20 repeatable links are optional.
+Paths are linked only when the document viewer can read them; HTTP(S) URLs are allowed.
+
+An update adds a version. It requires the answer UUID and body file; omitted question,
+repo, ticket and links carry forward. Author, session and time belong to each version.
+The original version is never changed. Pin and archive are board actions. Archive hides
+an answer from the default list; Show archived exposes it and Restore brings it back.
+The page searches the latest question and body, and filters by exact repo and ticket.
+
+The authenticated command envelope is:
+
+```json
+{"action":"answer","request_id":"<uuid>","update":null,"payload":{"question":"Why?","body":"Markdown bytes","actor":"pi","session":"build","repo":"sample","ticket":"fm-1","links":["docs/spec.md"]}}
+```
+
+For an update, `update` contains the answer UUID. The transport retains the existing
+receipt and offline-spool behavior: a warning is not confirmation of storage. Replaying
+the same request UUID creates one answer or one new version, not duplicates. Body bytes
+are in the envelope, so replay does not need the original body file. Invalid input is
+refused with a warning; malformed API payloads return 422 and unknown update IDs return 404.
+
 ## User setup
 
 These are user steps, not actions performed by this build session.

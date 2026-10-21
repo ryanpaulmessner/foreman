@@ -1,0 +1,25 @@
+defmodule Foreman.Answers.State do
+  @moduledoc "Pin and archive are independent; restoring keeps the pin."
+  use Foreman.Fsm
+  initial(:normal)
+  state(:normal)
+  state(:pinned)
+  state(:archived)
+  state(:archived_pinned)
+  event(:pin)
+  event(:unpin)
+  event(:archive)
+  event(:restore)
+  transition(:pin, from: :normal, to: :pinned)
+  transition(:pin, from: :archived, to: :archived_pinned)
+  transition(:unpin, from: :pinned, to: :normal)
+  transition(:unpin, from: :archived_pinned, to: :archived)
+  transition(:archive, from: :normal, to: :archived)
+  transition(:archive, from: :pinned, to: :archived_pinned)
+  transition(:restore, from: :archived, to: :normal)
+  transition(:restore, from: :archived_pinned, to: :pinned)
+  ignore(:pin, from: [:pinned, :archived_pinned])
+  ignore(:unpin, from: [:normal, :archived])
+  ignore(:archive, from: [:archived, :archived_pinned])
+  ignore(:restore, from: [:normal, :pinned])
+end
