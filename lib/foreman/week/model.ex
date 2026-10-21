@@ -15,7 +15,7 @@ defmodule Foreman.Week.Model do
     "Waiting on you",
     "Waiting on others",
     "Building",
-    "Not started"
+    "Discussed"
   ]
 
   @doc """
@@ -51,7 +51,8 @@ defmodule Foreman.Week.Model do
 
     items =
       tickets
-      |> Enum.filter(&(&1.repo in repos))
+      # Epics are the Feature sub-headings, never items of their own.
+      |> Enum.filter(&(&1.repo in repos and &1.type != "epic"))
       |> Enum.flat_map(fn ticket ->
         times = Map.get(activity, ticket.key, []) ++ file_times(ticket.raw, window.timezone)
 
@@ -130,8 +131,12 @@ defmodule Foreman.Week.Model do
       {pending != [], "Waiting on you"},
       {ticket.status == "parked" or Enum.any?(ticket.prs, &(&1["state"] == "open")),
        "Waiting on others"},
-      {ticket.stage in ~w(dispatched building reported in_review committed), "Building"},
-      {true, "Not started"}
+      # Work run outside the board (relay builds, by hand) only shows in the
+      # ticket file status.
+      {ticket.status == "in_progress" or
+         ticket.stage in ~w(dispatched building reported in_review committed), "Building"},
+      # Activity without work: a note, a decision, a status change.
+      {true, "Discussed"}
     ]
 
     Enum.find_value(rules, fn {matches, label} -> if matches, do: label end)

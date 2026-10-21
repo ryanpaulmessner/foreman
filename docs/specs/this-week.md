@@ -33,7 +33,7 @@ Success for Ryan:
 3. (user) **Scope:** tickets of the repo whose key is `work`.
    - (agent call) Make the repo a config key `board.week_repos`, default `["work"]`, so a later version can add repos without a code change.
 4. (user) **Worked this week** means at least one activity in the week. Activity is any of these:
-   - a `stage_events` row for the ticket, whatever its outcome
+   - a `stage_events` row for the ticket, whatever its outcome, except projection `backfill` rows (written when the board adopts or re-syncs a repo)
    - an `approval_requests` or `request_events` row for the ticket
    - a ticket-file date in the week: a `## Notes` line date, `closed`, or `parked`
    - (agent call) File dates have day precision only. A file date counts for the whole day in the board time zone.
@@ -54,6 +54,7 @@ Success for Ryan:
    - by effective ticket kind (fm-c2w.29), in this order: Feature (grouped under each epic, epic title as a sub-heading), Break-fix, Mapping, Access, Internal, Unsorted
    - (agent call) a section with no items does not render
    - Carried over is its own section, above the kind sections, with the same inner grouping
+   - (user, 2026-10-21) epics are sub-headings only, never items
 8. (user) **Plain stages.** Each item has one plain stage, shown as a group inside its kind section:
 
    | Plain stage | When (first match wins, top to bottom) |
@@ -64,8 +65,8 @@ Success for Ryan:
    | On staging | the PR is merged and its head commit is contained in `origin/staging`, but not in production |
    | Waiting on you | a pending Needs you request exists for the ticket (push, open_pr, merge, decision, session_waiting) |
    | Waiting on others | the ticket is parked, or it has an open PR with no pending request |
-   | Building | the board stage is dispatched, building, reported, in_review or committed |
-   | Not started | anything else, for example a ticket that only got a note |
+   | Building | the board stage is dispatched, building, reported, in_review or committed, or the ticket file status is in_progress (work run outside the board) |
+   | Discussed | anything else: a note, a decision or a status change, but no work (renamed from "Not started", Ryan 2026-10-21) |
 
    The exact board stage, and the request id when there is one, show in the item's details.
 9. (user + agent call) **Shipped detection.** Shipped means in production. ReportSystem deploys through a staging → production PR, plus hotfix PRs into production, and its PRs merge with merge commits.

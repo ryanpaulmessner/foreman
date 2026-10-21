@@ -85,8 +85,10 @@ defmodule Foreman.Week.ModelTest do
         {%{status: "parked", stage: "building"}, [], "Waiting on others"},
         {%{prs: [%{"state" => "open"}], stage: "building"}, [], "Waiting on others"},
         {%{prs: [%{"state" => "merged"}], stage: "building"}, [], "Building"},
-        {%{status: "closed", prs: [%{"state" => "merged"}]}, [], "Not started"},
-        {%{}, [], "Not started"}
+        {%{status: "closed", prs: [%{"state" => "merged"}]}, [], "Discussed"},
+        {%{status: "in_progress"}, [], "Building"},
+        {%{status: "in_progress", prs: [%{"state" => "open"}]}, [], "Waiting on others"},
+        {%{}, [], "Discussed"}
       ] ++
         for(
           reason <- ["won't do: no", "duplicate of x", "superseded by x", "out of scope now"],
@@ -138,6 +140,32 @@ defmodule Foreman.Week.ModelTest do
 
     assert hd(model.sections).groups |> Enum.map(& &1.epic_title) == ["Better reports"]
     assert Model.build(%{tickets: tickets}, ~U[2026-10-21 12:00:00Z]).sections == []
+  end
+
+  test "an epic with activity is a heading, never an item" do
+    epic = ticket("epic", %{type: "epic", kind: "feature", title: "Better reports"})
+    child = ticket("child", %{edges: [%{target: epic.key, type: "parent-child"}]})
+    at = ~U[2026-10-20 12:00:00Z]
+
+    model =
+      Model.build(
+        %{
+          tickets: [epic, child],
+          events: [%{key: epic.key, inserted_at: at}, %{key: child.key, inserted_at: at}]
+        },
+        ~U[2026-10-21 12:00:00Z]
+      )
+
+    assert model |> items() |> Enum.map(& &1.id) == ["child"]
+    assert hd(model.sections).groups |> Enum.map(& &1.epic_title) == ["Better reports"]
+
+    only_epic =
+      Model.build(
+        %{tickets: [epic, child], events: [%{key: epic.key, inserted_at: at}]},
+        ~U[2026-10-21 12:00:00Z]
+      )
+
+    assert only_epic.sections == []
   end
 
   test "feature grouping uses the nearest epic" do
