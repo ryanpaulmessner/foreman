@@ -23,6 +23,192 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     %{request: request}
   end
 
+  test "every card has ticket context and agent asks can be withdrawn", %{
+    conn: conn,
+    request: request
+  } do
+    {:ok, view, _} = live(conn, "/needs-you")
+    assert has_element?(view, "#request-#{request.id} [data-ticket-heading]", "A ticket")
+    refute has_element?(view, "#context-#{request.id} h2")
+    assert has_element?(view, "#context-#{request.id}", "One-off")
+    assert has_element?(view, "#source-#{request.id}", "Source unknown")
+    assert has_element?(view, "#withdraw-#{request.id}")
+
+    view
+    |> form("#withdraw-#{request.id}", withdraw: %{reason: "Answered in chat"})
+    |> render_submit()
+
+    refute has_element?(view, "#request-#{request.id}")
+    assert has_element?(view, "#recent-requests", "withdrawn")
+    assert has_element?(view, "#recent-requests", "Answered in chat")
+    assert Requests.get(request.id).state == "withdrawn"
+  end
+
+  test "registered sources and preview fallback commands appear on page and drawer", %{conn: conn} do
+    old = System.get_env("PREVIEW")
+    System.put_env("PREVIEW", "1")
+
+    on_exit(fn ->
+      if old, do: System.put_env("PREVIEW", old), else: System.delete_env("PREVIEW")
+    end)
+
+    assert {200, _} =
+             Foreman.Agent.event("sample", "s-1", %{
+               "event" => "dispatch",
+               "actor" => "pi",
+               "session" => "relay-build",
+               "payload" => %{"window" => "%99999999", "harness" => "pi", "workdir" => "/tmp"}
+             })
+
+    {:ok, request} =
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "actor" => "pi",
+        "session" => "relay-build",
+        "facts" => %{
+          "question" => "Which?",
+          "options" => ["A"],
+          "option_details" => %{"A" => "Keep access enabled"}
+        }
+      })
+
+    {:ok, view, _} = live(conn, "/needs-you")
+    render_click(view, "open-request-drawer")
+
+    for prefix <- ["", "drawer-"] do
+      assert has_element?(
+               view,
+               "##{prefix}source-#{request.id}",
+               "relay-build · pi · sample · s-1"
+             )
+
+      assert has_element?(view, "##{prefix}option-detail-#{request.id}-0", "Keep access enabled")
+      view |> element("##{prefix}go-session-#{request.id}") |> render_click()
+
+      assert has_element?(
+               view,
+               "##{prefix}session-command-#{request.id} code",
+               "tmux -L 'default' select-window -t '%99999999'"
+             )
+
+      assert has_element?(view, "##{prefix}copy-session-#{request.id}[data-command]")
+    end
+  end
+
+  test "ticket context shows epic, origin and plain Summary on page and drawer", %{
+    conn: conn,
+    request: request
+  } do
+    Foreman.Beads.Projection.replace(
+      "sample",
+      Enum.map_join(
+        [
+          %{
+            id: "s-e",
+            title: "Mobile access",
+            issue_type: "epic",
+            status: "open",
+            kind: "feature"
+          },
+          %{
+            id: "s-1",
+            title: "Technical title",
+            issue_type: "task",
+            status: "open",
+            dependencies: [%{type: "parent-child", depends_on_id: "s-e"}],
+            description:
+              "**Ticket:** T-123\n\n## Summary\nTitle: Fix mobile login\nWhat users see: Login works on phones.\n"
+          }
+        ],
+        "\n",
+        &Jason.encode!/1
+      )
+    )
+
+    {:ok, view, _} = live(conn, "/needs-you")
+    render_click(view, "open-request-drawer")
+
+    for prefix <- ["", "drawer-"] do
+      selector = "##{prefix}context-#{request.id}"
+
+      assert has_element?(
+               view,
+               "##{prefix}request-#{request.id} [data-ticket-heading]",
+               "Fix mobile login"
+             )
+
+      refute has_element?(view, "#{selector} h2")
+      assert has_element?(view, selector, "Feature")
+      assert has_element?(view, selector, "Mobile access")
+      assert has_element?(view, selector, "Support Board T-123")
+      assert has_element?(view, selector, "Login works on phones.")
+    end
+  end
+
+  test "closed source windows show a notice without a stale command", %{request: request} do
+    request = %{
+      request
+      | kind: "session_waiting",
+        facts: %{"target" => "external", "pane" => "%99999999"}
+    }
+
+    for prefix <- ["", "drawer-"] do
+      document =
+        render_component(&ForemanWeb.RequestContext.context/1,
+          request: request,
+          prefix: prefix,
+          focus: :window_gone
+        )
+        |> LazyHTML.from_fragment()
+
+      assert document
+             |> LazyHTML.query("##{prefix}session-closed-#{request.id}")
+             |> LazyHTML.text()
+             |> String.trim() == "The session window is closed."
+
+      assert Enum.empty?(LazyHTML.query(document, "##{prefix}session-command-#{request.id}"))
+      assert Enum.empty?(LazyHTML.query(document, "##{prefix}copy-session-#{request.id}"))
+    end
+  end
+
+  test "same-ticket cards have one group heading", %{conn: conn, request: request} do
+    {:ok, _} =
+      Requests.ask({"sample", "s-1"}, "decision", %{"facts" => %{"question" => "Another?"}})
+
+    {:ok, view, _} = live(conn, "/needs-you")
+
+    assert view
+           |> element("#pending-requests")
+           |> render()
+           |> LazyHTML.from_fragment()
+           |> LazyHTML.query("[data-ticket-heading]")
+           |> Enum.count() == 1
+
+    view
+    |> form("#withdraw-#{request.id}", withdraw: %{reason: "No longer needed"})
+    |> render_submit()
+
+    assert has_element?(view, "#pending-requests [data-ticket-heading]", "A ticket")
+  end
+
+  test "user asks cannot be withdrawn through a forged card event", %{conn: conn} do
+    {:ok, request} =
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "actor" => "user",
+        "facts" => %{"question" => "Which?"}
+      })
+
+    {:ok, view, _} = live(conn, "/needs-you")
+    refute has_element?(view, "#withdraw-#{request.id}")
+
+    render_click(view, "resolve", %{
+      "id" => request.id,
+      "action" => "withdraw",
+      "withdraw" => %{"reason" => "Stale"}
+    })
+
+    assert Requests.get(request.id).state == "pending"
+  end
+
   test "waiting cards share Open session and usage-only Continue on page and drawer", %{
     conn: conn
   } do
@@ -182,11 +368,26 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       view |> element("#open-#{request.id}") |> render_click()
       assert has_element?(view, "#notice-#{request.id}", "No terminal is attached")
       assert has_element?(view, "#attach-#{request.id}", "attach -t")
+      refute has_element?(view, "#session-command-#{request.id}")
       assert Requests.get(request.id).state == "pending"
 
       render_click(view, "open-request-drawer")
       view |> element("#drawer-open-#{request.id}") |> render_click()
       assert has_element?(view, "#drawer-notice-#{request.id}", "No terminal is attached")
+      refute has_element?(view, "#drawer-session-command-#{request.id}")
+
+      old = System.get_env("PREVIEW")
+      System.put_env("PREVIEW", "1")
+
+      on_exit(fn ->
+        if old, do: System.put_env("PREVIEW", old), else: System.delete_env("PREVIEW")
+      end)
+
+      for prefix <- ["", "drawer-"] do
+        view |> element("##{prefix}go-session-#{request.id}") |> render_click()
+        assert has_element?(view, "##{prefix}session-command-#{request.id}")
+        refute has_element?(view, "##{prefix}notice-#{request.id}")
+      end
     end
 
     test "choosing an option on the card answers the pane; a changed pane refuses", %{
@@ -414,7 +615,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
   } do
     {:ok, view, _} = live(conn, "/needs-you")
     assert has_element?(view, "#decision-#{request.id} textarea[name='decision[note]']")
-    refute has_element?(view, "#request-#{request.id} input[type=text]")
+    refute has_element?(view, "#decision-#{request.id} input[type=text]")
     refute has_element?(view, "#request-#{request.id} textarea[name='decision[answer]']")
     assert has_element?(view, "#decision-actions-#{request.id} #submit-answer-#{request.id}")
     assert has_element?(view, "#decision-actions-#{request.id} #submit-decline-#{request.id}")

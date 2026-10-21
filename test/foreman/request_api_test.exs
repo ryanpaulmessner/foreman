@@ -50,6 +50,8 @@ defmodule Foreman.RequestAPITest do
                    "B",
                    "--recommendation",
                    "B",
+                   "--option-detail",
+                   "B=Keep the compact layout",
                    "--actor",
                    "pi",
                    "--session",
@@ -62,6 +64,7 @@ defmodule Foreman.RequestAPITest do
     id = String.trim(output)
     assert {:ok, _} = Ecto.UUID.cast(id)
     request = Requests.get(id)
+    assert request.facts["option_details"] == %{"B" => "Keep the compact layout"}
     assert request.facts["options"] == ["A", "B"]
     assert request.session == "build"
     output = capture_io(fn -> assert CLI.run(["wait", id, "--timeout", "0"], opts) == 0 end)
@@ -69,6 +72,70 @@ defmodule Foreman.RequestAPITest do
     Requests.resolve(id, :decline, %{"note" => "Later"})
     output = capture_io(fn -> assert CLI.run(["wait", id], opts) == 0 end)
     assert %{"state" => "declined", "note" => "Later"} = Jason.decode!(output)
+  end
+
+  test "withdraw CLI returns withdrawn through wait and refuses a second withdrawal" do
+    {:ok, request} =
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "actor" => "pi",
+        "session" => "build",
+        "facts" => %{"question" => "Which?"}
+      })
+
+    opts = [req_options: [plug: {Req.Test, __MODULE__}]]
+
+    args = [
+      "withdraw",
+      request.id,
+      "--actor",
+      "pi",
+      "--session",
+      "build",
+      "--reason",
+      "Answered in chat",
+      "--json"
+    ]
+
+    output = capture_io(fn -> assert CLI.run(args, opts) == 0 end)
+    assert Jason.decode!(output)["state"] == "withdrawn"
+    output = capture_io(fn -> CLI.run(["wait", request.id], opts) end)
+
+    assert %{"state" => "withdrawn", "outcome" => %{"reason" => "Answered in chat"}} =
+             Jason.decode!(output)
+
+    output = capture_io(fn -> CLI.run(args, opts) end)
+    assert Jason.decode!(output)["warning"] =~ "invalid"
+  end
+
+  test "malformed option details are usage errors, not transport failures" do
+    output =
+      capture_io(fn ->
+        CLI.run(["ask", "decision", "s-1", "--option-detail", "bad", "--json"])
+      end)
+
+    assert Jason.decode!(output)["warning"] =~ "usage"
+  end
+
+  test "withdraw replay is idempotent" do
+    {:ok, request} =
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "actor" => "pi",
+        "session" => "build",
+        "facts" => %{"question" => "Which?"}
+      })
+
+    envelope = %{
+      "action" => "withdraw",
+      "id" => request.id,
+      "actor" => "pi",
+      "session" => "build",
+      "reason" => "Answered",
+      "request_id" => Ecto.UUID.generate()
+    }
+
+    assert {200, _} = AgentCommands.execute(envelope)
+    assert {200, _} = AgentCommands.execute(envelope)
+    assert Repo.aggregate("request_events", :count) == 2
   end
 
   test "ask retries are idempotent and worker observations are not agent commands" do

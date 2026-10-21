@@ -85,6 +85,19 @@ defmodule Foreman.AgentCommands do
     end
   end
 
+  defp command(%{"action" => "withdraw", "id" => id} = request) do
+    case Foreman.Requests.withdraw(
+           id,
+           request["actor"] || "user",
+           request["session"],
+           request["reason"]
+         ) do
+      {:ok, result} -> {200, %{id: result.id, state: result.state}}
+      {:error, :not_found} -> {404, %{error: "not_found"}}
+      {:error, reason} -> {422, %{error: reason}}
+    end
+  end
+
   defp command(%{"action" => "wait", "id" => id}) do
     case Foreman.Requests.get(id) do
       nil -> {404, %{error: "not_found"}}

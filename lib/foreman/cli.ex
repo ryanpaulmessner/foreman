@@ -29,6 +29,7 @@ defmodule Foreman.CLI do
     remote_branch: :string,
     question: :string,
     option: :keep,
+    option_detail: :keep,
     recommendation: :string,
     text: :string,
     doc: :keep,
@@ -237,6 +238,21 @@ defmodule Foreman.CLI do
       "text" => opts[:text]
     }
 
+    facts =
+      case Keyword.get_values(opts, :option_detail) do
+        [] ->
+          facts
+
+        details ->
+          parsed =
+            Map.new(details, fn detail ->
+              [option, text] = String.split(detail, "=", parts: 2)
+              {option, text}
+            end)
+
+          Map.put(facts, "option_details", parsed)
+      end
+
     # The board resolves a relative --doc against the ticket's repo, so a file
     # that exists relative to the asker's worktree is sent as its absolute path.
     case Keyword.get_values(opts, :doc) do
@@ -261,6 +277,11 @@ defmodule Foreman.CLI do
   def parse(args, defaults) do
     {opts, args, invalid} = OptionParser.parse(args, strict: @switches)
 
+    invalid =
+      if Enum.all?(Keyword.get_values(opts, :option_detail), &String.contains?(&1, "=")),
+        do: invalid,
+        else: [option_detail: :invalid]
+
     {kind, args} =
       case args do
         ["epic" | rest] -> {"epic", rest}
@@ -283,6 +304,17 @@ defmodule Foreman.CLI do
           |> Map.put("transient", request_kind == "session_waiting")
 
         {:ok, %{request: request, json: opts[:json] || false}}
+
+      {[], ["withdraw", id]} when kind == "ticket" ->
+        if Foreman.Requests.Decision.text?(opts[:reason]) do
+          request =
+            request_identity(opts, defaults)
+            |> Map.merge(%{"action" => "withdraw", "id" => id, "reason" => opts[:reason]})
+
+          {:ok, %{request: request, json: opts[:json] || false}}
+        else
+          {:error, :usage}
+        end
 
       {[], ["wait", id]} when kind == "ticket" ->
         timeout = Keyword.get(opts, :timeout, 300)

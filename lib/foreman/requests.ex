@@ -53,6 +53,28 @@ defmodule Foreman.Requests do
 
   defp request_subject(key, _kind), do: Overlay.get(key)
 
+  def withdraw(id, actor, session, reason) do
+    case get(id) do
+      nil -> {:error, :not_found}
+      %{actor: ^actor, session: ^session} -> resolve(id, :withdraw, %{"reason" => reason})
+      _ -> {:error, :forbidden}
+    end
+  end
+
+  def withdrawable?(request), do: request.actor in ~w(pi claude codex agent coordinator)
+
+  def withdraw_from_card(id, reason) do
+    case get(id) do
+      nil ->
+        {:error, :not_found}
+
+      request ->
+        if withdrawable?(request),
+          do: withdraw(id, request.actor, request.session, reason),
+          else: {:error, :forbidden}
+    end
+  end
+
   def get(id) do
     case Ecto.UUID.cast(id) do
       {:ok, id} -> Repo.get(Request, id)
@@ -358,6 +380,10 @@ defmodule Foreman.Requests do
       reason: request.facts["reason"],
       questions: request.facts["questions"]
     }
+
+  defp validate(:withdraw, payload) do
+    if Decision.text?(payload["reason"]), do: :ok, else: {:error, :reason_required}
+  end
 
   defp validate(:answer, payload) do
     if Decision.text?(payload["answer"]), do: :ok, else: {:error, :answer_required}

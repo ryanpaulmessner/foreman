@@ -78,9 +78,33 @@ board wait "$request" --timeout 300
 ```
 
 `ask decision <ticket-or-epic>` accepts `--question` (required), repeatable `--option`,
-`--recommendation` (one of those options), `--text` (optional context), and repeatable
+`--recommendation` (one of those options), repeatable `--option-detail "<option>=<what happens>"`,
+`--text` (optional context), and repeatable
 `--doc <path>` for the report, review or spec the question is about. Identity,
 `--project`, actor and session flags work as above; use `draft:<slug>` for a draft.
+Option details must name an offered option and contain nonblank text. The card shows each detail
+under its option. Existing asks without details still work.
+
+Cards show the ticket title, kind, nearest parent epic (or One-off), origin, and the
+`What users see:` line from `## Summary`, when present. A Summary `Title:` replaces the ticket title.
+Support Board ticket numbers and Asana links identify the origin; otherwise the card uses the
+first sentence after removing Summary, headings, and `**Ticket:** none`. Bold markers are
+removed; text longer than 80 characters ends with an ellipsis. Cards for a ticket stay together
+under one heading.
+
+Dispatch records the logical session name as well as `--window` (a window name or `%pane-id`).
+Any caller can register this way. Cards use that record, or a board planning session, for
+**Go to session**. The action selects the window and pane in the most recently active attached
+client on the owning tmux server, using `FOREMAN_PLANNING_TMUX_SOCKET` or
+`FOREMAN_EXTERNAL_TMUX_SOCKET` with the same defaults as SessionTmux. If focus fails (including
+in preview), the card offers a command that switches clients inside tmux or attaches outside it.
+A closed window shows a notice instead of a stale command. Unknown sessions show **Source unknown**.
+Legacy pane records without a session name are used only when their harness matches the asker.
+
+`foreman withdraw <request-id> --reason "Answered in chat"` withdraws a pending request.
+Actor and session must match the original ask. Other states are refused. Withdrawal is recorded
+with its reason, removes the card from Needs you, and appears in Recent outcomes. `foreman wait`
+returns `state: withdrawn`. Agent/coordinator cards also have a Withdraw form; user cards do not.
 
 `--doc` takes a Markdown file path: repo-relative, or absolute beneath a configured repo or
 one of its git worktrees. A relative path that exists under the asker's working directory is
@@ -108,7 +132,8 @@ Ask and wait always exit 0, including refusals and malformed input. Wait never s
 The authenticated `/api/commands` envelope adds:
 
 - `action: "ask"`, `id: <ticket-or-epic>`, `request_kind: "decision"`, `facts: {question,
-  options, recommendation, text, docs}` (`docs` is a list of path strings), plus the existing identity and UUID fields.
+  options, recommendation, text, docs, option_details}`, plus the existing identity and UUID fields.
+  `option_details` maps option labels to text; `docs` is a list of path strings.
 - `action: "wait"`, `id: <request-uuid>` returns the current request immediately;
   the CLI owns polling. It does not resolve ticket prefixes or force a beads read.
 
@@ -116,6 +141,8 @@ The ask's envelope UUID is also its durable request ID. An offline spool warning
 `request_id` can therefore be passed to `wait` after replay. Before replay it returns
 `not_found`; a warning is not a successful ask. Replaying the same envelope creates
 one request. Answers and declines are browser actions, not agent command verbs.
+Withdrawal uses `action: "withdraw"`, `id: <request-uuid>`, `reason`, `actor`, and `session`,
+plus a fresh envelope `request_id` for idempotent delivery.
 
 ## Saved answers (fm-5fq)
 

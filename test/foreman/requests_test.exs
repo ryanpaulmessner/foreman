@@ -31,6 +31,40 @@ defmodule Foreman.RequestsTest do
     assert {:error, :invalid} = Requests.resolve(request.id, :decline, %{})
   end
 
+  test "only the asker can withdraw a pending request, with a reason" do
+    {:ok, request} = ask()
+    assert {:error, :forbidden} = Requests.withdraw(request.id, "other", "build", "Answered")
+    assert {:error, :forbidden} = Requests.withdraw(request.id, "pi", "other", "Answered")
+    assert {:error, :invalid} = Requests.withdraw(request.id, "pi", "build", " ")
+    assert {:ok, result} = Requests.withdraw(request.id, "pi", "build", "Answered in chat")
+    assert result.state == "withdrawn"
+    assert result.outcome == %{"reason" => "Answered in chat"}
+    refute Enum.any?(Requests.pending(), &(&1.id == request.id))
+    assert {:error, :invalid} = Requests.withdraw(request.id, "pi", "build", "Again")
+  end
+
+  test "withdraw refuses every non-pending state" do
+    for state <- ~w(new approved answered declined withdrawn superseded executing done failed) do
+      {:ok, request} = ask()
+      request |> Ecto.Changeset.change(state: state) |> Repo.update!()
+      assert {:error, :invalid} = Requests.withdraw(request.id, "pi", "build", "Stale")
+      assert Requests.get(request.id).state == state
+    end
+  end
+
+  test "unknown options and blank consequence text are refused" do
+    for details <- [%{"Other" => "Do something"}, %{"A" => " "}, ["bad"]] do
+      assert {:error, :invalid_facts} =
+               Requests.ask({"sample", "s-1"}, "decision", %{
+                 "facts" => %{
+                   "question" => "Which?",
+                   "options" => ["A"],
+                   "option_details" => details
+                 }
+               })
+    end
+  end
+
   test "decline records note and enqueues nothing" do
     {:ok, request} = ask()
     assert {:ok, result} = Requests.resolve(request.id, :decline, %{"note" => "Not this slice"})
@@ -64,6 +98,15 @@ defmodule Foreman.RequestsTest do
     assert {:ok, plain} = Requests.ask({"sample", "s-1"}, "decision", facts.([]))
     refute Map.has_key?(plain.facts, "docs")
     assert Requests.pending_count() == 2
+  end
+
+  test "draft request headers use the board title" do
+    Foreman.Overlay.apply_event({"sample", "draft:plan"}, {:create, %{title: "Mobile access"}})
+
+    {:ok, request} =
+      Requests.ask({"sample", "draft:plan"}, "decision", %{"facts" => %{"question" => "Build?"}})
+
+    assert Foreman.RequestHeader.for_request(request).title == "Mobile access"
   end
 
   test "bad kinds and facts are refused before recording" do

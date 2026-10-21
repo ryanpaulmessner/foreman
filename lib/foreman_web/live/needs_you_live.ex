@@ -9,6 +9,7 @@ defmodule ForemanWeb.NeedsYouLive do
     {:ok,
      socket
      |> assign(:pending_ids, MapSet.new())
+     |> assign(:pending_headings, MapSet.new())
      |> assign(panel: Foreman.CardPanel.__fsm__(:initial), panel_doc: nil, card_repos: [])
      |> stream_configure(:pending, dom_id: &("request-" <> &1.id))
      |> stream(:pending, [])
@@ -112,6 +113,21 @@ defmodule ForemanWeb.NeedsYouLive do
     end
   end
 
+  def resolve(%{"id" => id, "action" => "withdraw", "withdraw" => %{"reason" => reason}}),
+    do: Requests.withdraw_from_card(id, reason)
+
+  def resolve(%{"id" => id, "action" => "go-session"}) do
+    with request when not is_nil(request) <- Requests.get(id),
+         source when not is_nil(source) <- Foreman.RequestSource.for_request(request) do
+      case card(id, Foreman.RequestSource.focus(source)) do
+        {:card, ^id, state} -> {:card, id, {:focus, state}}
+        error -> error
+      end
+    else
+      _ -> {:error, :source_unknown}
+    end
+  end
+
   def resolve(%{"id" => id, "action" => "continue"}), do: Foreman.SessionWaiting.continue(id)
 
   def resolve(%{"id" => id, "action" => "open"}),
@@ -165,8 +181,24 @@ defmodule ForemanWeb.NeedsYouLive do
   end
 
   @doc "A pending-stream entry: the request and its card notice."
-  def item(request, card \\ Foreman.WaitingCard.__fsm__(:initial)),
-    do: %{id: request.id, request: request, card: card}
+  def item(request, card \\ Foreman.WaitingCard.__fsm__(:initial), heading \\ false)
+
+  def item(request, {:focus, state}, heading),
+    do: %{id: request.id, request: request, card: :ready, focus: state, heading: heading}
+
+  def item(request, card, heading),
+    do: %{id: request.id, request: request, card: card, focus: :ready, heading: heading}
+
+  def grouped(pending) do
+    keys = pending |> Enum.map(&{&1.repo_key, &1.bead_id}) |> Enum.uniq()
+    groups = Enum.group_by(pending, &{&1.repo_key, &1.bead_id})
+
+    Enum.flat_map(keys, fn key ->
+      groups[key]
+      |> Enum.with_index()
+      |> Enum.map(fn {request, index} -> item(request, :ready, index == 0) end)
+    end)
+  end
 
   def handle_info(:reconcile, socket) do
     Process.send_after(self(), :reconcile, 3_000)
@@ -182,7 +214,12 @@ defmodule ForemanWeb.NeedsYouLive do
     case Requests.get(id) do
       %{state: "pending"} = request ->
         [request] = Requests.with_priority([request])
-        stream_insert(socket, :pending, item(request, card))
+
+        stream_insert(
+          socket,
+          :pending,
+          item(request, card, MapSet.member?(socket.assigns.pending_headings, id))
+        )
 
       _ ->
         refresh(socket)
@@ -199,6 +236,8 @@ defmodule ForemanWeb.NeedsYouLive do
     ids = MapSet.new(pending, & &1.id)
     socket = assign(socket, :card_repos, Foreman.CardText.repos())
     previous = socket.assigns.pending_ids
+    items = grouped(pending)
+    headings = items |> Enum.filter(& &1.heading) |> MapSet.new(& &1.id)
 
     # Pending facts are immutable. Leave existing cards mounted so reconciliation
     # cannot erase an answer or note the user is still composing.
@@ -208,16 +247,18 @@ defmodule ForemanWeb.NeedsYouLive do
       end)
 
     socket =
-      pending
+      items
       |> Enum.with_index()
-      |> Enum.reduce(socket, fn {request, index}, socket ->
-        if MapSet.member?(previous, request.id),
-          do: socket,
-          else: stream_insert(socket, :pending, item(request), at: index)
+      |> Enum.reduce(socket, fn {item, index}, socket ->
+        if MapSet.member?(previous, item.id) and
+             MapSet.member?(socket.assigns.pending_headings, item.id) == item.heading,
+           do: socket,
+           else: stream_insert(socket, :pending, item, at: index)
       end)
 
     socket
     |> assign(:pending_ids, ids)
+    |> assign(:pending_headings, headings)
     |> ForemanWeb.RequestCount.refresh()
     |> stream(:recent, Requests.recent(), reset: true)
   end
@@ -258,6 +299,8 @@ defmodule ForemanWeb.NeedsYouLive do
               id={id}
               request={item.request}
               card={item.card}
+              focus={item.focus}
+              heading={item.heading}
               repos={@card_repos}
             />
           </div>
@@ -355,13 +398,41 @@ defmodule ForemanWeb.NeedsYouLive do
   attr :prefix, :string, default: ""
   attr :event, :string, default: "resolve"
   attr :card, :atom, default: :ready
+  attr :focus, :atom, default: :ready
   attr :repos, :list, default: nil
 
-  def request_card(%{request: %{kind: kind}} = assigns) when kind in ["push", "open_pr", "merge"],
+  attr :heading, :boolean, default: false
+
+  def request_card(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :title,
+        if(assigns.heading, do: Foreman.RequestHeader.for_request(assigns.request).title)
+      )
+
+    ~H"""
+    <article id={@id}>
+      <h2 :if={@heading} data-ticket-heading="true" class="mb-3 text-base font-semibold">{@title}</h2>
+      <.card_body
+        id={"card-" <> @id}
+        request={@request}
+        prefix={@prefix}
+        event={@event}
+        card={@card}
+        focus={@focus}
+        heading={@heading}
+        repos={@repos}
+      />
+    </article>
+    """
+  end
+
+  defp card_body(%{request: %{kind: kind}} = assigns) when kind in ["push", "open_pr", "merge"],
     do: action_card(assigns)
 
-  def request_card(%{request: %{kind: "session_waiting"}} = assigns), do: waiting_card(assigns)
-  def request_card(assigns), do: decision_card(assigns)
+  defp card_body(%{request: %{kind: "session_waiting"}} = assigns), do: waiting_card(assigns)
+  defp card_body(assigns), do: decision_card(assigns)
 
   def waiting_card(assigns) do
     question =
@@ -378,6 +449,13 @@ defmodule ForemanWeb.NeedsYouLive do
 
     ~H"""
     <article id={@id} class="rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
+      <ForemanWeb.RequestContext.context
+        request={@request}
+        prefix={@prefix}
+        event={@event}
+        focus={@focus}
+        heading={@heading}
+      />
       <div class="mb-4 flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
         <Badge.badge>Session waiting</Badge.badge>
         <ForemanWeb.RequestCard.ticket_link
@@ -571,6 +649,13 @@ defmodule ForemanWeb.NeedsYouLive do
 
     ~H"""
     <article id={@id} class="rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
+      <ForemanWeb.RequestContext.context
+        request={@request}
+        prefix={@prefix}
+        event={@event}
+        focus={@focus}
+        heading={@heading}
+      />
       <div class="mb-4 flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
         <Badge.badge>
           {%{"push" => "Push", "open_pr" => "Open PR", "merge" => "Merge"}[@request.kind]}
@@ -644,6 +729,13 @@ defmodule ForemanWeb.NeedsYouLive do
 
     ~H"""
     <article id={@id} class="rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
+      <ForemanWeb.RequestContext.context
+        request={@request}
+        prefix={@prefix}
+        event={@event}
+        focus={@focus}
+        heading={@heading}
+      />
       <div class="mb-4 flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
         <Badge.badge>Decision</Badge.badge>
         <ForemanWeb.RequestCard.ticket_link
@@ -694,7 +786,16 @@ defmodule ForemanWeb.NeedsYouLive do
               value={option}
               class="size-4 shrink-0 accent-current"
             />
-            <span class="min-w-0 flex-1 break-words">{option}</span>
+            <span class="min-w-0 flex-1 break-words">
+              <span class="block">{option}</span>
+              <span
+                :if={get_in(@request.facts, ["option_details", option])}
+                id={"#{@prefix}option-detail-#{@request.id}-#{index}"}
+                class="mt-1 block text-sm text-foreground-softer"
+              >
+                {get_in(@request.facts, ["option_details", option])}
+              </span>
+            </span>
             <span
               :if={option == @request.facts["recommendation"]}
               class="text-xs text-foreground-softer"

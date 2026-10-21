@@ -23,7 +23,10 @@ defmodule Foreman.Agent do
       true ->
         payload =
           if params["session"],
-            do: Map.put_new(payload, "window", params["session"]),
+            do:
+              payload
+              |> Map.put_new("window", params["session"])
+              |> Map.put("session", params["session"]),
             else: payload
 
         with :ok <- validate_target(repo, event, payload) do

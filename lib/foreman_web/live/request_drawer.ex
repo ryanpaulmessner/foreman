@@ -9,6 +9,7 @@ defmodule ForemanWeb.RequestDrawer do
     |> assign(
       drawer_state: Foreman.RequestDrawer.__fsm__(:initial),
       drawer_ids: MapSet.new(),
+      drawer_headings: MapSet.new(),
       drawer_error: nil
     )
     |> stream_configure(:drawer_requests, dom_id: &("drawer-request-" <> &1.id))
@@ -26,17 +27,19 @@ defmodule ForemanWeb.RequestDrawer do
           stream_delete_by_dom_id(socket, :drawer_requests, "drawer-request-" <> id)
         end)
 
-      pending
+      items = ForemanWeb.NeedsYouLive.grouped(pending)
+      headings = items |> Enum.filter(& &1.heading) |> MapSet.new(& &1.id)
+
+      items
       |> Enum.with_index()
-      |> Enum.reduce(socket, fn {request, index}, socket ->
-        if MapSet.member?(previous, request.id),
-          do: socket,
-          else:
-            stream_insert(socket, :drawer_requests, ForemanWeb.NeedsYouLive.item(request),
-              at: index
-            )
+      |> Enum.reduce(socket, fn {item, index}, socket ->
+        if MapSet.member?(previous, item.id) and
+             MapSet.member?(socket.assigns.drawer_headings, item.id) == item.heading,
+           do: socket,
+           else: stream_insert(socket, :drawer_requests, item, at: index)
       end)
       |> assign(:drawer_ids, ids)
+      |> assign(:drawer_headings, headings)
     else
       socket
     end
@@ -63,7 +66,14 @@ defmodule ForemanWeb.RequestDrawer do
             %{state: "pending"} = request ->
               socket
               |> assign(:drawer_error, nil)
-              |> stream_insert(:drawer_requests, ForemanWeb.NeedsYouLive.item(request, card))
+              |> stream_insert(
+                :drawer_requests,
+                ForemanWeb.NeedsYouLive.item(
+                  request,
+                  card,
+                  MapSet.member?(socket.assigns.drawer_headings, id)
+                )
+              )
 
             _ ->
               socket
@@ -138,6 +148,8 @@ defmodule ForemanWeb.RequestDrawer do
           id={id}
           request={item.request}
           card={item.card}
+          focus={item.focus}
+          heading={item.heading}
           prefix="drawer-"
           event="drawer-resolve"
         />
