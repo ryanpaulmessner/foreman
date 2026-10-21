@@ -6,6 +6,7 @@ defmodule Foreman.TicketCLI do
     json: :boolean,
     title: :string,
     type: :string,
+    kind: :string,
     status: :string,
     priority: :integer,
     parent: :string,
@@ -277,7 +278,7 @@ defmodule Foreman.TicketCLI do
           field in ~w(parent discovered_from) ->
             put_in(ticket, [:facts, field], nullable(value))
 
-          field in ~w(title type priority) ->
+          field in ~w(title type priority kind) ->
             put_in(ticket, [:facts, field], value)
 
           field == "body" ->
@@ -403,6 +404,7 @@ defmodule Foreman.TicketCLI do
     fields = [
       :title,
       :type,
+      :kind,
       :status,
       :priority,
       :parent,

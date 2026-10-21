@@ -40,14 +40,14 @@ defmodule ForemanWeb.SessionLaunchTest do
   test "draft Launch appears in the list and detail, not for ticketed epics", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
     assert has_element?(view, "#drafts [phx-click=launch-session][phx-value-ticket='draft:plan']")
-    refute has_element?(view, "#epics [phx-click=launch-session]")
+    refute has_element?(view, "#kind-unsorted [phx-click=launch-session]")
 
     Foreman.Repo.query!(
       "UPDATE epics SET stage = 'idea' WHERE repo_key = 'sample' AND bead_id = 'x-2'"
     )
 
     send(view.pid, :reconcile)
-    assert has_element?(view, "#epics [phx-click=launch-session][phx-value-ticket='x-2']")
+    assert has_element?(view, "#kind-unsorted [phx-click=launch-session][phx-value-ticket='x-2']")
     {:ok, detail, _} = live(conn, "/epics/sample/draft:plan")
     assert has_element?(detail, "#epic-launch")
     Foreman.Overlay.apply_event({"sample", "draft:plan"}, :start_spec)
@@ -90,7 +90,7 @@ defmodule ForemanWeb.SessionLaunchTest do
     {:ok, sheet, _} = live(conn, "/?ticket=sample:x-1")
     assert has_element?(sheet, "#ticket-launch", "Focus")
     assert has_element?(sheet, "#drafts [phx-click=launch-session]", "Focus")
-    assert has_element?(sheet, "#epics [phx-click=launch-session]", "Focus")
+    assert has_element?(sheet, "#kind-unsorted [phx-click=launch-session]", "Focus")
     {:ok, detail, _} = live(conn, "/epics/sample/draft:plan")
     assert has_element?(detail, "#epic-launch", "Focus")
     Foreman.Repo.query!("UPDATE planning_sessions SET state = 'ended'")
@@ -101,7 +101,7 @@ defmodule ForemanWeb.SessionLaunchTest do
     send(detail.pid, :reconcile)
     assert has_element?(sheet, "#ticket-launch[phx-value-action=relaunch]", "Relaunch")
     assert has_element?(sheet, "#drafts [phx-click=launch-session]", "Relaunch")
-    assert has_element?(sheet, "#epics [phx-click=launch-session]", "Relaunch")
+    assert has_element?(sheet, "#kind-unsorted [phx-click=launch-session]", "Relaunch")
     assert has_element?(detail, "#epic-launch", "Relaunch")
   end
 

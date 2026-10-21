@@ -32,6 +32,113 @@ defmodule ForemanWeb.InitiativesLiveTest do
     :ok
   end
 
+  test "kind sections own whole trees and loose tickets, excluding closed and parked", %{
+    conn: conn
+  } do
+    rows = [
+      Map.put(b("e", "epic"), :kind, "feature"),
+      Map.put(b("child", "task", [%{depends_on_id: "e", type: "parent-child"}]), :kind, "access"),
+      Map.put(b("fix", "bug"), :kind, "break_fix"),
+      b("unknown", "task"),
+      Map.put(b("closed", "task", [], "closed"), :kind, "mapping"),
+      b("closed_child", "task", [%{depends_on_id: "e", type: "parent-child"}], "closed")
+    ]
+
+    Foreman.Beads.Projection.replace("sample", Enum.map_join(rows, "\n", &Jason.encode!/1))
+    data = Foreman.Initiatives.snapshot()
+    assert Enum.map(Map.get(data, :sections, []), & &1.kind) == ~w(break_fix feature unsorted)
+    assert Enum.map(data.sections, & &1.count) == [1, 2, 1]
+    feature = Enum.find(data.sections, &(&1.kind == "feature"))
+    assert Enum.map(hd(feature.epics).planned, & &1.id) == ["child"]
+    {:ok, view, _} = live(conn, "/")
+
+    assert has_element?(
+             view,
+             "#parked-panel ~ #kind-break_fix-panel ~ #kind-feature-panel ~ #kind-unsorted-panel"
+           )
+
+    refute has_element?(view, "#kind-mapping-panel")
+    assert has_element?(view, "#kind-feature-count", "2")
+    assert has_element?(view, "select[name='filters[kind]'] option[value=unsorted]")
+
+    view
+    |> element("#initiative-filters")
+    |> render_change(%{"filters" => %{"kind" => "break_fix"}})
+
+    assert has_element?(view, "#kind-break_fix-panel")
+    refute has_element?(view, "#kind-feature-panel")
+  end
+
+  test "all kind headers follow Parked in the declared order", %{conn: conn} do
+    rows =
+      Enum.map(~w(break_fix mapping access feature internal), &Map.put(b(&1, "task"), :kind, &1)) ++
+        [b("unknown", "task")]
+
+    Foreman.Beads.Projection.replace("sample", Enum.map_join(rows, "\n", &Jason.encode!/1))
+    {:ok, view, _} = live(conn, "/")
+
+    assert has_element?(
+             view,
+             "#parked-panel + #kind-break_fix-panel + #kind-mapping-panel + #kind-access-panel + #kind-feature-panel + #kind-internal-panel + #kind-unsorted-panel"
+           )
+  end
+
+  test "repo default fills missing kinds without overriding explicit epic kind", %{conn: conn} do
+    Foreman.Repo.query!(
+      "UPDATE board_config SET config = jsonb_set(config, '{repos,0,default_kind}', '\"internal\"')"
+    )
+
+    rows = [
+      Map.put(b("e", "epic"), :kind, "feature"),
+      b("child", "task", [%{depends_on_id: "e", type: "parent-child"}]),
+      b("loose", "task")
+    ]
+
+    Foreman.Beads.Projection.replace("sample", Enum.map_join(rows, "\n", &Jason.encode!/1))
+    data = Foreman.Initiatives.snapshot()
+    assert Enum.map(data.sections, &{&1.kind, &1.count}) == [{"feature", 2}, {"internal", 1}]
+    {:ok, view, _} = live(conn, "/?kind=feature")
+    view |> element("#kind-feature [data-bead=e] button") |> render_click()
+    assert has_element?(view, "#kind-feature [data-bead=child]")
+    refute has_element?(view, "#kind-internal-panel")
+  end
+
+  test "a ticket linked to two epic roots belongs to only one kind section" do
+    rows = [
+      Map.put(b("root1", "epic"), :kind, "feature"),
+      Map.put(b("root2", "epic"), :kind, "mapping"),
+      b("shared", "task", [
+        %{depends_on_id: "root1", type: "parent-child"},
+        %{depends_on_id: "root2", type: "parent-child"}
+      ])
+    ]
+
+    Foreman.Beads.Projection.replace("sample", Enum.map_join(rows, "\n", &Jason.encode!/1))
+    data = Foreman.Initiatives.snapshot()
+    assert Enum.sum(Enum.map(data.sections, & &1.count)) == 3
+
+    assert Enum.count(
+             Enum.flat_map(data.sections, & &1.epics),
+             &Enum.any?(&1.planned, fn b -> b.id == "shared" end)
+           ) == 1
+  end
+
+  test "unresolved discovery and children of closed epics stay visible" do
+    rows = [
+      b("closed", "epic", [], "closed"),
+      b("child", "task", [%{depends_on_id: "closed", type: "parent-child"}]),
+      b("missing", "task", [%{depends_on_id: "absent", type: "discovered-from"}])
+    ]
+
+    Foreman.Beads.Projection.replace("sample", Enum.map_join(rows, "\n", &Jason.encode!/1))
+    data = Foreman.Initiatives.snapshot()
+
+    assert Enum.flat_map(data.sections, &Enum.map(&1.never_started, fn t -> t.id end)) == [
+             "child",
+             "missing"
+           ]
+  end
+
   test "the global coordinator offers state, focus, resume and a separate fresh start", %{
     conn: conn
   } do
@@ -409,13 +516,17 @@ defmodule ForemanWeb.InitiativesLiveTest do
 
     refute has_element?(view, "[data-bead=f]")
     view |> element("[data-bead=e] button") |> render_click()
-    assert has_element?(view, "#epics h3", "Fallout")
+    assert has_element?(view, "#kind-unsorted h3", "Fallout")
     assert has_element?(view, "[data-bead=f]", "bug")
-    assert has_element?(view, "#toggle-unplanned[aria-expanded=false]")
-    view |> element("#toggle-unplanned") |> render_click()
-    refute has_element?(view, "#unplanned [data-bead=o]")
-    view |> element("#toggle-project-sample") |> render_click()
-    assert has_element?(view, "#unplanned [data-bead=o]")
+
+    assert has_element?(
+             view,
+             "#toggle-kind-unsorted-never_started-project-sample[aria-expanded=false]"
+           )
+
+    refute has_element?(view, "#kind-unsorted [data-bead=o]")
+    view |> element("#toggle-kind-unsorted-never_started-project-sample") |> render_click()
+    assert has_element?(view, "#kind-unsorted [data-bead=o]")
   end
 
   test "filtering children retains full progress and reconciliation refreshes stages", %{
@@ -444,10 +555,10 @@ defmodule ForemanWeb.InitiativesLiveTest do
     {:ok, view, _} = live(conn, "/")
     assert has_element?(view, "#drafts [data-bead='draft:next']", "idea")
     assert has_element?(view, "#drafts a[href='/documents/sample?path=docs%2Fnext.md']")
-    assert has_element?(view, "#drafts-panel ~ #epics-panel")
+    assert has_element?(view, "#drafts-panel ~ #kind-unsorted-panel")
     view |> form("#initiative-filters", filters: %{status: "closed"}) |> render_change()
     refute has_element?(view, "#drafts-panel")
-    assert has_element?(view, "[data-bead=e]")
+    refute has_element?(view, "#kind-unsorted-panel")
     view |> form("#initiative-filters", filters: %{status: "", stale: "true"}) |> render_change()
     refute has_element?(view, "[data-bead=e]")
     Foreman.Overlay.apply_event({"sample", "f"}, {:dispatch, %{window: "worker"}})
@@ -509,10 +620,10 @@ defmodule ForemanWeb.InitiativesLiveTest do
 
     assert has_element?(
              view,
-             "#epics-panel + #done-panel + #parked-panel + #standalone-panel + #unplanned-panel"
+             "#parked-panel + #kind-unsorted-panel + #done-panel"
            )
 
-    assert ids(view, "#epics [data-kind=epic]") == ["e", "shipping", "ticketed"]
+    assert ids(view, "#kind-unsorted [data-kind=epic]") == ["e", "shipping", "ticketed"]
     refute has_element?(view, "[data-bead='done.2']")
     refute has_element?(view, "[data-bead=shipped]")
     view |> element("#toggle-done") |> render_click()
@@ -535,15 +646,15 @@ defmodule ForemanWeb.InitiativesLiveTest do
     view |> element("[data-bead=e] button") |> render_click()
     Foreman.Overlay.apply_event({"sample", "e"}, :bead_epic_closed)
     send(view.pid, :reconcile)
-    refute has_element?(view, "#epics [data-bead=e]")
+    refute has_element?(view, "#kind-unsorted [data-bead=e]")
     assert has_element?(view, "#done-count", "1")
     view |> element("#toggle-done") |> render_click()
     assert has_element?(view, "#done [data-bead=e]")
     assert has_element?(view, "#done [data-bead=a]")
     Foreman.Overlay.apply_event({"sample", "e"}, :bead_epic_reopened)
     send(view.pid, :reconcile)
-    assert has_element?(view, "#epics [data-bead=e]")
-    assert has_element?(view, "#epics [data-bead=a]")
+    assert has_element?(view, "#kind-unsorted [data-bead=e]")
+    refute has_element?(view, "#kind-unsorted [data-bead=a]")
     assert has_element?(view, "#done-count", "0")
     refute has_element?(view, "#done [data-bead=e]")
   end
@@ -683,8 +794,8 @@ defmodule ForemanWeb.InitiativesLiveTest do
     )
 
     {:ok, filtered, _} = live(conn, "/?q=Title+excluded")
-    assert has_element?(filtered, "#epics [data-bead=excluded]")
-    refute has_element?(filtered, "#epics [data-bead=e]")
+    assert has_element?(filtered, "#kind-unsorted [data-bead=excluded]")
+    refute has_element?(filtered, "#kind-unsorted [data-bead=e]")
   end
 
   test "curated views default to Open and selection patches while retaining search and project",
@@ -710,7 +821,7 @@ defmodule ForemanWeb.InitiativesLiveTest do
     assert has_element?(view, "[data-bead=f]")
     refute has_element?(view, "[data-bead=a]")
     view |> element("#view-all") |> render_click()
-    assert has_element?(view, "[data-bead=a]")
+    refute has_element?(view, "[data-bead=a]")
   end
 
   test "Filters starts closed, counts only advanced overrides and remembers disclosure independently",
@@ -821,15 +932,14 @@ defmodule ForemanWeb.InitiativesLiveTest do
              )
 
     {:ok, view, _} = live(conn, "/")
-    view |> element("#toggle-unplanned") |> render_click()
-    view |> element("#toggle-project-sample") |> render_click()
+    view |> element("#toggle-kind-unsorted-never_started-project-sample") |> render_click()
 
-    assert ids(view, "#unplanned [data-bead]") ==
+    assert ids(view, "#kind-unsorted [data-bead]") ==
              ~w(c-new d-tie f-earlier b-old a-missing e-missing)
 
     send(view.pid, :reconcile)
 
-    assert ids(view, "#unplanned [data-bead]") ==
+    assert ids(view, "#kind-unsorted [data-bead]") ==
              ~w(c-new d-tie f-earlier b-old a-missing e-missing)
   end
 
@@ -854,26 +964,25 @@ defmodule ForemanWeb.InitiativesLiveTest do
              )
 
     {:ok, view, _} = live(conn, "/")
-    view |> element("#epics [data-bead=e] button") |> render_click()
-    view |> element("#toggle-unplanned") |> render_click()
-    view |> element("#toggle-project-sample") |> render_click()
+    view |> element("#kind-unsorted [data-bead=e] button") |> render_click()
+    view |> element("#toggle-kind-unsorted-never_started-project-sample") |> render_click()
 
     child_date = Calendar.strftime(Date.add(today, -35), "%B %-d, %Y")
     today_date = Calendar.strftime(today, "%B %-d, %Y")
 
     assert has_element?(
              view,
-             "#epics [data-bead=child] time[title='Created #{child_date}']",
+             "#kind-unsorted [data-bead=child] time[title='Created #{child_date}']",
              "5w"
            )
 
     assert has_element?(
              view,
-             "#unplanned [data-bead=orphan] time[title='Created #{today_date}']",
+             "#kind-unsorted [data-bead=orphan] time[title='Created #{today_date}']",
              "today"
            )
 
-    refute has_element?(view, "#unplanned [data-bead=missing] time")
+    refute has_element?(view, "#kind-unsorted [data-bead=missing] time")
   end
 
   test "parentless buckets separate untouched work from active work and exclude closed", %{
@@ -902,19 +1011,14 @@ defmodule ForemanWeb.InitiativesLiveTest do
     assert Enum.map(data.orphans, & &1.id) == ["untouched"]
 
     {:ok, view, _} = live(conn, "/?view=all")
-    assert has_element?(view, "#standalone-panel + #unplanned-panel")
-    assert has_element?(view, "#standalone-count", "6")
-    assert has_element?(view, "#unplanned-count", "1")
-    view |> element("#toggle-unplanned") |> render_click()
-    view |> element("#toggle-project-sample") |> render_click()
-    view |> element("#toggle-standalone") |> render_click()
-    view |> element("#toggle-standalone-project-sample") |> render_click()
-    assert ids(view, "#unplanned [data-bead]") == ["untouched"]
+    assert has_element?(view, "#kind-unsorted-count", "7")
+    view |> element("#toggle-kind-unsorted-never_started-project-sample") |> render_click()
+    view |> element("#toggle-kind-unsorted-in_flight-project-sample") |> render_click()
 
-    assert ids(view, "#standalone [data-bead]") ==
-             ~w(building committed dispatched in_review reported claimed)
+    assert ids(view, "#kind-unsorted [data-bead]") ==
+             ~w(building committed dispatched in_review reported claimed untouched)
 
-    assert has_element?(view, "#standalone [data-bead=committed] time[title][datetime]")
+    assert has_element?(view, "#kind-unsorted [data-bead=committed] time[title][datetime]")
     refute has_element?(view, "[data-bead=closed]")
   end
 
@@ -931,40 +1035,35 @@ defmodule ForemanWeb.InitiativesLiveTest do
     end
 
     {:ok, view, _} = live(conn, "/?view=in-flight")
-    assert has_element?(view, "#standalone-count", "6")
-    assert has_element?(view, "#unplanned-count", "0")
-    view |> element("#toggle-standalone") |> render_click()
-    view |> element("#toggle-standalone-project-sample") |> render_click()
+    assert has_element?(view, "#kind-unsorted-count", "6")
+    refute has_element?(view, "#kind-unsorted-never_started")
+    view |> element("#toggle-kind-unsorted-in_flight-project-sample") |> render_click()
 
-    assert ids(view, "#standalone [data-bead]") ==
+    assert ids(view, "#kind-unsorted [data-bead]") ==
              ~w(building claimed committed dispatched in_review reported)
 
     view |> form("#initiative-filters", filters: %{q: "committed"}) |> render_change()
-    assert ids(view, "#standalone [data-bead]") == ["committed"]
-    assert has_element?(view, "#standalone-count", "1")
+    assert ids(view, "#kind-unsorted [data-bead]") == ["committed"]
+    assert has_element?(view, "#kind-unsorted-count", "1")
   end
 
   test "reconciliation moves dispatched and closed tickets out of their former buckets", %{
     conn: conn
   } do
     {:ok, view, _} = live(conn, "/?view=all")
-    view |> element("#toggle-unplanned") |> render_click()
-    view |> element("#toggle-project-sample") |> render_click()
-    view |> element("#toggle-standalone") |> render_click()
-    assert has_element?(view, "#unplanned [data-bead=o]")
+    view |> element("#toggle-kind-unsorted-never_started-project-sample") |> render_click()
+    assert has_element?(view, "#kind-unsorted [data-bead=o]")
 
     Foreman.Overlay.apply_event({"sample", "o"}, {:dispatch, %{window: "worker"}})
     send(view.pid, :reconcile)
-    refute has_element?(view, "#unplanned [data-bead=o]")
-    assert has_element?(view, "#unplanned-count", "0")
-    assert has_element?(view, "#standalone-count", "1")
-    view |> element("#toggle-standalone-project-sample") |> render_click()
-    assert has_element?(view, "#standalone [data-bead=o]")
+    refute has_element?(view, "#kind-unsorted-never_started")
+    view |> element("#toggle-kind-unsorted-in_flight-project-sample") |> render_click()
+    assert has_element?(view, "#kind-unsorted [data-bead=o]")
 
     Foreman.Beads.Projection.replace("sample", Jason.encode!(b("o", "chore", [], "closed")))
     send(view.pid, :reconcile)
-    refute has_element?(view, "#standalone [data-bead=o]")
-    assert has_element?(view, "#standalone-count", "0")
+    refute has_element?(view, "#kind-unsorted [data-bead=o]")
+    refute has_element?(view, "#kind-unsorted-panel")
   end
 
   test "parked collects epic and parentless work without stale or duplicate buckets", %{
@@ -1010,7 +1109,7 @@ defmodule ForemanWeb.InitiativesLiveTest do
     assert length(Foreman.Initiatives.snapshot(%{"status" => "parked"}).parked) == 2
 
     {:ok, view, _} = live(conn, "/")
-    assert has_element?(view, "#parked-panel + #standalone-panel")
+    assert has_element?(view, "#parked-panel + #kind-unsorted-panel")
     assert has_element?(view, "#parked-count", "2")
     assert has_element?(view, "option[value=parked]", "Parked")
     view |> element("#toggle-parked") |> render_click()
@@ -1019,8 +1118,8 @@ defmodule ForemanWeb.InitiativesLiveTest do
     assert has_element?(view, "#parked [data-bead=p]", "Vendor approval")
     assert has_element?(view, "#parked [data-bead=p]", "e · Title e")
     assert has_element?(view, "#parked [data-bead=p] time[title][datetime]", "3d")
-    view |> element("#epics [data-bead=e] button[phx-click=toggle]") |> render_click()
-    assert has_element?(view, "#epics [data-bead=p]", "Parked")
+    view |> element("#kind-unsorted [data-bead=e] button[phx-click=toggle]") |> render_click()
+    assert has_element?(view, "#kind-unsorted [data-bead=p]", "Parked")
     view |> element("#parked [data-bead=p] a") |> render_click()
     assert has_element?(view, "#ticket-parked-reason", "Vendor approval")
     assert has_element?(view, "#ticket-unpark", "foreman update p --status in_progress")

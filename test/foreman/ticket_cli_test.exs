@@ -81,6 +81,19 @@ defmodule Foreman.TicketCLITest do
     assert ticket.facts["parked_reason"] == nil
   end
 
+  test "new and update accept kind but invalid kinds never write", %{root: root} do
+    ticket = call(root, ["new", "Kinds", "--kind", "feature"])
+    id = ticket["id"]
+    assert ticket["kind"] == "feature"
+    assert call(root, ["update", id, "--kind", "access"])["kind"] == "access"
+    path = Path.join([root, "tickets", id <> ".md"])
+    before = File.read!(path)
+    assert call(root, ["update", id, "--kind", "wrong"], 2)["error"] =~ "kind"
+    assert File.read!(path) == before
+    assert call(root, ["new", "Invalid", "--kind", "wrong"], 2)["error"] =~ "kind"
+    assert length(Path.wildcard(Path.join(root, "tickets/*.md"))) == 1
+  end
+
   test "an empty configured checkout lists tickets without a server", %{root: root} do
     assert call(root, ["ls"]) == []
     assert call(root, ["ready"]) == []

@@ -79,6 +79,7 @@ defmodule Foreman.Initiatives do
           id: raw["id"],
           title: raw["title"],
           type: raw["issue_type"],
+          kind: raw["kind"],
           status: raw["status"],
           created_at: created_at(raw["created_at"] || raw["created"]),
           parked_at: created_at(raw["parked"]),
@@ -106,6 +107,7 @@ defmodule Foreman.Initiatives do
       )
       |> Enum.map(fn link -> %{link | epic: Map.get(epic_aliases, link.epic, link.epic)} end)
 
+    beads = Foreman.Initiatives.Kinds.resolve(beads, config["repos"], links)
     tree = Tree.build(beads, links)
 
     drafts =
@@ -126,7 +128,7 @@ defmodule Foreman.Initiatives do
           planning_session: planning_sessions[{e.repo_key, e.bead_id}]
         }
       end)
-      |> Enum.filter(&matches?(&1, filters))
+      |> Enum.filter(&matches?(&1, Map.delete(filters, "kind")))
       |> Enum.sort_by(&Foreman.Beads.Id.sort_key(&1.key))
 
     parentless =
@@ -144,6 +146,8 @@ defmodule Foreman.Initiatives do
 
     %{
       drafts: drafts,
+      sections: kind_sections(tree, beads, filters),
+      swimlanes: config["board"]["swimlanes"],
       parked:
         beads
         |> Enum.filter(&(&1.status == "parked" and matches?(&1, filters)))
@@ -167,6 +171,87 @@ defmodule Foreman.Initiatives do
       types: beads |> Enum.map(& &1.type) |> Enum.uniq() |> Enum.sort(),
       labels: beads |> Enum.flat_map(& &1.labels) |> Enum.uniq() |> Enum.sort()
     }
+  end
+
+  defp kind_sections(tree, beads, filters) do
+    {active, _} = tree.epics |> open_epics() |> display_ownership(MapSet.new())
+
+    owned = Enum.reduce(active, MapSet.new(), &MapSet.union(&1.members, &2))
+
+    loose =
+      beads
+      |> Enum.reject(
+        &(&1.type == "epic" or &1.status in ["closed", "parked"] or MapSet.member?(owned, &1.key))
+      )
+      |> Enum.sort_by(fn b ->
+        {Foreman.Priority.rank(b.priority), is_nil(b.created_at),
+         b.created_at && -DateTime.to_unix(b.created_at, :microsecond),
+         Foreman.Beads.Id.sort_key(b.key)}
+      end)
+      |> Enum.filter(fn b ->
+        matches?(
+          b,
+          if(standalone?(b), do: filters_for_standalone_in_flight(filters), else: filters)
+        )
+      end)
+
+    active = Enum.filter(active, &epic_matches?(&1, filters))
+    # Preserve trees when a child's explicit kind differs from its display root.
+    for {kind, label} <- Foreman.Initiatives.Kinds.options(),
+        epics = Enum.filter(active, &(&1.effective_kind == kind)),
+        tickets = Enum.filter(loose, &(&1.effective_kind == kind)),
+        epics != [] or tickets != [] do
+      keys =
+        Enum.reduce(epics, MapSet.new(Enum.map(tickets, & &1.key)), &MapSet.union(&1.members, &2))
+
+      count =
+        Enum.count(
+          beads,
+          &(MapSet.member?(keys, &1.key) and &1.status not in ["closed", "parked"])
+        )
+
+      %{
+        kind: kind,
+        label: label,
+        epics: epics,
+        in_flight: Enum.filter(tickets, &standalone?/1),
+        never_started: Enum.reject(tickets, &standalone?/1),
+        count: count
+      }
+    end
+  end
+
+  # Display ownership is single-valued even when imported edges link a ticket
+  # to multiple roots. Tree.build retains the full rollups for progress and Done.
+  defp display_ownership(epics, seen) do
+    Enum.map_reduce(epics, seen, fn epic, seen ->
+      {children, seen} = display_ownership(epic.children, seen)
+      nested = Enum.reduce(children, MapSet.new(), &MapSet.union(&1.members, &2))
+
+      taken? = fn b ->
+        b.status == "closed" or
+          (MapSet.member?(seen, b.key) and not MapSet.member?(nested, b.key))
+      end
+
+      planned = Enum.reject(epic.planned, taken?)
+      seen = Enum.reduce(planned, seen, &MapSet.put(&2, &1.key))
+      fallout = Enum.reject(epic.fallout, taken?)
+      seen = Enum.reduce(fallout, seen, &MapSet.put(&2, &1.key)) |> MapSet.put(epic.key)
+      members = MapSet.new([epic.key | Enum.map(planned ++ fallout, & &1.key)])
+      members = Enum.reduce(children, members, &MapSet.union(&1.members, &2))
+      display = %{epic | planned: planned, fallout: fallout, children: children, members: members}
+      {Map.put(display, :fallout_count, length(epic.fallout)), seen}
+    end)
+  end
+
+  defp open_epics(epics) do
+    Enum.flat_map(epics, fn epic ->
+      children = open_epics(epic.children)
+
+      if epic.status == "closed" or epic.stage in [:done, :shipped],
+        do: children,
+        else: [%{epic | children: children}]
+    end)
   end
 
   defp parked_epics(epics, key) do
@@ -195,6 +280,9 @@ defmodule Foreman.Initiatives do
     Enum.all?(filters, fn
       {"project", value} ->
         value in ["", "all"] or b.repo == value
+
+      {"kind", value} ->
+        value in [nil, "", "all"] or Map.get(b, :effective_kind, "unsorted") == value
 
       {"type", value} ->
         value in ["", "all"] or b.type == value

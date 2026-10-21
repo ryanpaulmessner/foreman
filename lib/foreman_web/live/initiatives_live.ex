@@ -3,6 +3,8 @@ defmodule ForemanWeb.InitiativesLive do
   alias Fluxon.Components.{Badge, Button}
   alias Foreman.Initiatives.{Disclosure, Filters, FilterRestore}
 
+  @kind_streams ~w(break_fix mapping access feature internal unsorted)a
+
   @impl true
   def mount(_, _, socket) do
     if connected?(socket) do
@@ -157,19 +159,22 @@ defmodule ForemanWeb.InitiativesLive do
           ),
         else: []
 
-    rows =
-      Enum.flat_map(
-        active,
-        &epic_rows(&1, socket.assigns.expanded, data.filters, 0, "")
-      )
+    socket =
+      Enum.reduce(@kind_streams, socket, fn kind, socket ->
+        section = Enum.find(data.sections, &(&1.kind == to_string(kind)))
 
-    unplanned = project_rows(data.orphans, socket.assigns.expanded, "unplanned", "")
+        rows =
+          if section,
+            do: kind_rows(section, socket.assigns.expanded, data.filters, data.swimlanes),
+            else: []
 
-    standalone =
-      project_rows(data.standalone, socket.assigns.expanded, "standalone", "standalone-")
+        stream(socket, kind, rows, reset: true)
+      end)
 
     socket
     |> assign(
+      kind_sections: Enum.map(data.sections, &Map.take(&1, [:kind, :label, :count])),
+      kind_streams: @kind_streams,
       coordinator: Foreman.Sessions.coordinator(),
       repos: data.repos,
       columns: data.columns,
@@ -179,20 +184,41 @@ defmodule ForemanWeb.InitiativesLive do
       draft_count: length(drafts),
       epic_count: length(active),
       done_count: length(finished),
-      orphan_count: length(data.orphans),
-      standalone_count: length(data.standalone),
       parked_count: length(data.parked),
       advanced_count: Filters.advanced_count(filters, data.views),
       form: to_form(socket.assigns.filters, as: :filters)
     )
     |> stream(:drafts, Enum.map(drafts, &Map.put(&1, :id, dom_key(&1.key))), reset: true)
-    |> stream(:epics, rows, reset: true)
     |> stream(:done, done_rows, reset: true)
-    |> stream(:unplanned, unplanned, reset: true)
-    |> stream(:standalone, standalone, reset: true)
     |> stream(:parked, project_rows(data.parked, socket.assigns.expanded, "parked", "parked-"),
       reset: true
     )
+  end
+
+  defp kind_rows(section, expanded, filters, swimlanes) do
+    epics =
+      Enum.flat_map(
+        section.epics,
+        &epic_rows(&1, expanded, filters, 0, "")
+      )
+
+    loose =
+      Enum.flat_map([{:in_flight, "In flight"}, {:never_started, "Never started"}], fn {bucket,
+                                                                                        title} ->
+        id = "kind-#{section.kind}-#{bucket}"
+        tickets = Map.fetch!(section, bucket)
+
+        rows =
+          if swimlanes == "project" do
+            project_rows(tickets, Map.put(expanded, id, :expanded), id, id <> "-")
+          else
+            Enum.map(tickets, &ticket_row(&1, 0, id))
+          end
+
+        section_rows(rows, title, id, 0)
+      end)
+
+    epics ++ loose
   end
 
   defp project_rows(tickets, expanded, section, prefix) do
@@ -319,7 +345,7 @@ defmodule ForemanWeb.InitiativesLive do
       <header class="flex items-center justify-between gap-4">
         <h1 class="text-[22px] font-semibold text-foreground">Initiatives</h1>
         <span class="text-xs text-foreground-softer">
-          {@draft_count} drafts · {@epic_count} active · {@done_count} done · {@standalone_count} standalone · {@orphan_count} unplanned
+          {@draft_count} drafts · {@epic_count} active · {@done_count} done
         </span>
       </header>
       <section
@@ -447,6 +473,16 @@ defmodule ForemanWeb.InitiativesLive do
             options={[{"Any", ""} | Enum.map(@types, &{&1, &1})]}
           />
           <.input
+            field={@form[:kind]}
+            type="select"
+            class="bb-filter-control"
+            label="Kind"
+            options={[
+              {"All", ""}
+              | Enum.map(Foreman.Initiatives.Kinds.options(), fn {kind, label} -> {label, kind} end)
+            ]}
+          />
+          <.input
             field={@form[:label]}
             type="select"
             class="bb-filter-control"
@@ -511,13 +547,28 @@ defmodule ForemanWeb.InitiativesLive do
           </div>
         </div>
       </section>
-      <section id="epics-panel" class="bb-initiative-panel overflow-x-auto">
+      <.parentless_section
+        id="parked"
+        title="Parked"
+        count={@parked_count}
+        rows={@streams.parked}
+        expanded={@expanded}
+        uri={@page_uri}
+      />
+      <section
+        :for={section <- @kind_sections}
+        id={"kind-#{section.kind}-panel"}
+        class="bb-initiative-panel overflow-x-auto"
+      >
         <h2 class="bb-section-title">
-          Epics <span class="text-foreground-softer">{@epic_count}</span>
+          {section.label}
+          <span id={"kind-#{section.kind}-count"} class="text-foreground-softer">
+            {section.count}
+          </span>
         </h2>
         <.epic_list
-          id="epics"
-          rows={@streams.epics}
+          id={"kind-#{section.kind}"}
+          rows={Map.fetch!(@streams, Enum.find(@kind_streams, &(to_string(&1) == section.kind)))}
           expanded={@expanded}
           columns={@columns}
           uri={@page_uri}
@@ -547,30 +598,7 @@ defmodule ForemanWeb.InitiativesLive do
           columns={@columns}
         />
       </section>
-      <.parentless_section
-        id="parked"
-        title="Parked"
-        count={@parked_count}
-        rows={@streams.parked}
-        expanded={@expanded}
-        uri={@page_uri}
-      />
-      <.parentless_section
-        id="standalone"
-        title="Standalone work"
-        count={@standalone_count}
-        rows={@streams.standalone}
-        expanded={@expanded}
-        uri={@page_uri}
-      />
-      <.parentless_section
-        id="unplanned"
-        title="Unplanned"
-        count={@orphan_count}
-        rows={@streams.unplanned}
-        expanded={@expanded}
-        uri={@page_uri}
-      />
+
       <ForemanWeb.TicketDetail.sheet
         ticket={@ticket}
         state={@sheet_state}
@@ -746,7 +774,7 @@ defmodule ForemanWeb.InitiativesLive do
                 >
                 </span>
               </div>
-              <span class="text-xs">{length(row.fallout)}</span>
+              <span class="text-xs">{Map.get(row, :fallout_count, length(row.fallout))}</span>
               <span
                 class="text-xs text-foreground-softer"
                 data-cr-count={row.cr_count}
@@ -755,6 +783,22 @@ defmodule ForemanWeb.InitiativesLive do
                 {row.cr_count}
               </span>
             </div>
+          <% :project -> %>
+            <button
+              id={"toggle-" <> row.id}
+              class="flex w-full items-center gap-3 border-t border-base px-5 py-3 text-left"
+              phx-click="toggle"
+              phx-value-id={row.id}
+              aria-expanded={to_string(expanded?(@expanded, row.id))}
+            >
+              <.icon
+                name={
+                  if expanded?(@expanded, row.id), do: "hero-chevron-down", else: "hero-chevron-right"
+                }
+                class="size-3"
+              />
+              {row.repo}<span class="text-xs text-foreground-softer">{row.count}</span>
+            </button>
           <% :section -> %>
             <h3 class="bb-section-label" style={"padding-left: #{24 + row.depth * 16}px"}>
               {row.title}

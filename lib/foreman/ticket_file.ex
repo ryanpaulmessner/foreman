@@ -1,10 +1,11 @@
 defmodule Foreman.TicketFile do
   @moduledoc "Shared ticket Markdown codec. String-keyed facts and an opaque Markdown body."
-  @keys ~w(id title type status priority parent blocked_by related supersedes discovered_from labels created closed close_reason parked_reason parked)
+  @keys ~w(id title type status priority parent blocked_by related supersedes discovered_from labels created closed close_reason parked_reason parked kind)
   @lists ~w(blocked_by related supersedes labels)
   @types ~w(epic feature task bug decision chore)
   @statuses ~w(open in_progress closed deferred parked)
 
+  def kinds, do: ~w(break_fix mapping access feature internal)
   def keys, do: @keys
   def types, do: @types
   def statuses, do: @statuses
@@ -28,7 +29,7 @@ defmodule Foreman.TicketFile do
 
   def validate(facts) do
     unknown = Map.keys(facts) -- @keys
-    missing = (@keys -- ~w(supersedes parked_reason parked)) -- Map.keys(facts)
+    missing = (@keys -- ~w(supersedes parked_reason parked kind)) -- Map.keys(facts)
 
     cond do
       unknown != [] ->
@@ -48,6 +49,9 @@ defmodule Foreman.TicketFile do
 
       facts["status"] not in @statuses ->
         {:error, "invalid status"}
+
+      not is_nil(facts["kind"]) and facts["kind"] not in kinds() ->
+        {:error, "invalid kind"}
 
       facts["priority"] not in 0..4 ->
         {:error, "priority must be 0..4"}
@@ -94,7 +98,7 @@ defmodule Foreman.TicketFile do
 
   def print(%{facts: facts, body: body}) do
     facts = Map.put_new(facts, "supersedes", [])
-    keys = Enum.reject(@keys, &(&1 in ~w(parked_reason parked) and is_nil(facts[&1])))
+    keys = Enum.reject(@keys, &(&1 in ~w(parked_reason parked kind) and is_nil(facts[&1])))
     header = Enum.map_join(keys, "\n", fn key -> "#{key}: #{scalar(key, facts[key])}" end)
 
     "---\n" <>

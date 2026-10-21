@@ -5,6 +5,7 @@ defmodule Foreman.Initiatives.Filters do
     choices = %{
       "project" => Enum.map(options.repos, & &1["key"]),
       "type" => options.types,
+      "kind" => ["all", "unsorted" | Foreman.TicketFile.kinds()],
       "label" => options.labels,
       "status" => ~w(all open closed in_progress blocked deferred parked),
       "stale" => ["true", "false"]
@@ -61,6 +62,7 @@ defmodule Foreman.Initiatives.Filters do
   def advanced_count(filters, views) do
     preset = Enum.find(views, %{}, &(&1["key"] == filters["view"]))
     count = Enum.count(~w(type label), &(filters[&1] not in [nil, ""]))
+    count = count + if(filters["kind"] in [nil, "", "all"], do: 0, else: 1)
 
     status_override? =
       filters["status"] not in [nil, "", "all"] or

@@ -62,13 +62,12 @@ defmodule ForemanWeb.PriorityLiveTest do
     ])
 
     {:ok, view, _} = live(conn, "/")
-    view |> element("#toggle-unplanned") |> render_click()
-    view |> element("#toggle-project-sample") |> render_click()
+    view |> element("#toggle-kind-unsorted-never_started-project-sample") |> render_click()
 
-    assert ids(view, "#unplanned [data-bead]") == ~w(p0 p1 p2-new p2-old none)
-    assert has_element?(view, "#unplanned [data-bead=p0] [data-priority='0']", "P0")
-    assert has_element?(view, "#unplanned [data-bead=p2-old] [data-priority='2']", "P2")
-    refute has_element?(view, "#unplanned [data-bead=none] [data-priority]")
+    assert ids(view, "#kind-unsorted [data-bead]") == ~w(p0 p1 p2-new p2-old none)
+    assert has_element?(view, "#kind-unsorted [data-bead=p0] [data-priority='0']", "P0")
+    assert has_element?(view, "#kind-unsorted [data-bead=p2-old] [data-priority='2']", "P2")
+    refute has_element?(view, "#kind-unsorted [data-bead=none] [data-priority]")
   end
 
   test "epics sort by their own priority and children do not inherit it", %{conn: conn} do
@@ -81,12 +80,12 @@ defmodule ForemanWeb.PriorityLiveTest do
     ])
 
     {:ok, view, _} = live(conn, "/")
-    assert ids(view, "#epics > [data-kind=epic]") == ~w(e2 e1)
-    assert has_element?(view, "#epics [data-bead=e2] [data-priority='0']")
+    assert ids(view, "#kind-unsorted > [data-kind=epic]") == ~w(e2 e1)
+    assert has_element?(view, "#kind-unsorted [data-bead=e2] [data-priority='0']")
 
-    view |> element("#epics [data-bead=e1] button") |> render_click()
-    assert ids(view, "#epics [data-kind=ticket]") == ~w(e1.2 e1.1 e1.3)
-    refute has_element?(view, "#epics [data-bead='e1.3'] [data-priority]")
+    view |> element("#kind-unsorted [data-bead=e1] button") |> render_click()
+    assert ids(view, "#kind-unsorted [data-kind=ticket]") == ~w(e1.2 e1.1 e1.3)
+    refute has_element?(view, "#kind-unsorted [data-bead='e1.3'] [data-priority]")
 
     {:ok, epic, _} = live(conn, "/epics/sample/e1")
     assert has_element?(epic, "#epic-priority", "P3")
@@ -110,10 +109,9 @@ defmodule ForemanWeb.PriorityLiveTest do
     assert has_element?(view, "#ticket-priority-changed", "Changed on board")
     assert has_element?(view, "#ticket-priority-changed", "file P2")
 
-    view |> element("#toggle-unplanned") |> render_click()
-    view |> element("#toggle-project-sample") |> render_click()
-    assert ids(view, "#unplanned [data-bead]") == ~w(t u)
-    assert has_element?(view, "#unplanned [data-bead=t] [data-priority='1']")
+    view |> element("#toggle-kind-unsorted-never_started-project-sample") |> render_click()
+    assert ids(view, "#kind-unsorted [data-bead]") == ~w(t u)
+    assert has_element?(view, "#kind-unsorted [data-bead=t] [data-priority='1']")
 
     # The next file sync carrying the same value clears "changed on board".
     project([b("t", "task", 1), b("u", "task", 3)])

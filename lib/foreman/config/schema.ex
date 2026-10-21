@@ -40,6 +40,7 @@ defmodule Foreman.Config.Schema do
             "code_path" => :path,
             "prefix" => :key,
             "tickets" => {:one_of, ~w(files beads)},
+            "default_kind" => {:one_of, Foreman.TicketFile.kinds()},
             "github" => :github,
             "forge" => {:one_of, ~w(github none)},
             "merge_policy" => {:one_of, ~w(board human)},

@@ -105,6 +105,7 @@ defmodule Foreman.TicketFiles do
       "id" => facts["id"],
       "title" => facts["title"],
       "issue_type" => facts["type"],
+      "kind" => facts["kind"],
       "status" => facts["status"],
       "priority" => facts["priority"],
       "labels" => facts["labels"],

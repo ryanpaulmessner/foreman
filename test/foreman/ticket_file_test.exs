@@ -86,6 +86,27 @@ defmodule Foreman.TicketFileTest do
     assert TicketFile.print(legacy) == canonical()
   end
 
+  test "kind is optional and round trips only when set" do
+    assert {:ok, legacy} = TicketFile.parse(canonical())
+    refute TicketFile.print(legacy) =~ "kind:"
+
+    for kind <- ~w(break_fix mapping access feature internal) do
+      text =
+        String.replace(canonical(), "close_reason: null\n", "close_reason: null\nkind: #{kind}\n")
+
+      assert {:ok, ticket} = TicketFile.parse(text)
+      assert ticket.facts["kind"] == kind
+      assert TicketFile.print(ticket) == text
+      assert {[raw], []} = Foreman.TicketFiles.decode(%{"bb-abc.1.md" => {:ok, text}}, [])
+      assert raw["kind"] == kind
+    end
+
+    assert {:error, _} =
+             TicketFile.parse(
+               String.replace(canonical(), "type: task", "type: task\nkind: unknown")
+             )
+  end
+
   test "parked requires a reason and a date; the fields must be valid" do
     status = String.replace(canonical(), "status: open", "status: parked")
     assert {:error, reason} = TicketFile.parse(status)
