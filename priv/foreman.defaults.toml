@@ -28,7 +28,7 @@ collapsed = true
 [[views]]
 key = "open"
 title = "Open"
-statuses = ["open", "in_progress", "blocked", "deferred"]
+statuses = ["open", "in_progress", "blocked", "deferred", "parked"]
 
 [[views]]
 key = "in-flight"

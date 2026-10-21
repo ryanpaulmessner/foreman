@@ -14,7 +14,7 @@ defmodule Foreman.ConfigTest do
   test "shipped views are ordered with Open first" do
     assert {:ok, config} = parse("")
     assert Enum.map(config["views"] || [], & &1["key"]) == ~w(open in-flight stale all)
-    assert hd(config["views"])["statuses"] == ~w(open in_progress blocked deferred)
+    assert hd(config["views"])["statuses"] == ~w(open in_progress blocked deferred parked)
   end
 
   test "curated views replace defaults in order and rejected reloads retain the last good set" do

@@ -35,6 +35,52 @@ defmodule Foreman.TicketCLITest do
     Jason.decode!(output)
   end
 
+  test "parking requires a reason, persists the date and clears both on start or reopen", %{
+    root: root
+  } do
+    id = call(root, ["new", "Wait for IT"])["id"]
+    path = Path.join([root, "tickets", id <> ".md"])
+    before = File.read!(path)
+    assert call(root, ["update", id, "--status", "parked"], 2)["error"] =~ "reason"
+    assert File.read!(path) == before
+
+    assert call(root, ["update", id, "--status", "parked", "--reason", "  "], 2)["error"] =~
+             "reason"
+
+    assert File.read!(path) == before
+
+    for destination <- ["open", "in_progress", "deferred", "closed"] do
+      parked = call(root, ["update", id, "--status", "parked", "--reason", "IT: VPN"])
+      assert parked["status"] == "parked"
+      assert {:ok, ticket} = Foreman.TicketFile.parse(File.read!(path))
+      assert ticket.facts["parked_reason"] == "IT: VPN"
+      assert ticket.facts["parked"] == Date.to_iso8601(Date.utc_today())
+      call(root, ["update", id, "--status", destination])
+      assert {:ok, ticket} = Foreman.TicketFile.parse(File.read!(path))
+      assert ticket.facts["parked_reason"] == nil
+      assert ticket.facts["parked"] == nil
+    end
+  end
+
+  test "editing a parked reason retains its age; reopen clears parking", %{root: root} do
+    id = call(root, ["new", "Waiting"])["id"]
+    call(root, ["update", id, "--status", "parked", "--reason", "IT"])
+    path = Path.join([root, "tickets", id <> ".md"])
+
+    File.write!(
+      path,
+      String.replace(File.read!(path), "parked: #{Date.utc_today()}", "parked: 2020-01-01")
+    )
+
+    updated = call(root, ["update", id, "--status", "parked", "--reason", "Vendor"])
+    assert updated["parked"] == "2020-01-01"
+    assert updated["parked_reason"] == "Vendor"
+    call(root, ["reopen", id])
+    assert {:ok, ticket} = Foreman.TicketFile.parse(File.read!(path))
+    assert ticket.facts["parked"] == nil
+    assert ticket.facts["parked_reason"] == nil
+  end
+
   test "an empty configured checkout lists tickets without a server", %{root: root} do
     assert call(root, ["ls"]) == []
     assert call(root, ["ready"]) == []

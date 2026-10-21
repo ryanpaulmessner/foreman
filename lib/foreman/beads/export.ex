@@ -13,6 +13,7 @@ defmodule Foreman.Beads.Export do
     "in_progress" => :in_progress,
     "blocked" => :blocked,
     "deferred" => :deferred,
+    "parked" => :parked,
     "closed" => :closed,
     "pinned" => :pinned,
     "hooked" => :hooked

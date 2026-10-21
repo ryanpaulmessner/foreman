@@ -181,6 +181,7 @@ defmodule ForemanWeb.InitiativesLive do
       done_count: length(finished),
       orphan_count: length(data.orphans),
       standalone_count: length(data.standalone),
+      parked_count: length(data.parked),
       advanced_count: Filters.advanced_count(filters, data.views),
       form: to_form(socket.assigns.filters, as: :filters)
     )
@@ -189,6 +190,9 @@ defmodule ForemanWeb.InitiativesLive do
     |> stream(:done, done_rows, reset: true)
     |> stream(:unplanned, unplanned, reset: true)
     |> stream(:standalone, standalone, reset: true)
+    |> stream(:parked, project_rows(data.parked, socket.assigns.expanded, "parked", "parked-"),
+      reset: true
+    )
   end
 
   defp project_rows(tickets, expanded, section, prefix) do
@@ -431,7 +435,8 @@ defmodule ForemanWeb.InitiativesLive do
               {"Closed", "closed"},
               {"In progress", "in_progress"},
               {"Blocked", "blocked"},
-              {"Deferred", "deferred"}
+              {"Deferred", "deferred"},
+              {"Parked", "parked"}
             ]}
           />
           <.input
@@ -542,6 +547,14 @@ defmodule ForemanWeb.InitiativesLive do
           columns={@columns}
         />
       </section>
+      <.parentless_section
+        id="parked"
+        title="Parked"
+        count={@parked_count}
+        rows={@streams.parked}
+        expanded={@expanded}
+        uri={@page_uri}
+      />
       <.parentless_section
         id="standalone"
         title="Standalone work"
@@ -767,7 +780,24 @@ defmodule ForemanWeb.InitiativesLive do
       <span class="bb-ticket-id shrink-0 truncate font-mono text-xs text-foreground-softer md:w-28">
         {@row.bead_id}
       </span>
-      <span class="bb-ticket-title min-w-0 flex-1 text-sm">{@row.title}</span>
+      <span class="bb-ticket-title min-w-0 flex-1 text-sm">
+        {@row.title}
+        <span
+          :if={Map.has_key?(@row, :parked_epics)}
+          class="block text-xs text-foreground-softer break-words"
+        >
+          <span :for={epic <- @row.parked_epics} class="block">{epic.id} · {epic.title}</span>
+          {@row.parked_reason}
+          <time
+            :if={@row.parked_at}
+            datetime={DateTime.to_iso8601(@row.parked_at)}
+            title={"Parked " <> Calendar.strftime(@row.parked_at, "%B %-d, %Y")}
+          >
+            · {ForemanWeb.TicketAge.format(DateTime.to_date(@row.parked_at))}
+          </time>
+        </span>
+      </span>
+      <Badge.badge :if={@row.status == "parked"}>Parked</Badge.badge>
       <ForemanWeb.TicketDetail.priority_badge
         priority={Map.get(@row, :priority)}
         changed={Map.get(@row, :priority_changed, false)}

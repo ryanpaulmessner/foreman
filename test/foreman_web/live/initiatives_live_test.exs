@@ -506,7 +506,12 @@ defmodule ForemanWeb.InitiativesLiveTest do
     {:ok, view, _} = live(conn, "/?view=all")
     assert has_element?(view, "#toggle-done[aria-expanded=false]")
     assert has_element?(view, "#done-count", "3")
-    assert has_element?(view, "#epics-panel + #done-panel + #standalone-panel + #unplanned-panel")
+
+    assert has_element?(
+             view,
+             "#epics-panel + #done-panel + #parked-panel + #standalone-panel + #unplanned-panel"
+           )
+
     assert ids(view, "#epics [data-kind=epic]") == ["e", "shipping", "ticketed"]
     refute has_element?(view, "[data-bead='done.2']")
     refute has_element?(view, "[data-bead=shipped]")
@@ -960,6 +965,65 @@ defmodule ForemanWeb.InitiativesLiveTest do
     send(view.pid, :reconcile)
     refute has_element?(view, "#standalone [data-bead=o]")
     assert has_element?(view, "#standalone-count", "0")
+  end
+
+  test "parked collects epic and parentless work without stale or duplicate buckets", %{
+    conn: conn
+  } do
+    rows = [
+      b("e", "epic"),
+      Map.merge(
+        b("p", "task", [%{depends_on_id: "e", type: "parent-child"}], "parked"),
+        %{
+          parked: Date.to_iso8601(Date.add(Date.utc_today(), -3)),
+          parked_reason: "Vendor approval"
+        }
+      ),
+      Map.merge(b("o", "task", [], "parked"), %{
+        parked: Date.to_iso8601(Date.add(Date.utc_today(), -1)),
+        parked_reason: "IT access"
+      })
+    ]
+
+    Foreman.Beads.Projection.replace("sample", Enum.map_join(rows, "\n", &Jason.encode!/1))
+
+    Foreman.Repo.insert_all(
+      "tickets",
+      [
+        %{
+          repo_key: "sample",
+          bead_id: "o",
+          stage: "building",
+          stage_changed_at: DateTime.utc_now()
+        }
+      ],
+      on_conflict: {:replace, [:stage]},
+      conflict_target: [:repo_key, :bead_id]
+    )
+
+    snapshot = Foreman.Initiatives.snapshot()
+    assert Enum.map(snapshot.parked, & &1.id) == ["p", "o"]
+    assert snapshot.orphans == []
+    assert snapshot.standalone == []
+    refute Enum.any?(snapshot.parked, & &1.stale)
+    assert Foreman.Initiatives.snapshot(%{"stale" => "true"}).parked == []
+    assert length(Foreman.Initiatives.snapshot(%{"status" => "parked"}).parked) == 2
+
+    {:ok, view, _} = live(conn, "/")
+    assert has_element?(view, "#parked-panel + #standalone-panel")
+    assert has_element?(view, "#parked-count", "2")
+    assert has_element?(view, "option[value=parked]", "Parked")
+    view |> element("#toggle-parked") |> render_click()
+    view |> element("#toggle-parked-project-sample") |> render_click()
+    assert ids(view, "#parked [data-bead]") == ["p", "o"]
+    assert has_element?(view, "#parked [data-bead=p]", "Vendor approval")
+    assert has_element?(view, "#parked [data-bead=p]", "e · Title e")
+    assert has_element?(view, "#parked [data-bead=p] time[title][datetime]", "3d")
+    view |> element("#epics [data-bead=e] button[phx-click=toggle]") |> render_click()
+    assert has_element?(view, "#epics [data-bead=p]", "Parked")
+    view |> element("#parked [data-bead=p] a") |> render_click()
+    assert has_element?(view, "#ticket-parked-reason", "Vendor approval")
+    assert has_element?(view, "#ticket-unpark", "foreman update p --status in_progress")
   end
 
   defp ids(view, selector),

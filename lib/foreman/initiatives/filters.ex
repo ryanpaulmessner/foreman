@@ -6,7 +6,7 @@ defmodule Foreman.Initiatives.Filters do
       "project" => Enum.map(options.repos, & &1["key"]),
       "type" => options.types,
       "label" => options.labels,
-      "status" => ~w(all open closed in_progress blocked deferred),
+      "status" => ~w(all open closed in_progress blocked deferred parked),
       "stale" => ["true", "false"]
     }
 

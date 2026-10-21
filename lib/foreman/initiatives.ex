@@ -81,6 +81,8 @@ defmodule Foreman.Initiatives do
           type: raw["issue_type"],
           status: raw["status"],
           created_at: created_at(raw["created_at"] || raw["created"]),
+          parked_at: created_at(raw["parked"]),
+          parked_reason: raw["parked_reason"],
           labels: raw["labels"] || [],
           stage: stage,
           spec_link: epic && epic.spec_link,
@@ -129,7 +131,7 @@ defmodule Foreman.Initiatives do
 
     parentless =
       tree.orphans
-      |> Enum.reject(&(&1.status == "closed"))
+      |> Enum.reject(&(&1.status in ["closed", "parked"]))
       |> Enum.sort_by(fn ticket ->
         age =
           case ticket.created_at do
@@ -142,6 +144,13 @@ defmodule Foreman.Initiatives do
 
     %{
       drafts: drafts,
+      parked:
+        beads
+        |> Enum.filter(&(&1.status == "parked" and matches?(&1, filters)))
+        |> Enum.map(&Map.put(&1, :parked_epics, parked_epics(tree.epics, &1.key)))
+        |> Enum.sort_by(
+          &{is_nil(&1.parked_at), &1.parked_at && DateTime.to_unix(&1.parked_at), &1.key}
+        ),
       epics: Enum.filter(tree.epics, &epic_matches?(&1, filters)),
       orphans:
         parentless
@@ -158,6 +167,18 @@ defmodule Foreman.Initiatives do
       types: beads |> Enum.map(& &1.type) |> Enum.uniq() |> Enum.sort(),
       labels: beads |> Enum.flat_map(& &1.labels) |> Enum.uniq() |> Enum.sort()
     }
+  end
+
+  defp parked_epics(epics, key) do
+    Enum.flat_map(epics, fn epic ->
+      children = parked_epics(epic.children, key)
+
+      cond do
+        children != [] -> children
+        MapSet.member?(epic.members, key) and epic.key != key -> [Map.take(epic, [:id, :title])]
+        true -> []
+      end
+    end)
   end
 
   defp filters_for_standalone_in_flight(%{"view" => "in-flight"} = filters),
@@ -244,6 +265,8 @@ defmodule Foreman.Initiatives do
 
   defp stale?(raw, stage, last, threshold) do
     active = stage in [:dispatched, :building] or raw["status"] == "in_progress"
-    active and (is_nil(last) or NaiveDateTime.diff(NaiveDateTime.utc_now(), last) > threshold)
+
+    raw["status"] != "parked" and active and
+      (is_nil(last) or NaiveDateTime.diff(NaiveDateTime.utc_now(), last) > threshold)
   end
 end

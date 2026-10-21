@@ -31,6 +31,21 @@ defmodule Foreman.TicketFilesTest do
     })
   end
 
+  test "parked file facts reach the board projection unchanged" do
+    parked =
+      text("Wait")
+      |> String.replace("status: open", "status: parked")
+      |> String.replace(
+        "close_reason: null",
+        "close_reason: null\nparked_reason: Vendor approval\nparked: 2026-10-19"
+      )
+
+    assert {[raw], []} = TicketFiles.decode(%{"demo-abc.md" => {:ok, parked}}, [])
+    assert raw["status"] == "parked"
+    assert raw["parked_reason"] == "Vendor approval"
+    assert raw["parked"] == "2026-10-19"
+  end
+
   test "malformed files retain their last good row and name the error", %{root: root, path: path} do
     File.write!(path, text("Good"))
     {:ok, snapshot} = TicketFiles.snapshot(root)

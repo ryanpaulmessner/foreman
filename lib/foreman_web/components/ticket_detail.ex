@@ -278,6 +278,15 @@ defmodule ForemanWeb.TicketDetail do
         preview={@ticket.preview}
         terminal={@ticket.stage in [:merged, :done, :abandoned, "merged", "done", "abandoned"]}
       />
+      <div :if={@ticket.raw["status"] == "parked"} class="space-y-2">
+        <p id="ticket-parked-reason" class="text-sm break-words">{@ticket.raw["parked_reason"]}</p>
+        <div id="ticket-unpark" class="text-sm">
+          <span class="font-medium">Unpark</span>
+          <code class="block overflow-x-auto rounded border border-base px-3 py-2 text-xs">
+            foreman update {@ticket.id} --status in_progress
+          </code>
+        </div>
+      </div>
       <div id="ticket-actions" class="flex flex-wrap gap-2">
         <.priority_controls
           :if={@ticket.priority}
@@ -620,7 +629,7 @@ defmodule ForemanWeb.TicketDetail do
     do:
       raw
       |> Map.drop(
-        ~w(id title status issue_type priority description acceptance_criteria acceptance_progress design notes dependencies)
+        ~w(id title status issue_type priority description acceptance_criteria acceptance_progress design notes dependencies parked_reason parked)
       )
       |> Enum.reject(fn {_key, value} -> value in [nil, [], ""] end)
       |> Enum.sort()

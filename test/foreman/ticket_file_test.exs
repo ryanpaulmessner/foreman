@@ -68,6 +68,42 @@ defmodule Foreman.TicketFileTest do
     assert legacy.facts["supersedes"] == []
   end
 
+  test "a parked ticket carries its reason and park date; older files without them stay valid" do
+    parked =
+      canonical()
+      |> String.replace("status: open", "status: parked")
+      |> String.replace(
+        "close_reason: null\n",
+        "close_reason: null\nparked_reason: \"IT: VPN access\"\nparked: 2026-10-19\n"
+      )
+
+    assert {:ok, ticket} = TicketFile.parse(parked)
+    assert ticket.facts["parked_reason"] == "IT: VPN access"
+    assert ticket.facts["parked"] == "2026-10-19"
+    assert TicketFile.print(ticket) == parked
+
+    assert {:ok, legacy} = TicketFile.parse(canonical())
+    assert TicketFile.print(legacy) == canonical()
+  end
+
+  test "parked requires a reason and a date; the fields must be valid" do
+    status = String.replace(canonical(), "status: open", "status: parked")
+    assert {:error, reason} = TicketFile.parse(status)
+    assert reason =~ "parked_reason"
+
+    no_date =
+      String.replace(status, "close_reason: null\n", "close_reason: null\nparked_reason: \"x\"\n")
+
+    assert {:error, reason} = TicketFile.parse(no_date)
+    assert reason =~ "parked"
+
+    bad_date =
+      String.replace(no_date, "parked_reason: \"x\"\n", "parked_reason: \"x\"\nparked: soon\n")
+
+    assert {:error, reason} = TicketFile.parse(bad_date)
+    assert reason =~ "parked"
+  end
+
   test "supersedes rejects invalid ids and non-list values" do
     for value <- ["[invalid]", "null", "false", "bb-old"] do
       assert {:error, "supersedes must be a list of ids"} =
