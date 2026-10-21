@@ -9,6 +9,7 @@ defmodule ForemanWeb.NeedsYouLive do
     {:ok,
      socket
      |> assign(:pending_ids, MapSet.new())
+     |> assign(:pending_versions, %{})
      |> assign(:pending_headings, MapSet.new())
      |> assign(panel: Foreman.CardPanel.__fsm__(:initial), panel_doc: nil, card_repos: [])
      |> stream_configure(:pending, dom_id: &("request-" <> &1.id))
@@ -128,6 +129,15 @@ defmodule ForemanWeb.NeedsYouLive do
     end
   end
 
+  def resolve(%{"id" => id, "action" => "card-question", "card_question" => %{"text" => text}}) do
+    case Foreman.CardMessages.ask(id, text) do
+      {:ok, message} -> {:ok, message}
+      {:error, "refused in preview"} -> question_result(id, {:error, :tmux_unavailable}, text)
+      {:error, :source_unknown} -> question_result(id, {:error, :window_gone}, text)
+      error -> question_result(id, error, text)
+    end
+  end
+
   def resolve(%{"id" => id, "action" => "continue"}), do: Foreman.SessionWaiting.continue(id)
 
   def resolve(%{"id" => id, "action" => "open"}),
@@ -155,6 +165,13 @@ defmodule ForemanWeb.NeedsYouLive do
   end
 
   def resolve(_), do: {:error, :invalid_action}
+
+  defp question_result(id, result, text) do
+    case card(id, result) do
+      {:card, ^id, state} -> {:card, id, {:question, {state, text}}}
+      error -> error
+    end
+  end
 
   # Session results the card explains itself; anything else is "Request not updated".
   defp card(id, result) do
@@ -184,10 +201,34 @@ defmodule ForemanWeb.NeedsYouLive do
   def item(request, card \\ Foreman.WaitingCard.__fsm__(:initial), heading \\ false)
 
   def item(request, {:focus, state}, heading),
-    do: %{id: request.id, request: request, card: :ready, focus: state, heading: heading}
+    do: %{
+      id: request.id,
+      request: request,
+      card: :ready,
+      focus: state,
+      question: :ready,
+      heading: heading
+    }
+
+  def item(request, {:question, state}, heading),
+    do: %{
+      id: request.id,
+      request: request,
+      card: :ready,
+      focus: :ready,
+      question: state,
+      heading: heading
+    }
 
   def item(request, card, heading),
-    do: %{id: request.id, request: request, card: card, focus: :ready, heading: heading}
+    do: %{
+      id: request.id,
+      request: request,
+      card: card,
+      focus: :ready,
+      question: :ready,
+      heading: heading
+    }
 
   def grouped(pending) do
     keys = pending |> Enum.map(&{&1.repo_key, &1.bead_id}) |> Enum.uniq()
@@ -237,6 +278,7 @@ defmodule ForemanWeb.NeedsYouLive do
     socket = assign(socket, :card_repos, Foreman.CardText.repos())
     previous = socket.assigns.pending_ids
     items = grouped(pending)
+    versions = Foreman.CardMessages.versions(MapSet.to_list(ids))
     headings = items |> Enum.filter(& &1.heading) |> MapSet.new(& &1.id)
 
     # Pending facts are immutable. Leave existing cards mounted so reconciliation
@@ -251,13 +293,15 @@ defmodule ForemanWeb.NeedsYouLive do
       |> Enum.with_index()
       |> Enum.reduce(socket, fn {item, index}, socket ->
         if MapSet.member?(previous, item.id) and
-             MapSet.member?(socket.assigns.pending_headings, item.id) == item.heading,
+             MapSet.member?(socket.assigns.pending_headings, item.id) == item.heading and
+             socket.assigns.pending_versions[item.id] == versions[item.id],
            do: socket,
            else: stream_insert(socket, :pending, item, at: index)
       end)
 
     socket
     |> assign(:pending_ids, ids)
+    |> assign(:pending_versions, versions)
     |> assign(:pending_headings, headings)
     |> ForemanWeb.RequestCount.refresh()
     |> stream(:recent, Requests.recent(), reset: true)
@@ -299,6 +343,7 @@ defmodule ForemanWeb.NeedsYouLive do
               id={id}
               request={item.request}
               card={item.card}
+              question={item.question}
               focus={item.focus}
               heading={item.heading}
               repos={@card_repos}
@@ -398,6 +443,7 @@ defmodule ForemanWeb.NeedsYouLive do
   attr :prefix, :string, default: ""
   attr :event, :string, default: "resolve"
   attr :card, :atom, default: :ready
+  attr :question, :any, default: :ready
   attr :focus, :atom, default: :ready
   attr :repos, :list, default: nil
 
@@ -422,6 +468,15 @@ defmodule ForemanWeb.NeedsYouLive do
         card={@card}
         focus={@focus}
         heading={@heading}
+        repos={@repos}
+      />
+      <.live_component
+        module={ForemanWeb.CardConversation}
+        id={@prefix <> "card-conversation-" <> @request.id}
+        request={@request}
+        prefix={@prefix}
+        event={@event}
+        card={@question}
         repos={@repos}
       />
     </article>

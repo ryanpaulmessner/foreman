@@ -49,6 +49,13 @@ defmodule ForemanWeb.RequestCard do
       <p :if={@request.outcome["reason"]} class="text-foreground-softer">
         {String.replace(@request.outcome["reason"], "_", " ")}
       </p>
+      <.live_component
+        module={ForemanWeb.CardConversation}
+        id={@id <> "-conversation"}
+        request={@request}
+        prefix={@id <> "-"}
+        repos={@repos}
+      />
     </article>
     """
   end

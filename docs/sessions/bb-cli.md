@@ -144,6 +144,38 @@ one request. Answers and declines are browser actions, not agent command verbs.
 Withdrawal uses `action: "withdraw"`, `id: <request-uuid>`, `reason`, `actor`, and `session`,
 plus a fresh envelope `request_id` for idempotent delivery.
 
+## Card questions (fm-esh)
+
+Ryan can use **Ask about this** on a pending card. The question goes to the registered
+session as `[card question <request-id>] <text>`. A question does not answer the request.
+Reply in the same card with either command:
+
+```sh
+foreman card-reply <request-id> --text "The check prevents a stale merge."
+foreman card-reply <request-id> --body-file explanation.md
+```
+
+Use exactly one body option. Replies accept nonblank UTF-8 Markdown up to 20,000 bytes.
+The author comes from `FOREMAN_ACTOR` and `FOREMAN_SESSION`, or the usual identity flags.
+Unknown requests return `not_found`. Only pending requests accept messages; all other
+states return `request_finished`. The thread remains visible in Recent outcomes.
+
+The command envelope uses `action: "card_reply"`, `id: <request-uuid>`, `body`, `actor`,
+and `session`, plus a fresh `request_id` for idempotent delivery. Body bytes travel in
+the envelope. Replay does not read the file again. Success returns the message `id`
+and the card's `request_id`; `--json` prints these fields. An offline warning is not
+confirmation that a reply was stored.
+
+Card questions accept up to 1,900 bytes. Delivery uses the existing guarded tmux
+prompt writer. Claude needs an empty idle prompt. Pi uses pane input and needs an
+empty editor in a running Pi process. No relay files are written. An unknown source,
+closed pane, or busy prompt stores no question. The card shows the reason and a
+copyable full question, plus the session command when a source is known. Failed
+sends keep the text in the box; Try again clears the notice without clearing the text.
+Session resume hooks do not close a card that has a question thread. A closed
+session window or ticket completion still supersedes it, keeping the thread in
+Recent outcomes. Ryan can also answer, decline, or withdraw it.
+
 ## Saved answers (fm-5fq)
 
 ```sh

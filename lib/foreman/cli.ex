@@ -271,6 +271,15 @@ defmodule Foreman.CLI do
     end
   end
 
+  defp card_body(opts) do
+    if opts[:body_file] do
+      with {:ok, %{size: size}} when size <= 20_000 <- File.stat(opts[:body_file]),
+           do: File.read(opts[:body_file])
+    else
+      {:ok, opts[:text]}
+    end
+  end
+
   def parse(args, defaults \\ [])
   def parse(["answer" | args], defaults), do: Foreman.AnswerCLI.parse(args, defaults)
 
@@ -304,6 +313,24 @@ defmodule Foreman.CLI do
           |> Map.put("transient", request_kind == "session_waiting")
 
         {:ok, %{request: request, json: opts[:json] || false}}
+
+      {[], ["card-reply", id]} when kind == "ticket" ->
+        with true <- is_binary(opts[:text]) != is_binary(opts[:body_file]),
+             {:ok, body} <- card_body(opts),
+             true <-
+               is_binary(body) and String.valid?(body) and byte_size(body) <= 20_000 and
+                 String.trim(body) != "" and not String.contains?(body, <<0>>),
+             {:ok, _} <- Ecto.UUID.cast(id) do
+          request =
+            request_identity(opts, defaults)
+            |> Map.merge(%{"action" => "card_reply", "id" => id, "body" => body})
+
+          {:ok, %{request: request, json: opts[:json] || false}}
+        else
+          _ ->
+            {:error,
+             "usage: foreman card-reply <request-id> (--text <text> | --body-file <markdown>)"}
+        end
 
       {[], ["withdraw", id]} when kind == "ticket" ->
         if Foreman.Requests.Decision.text?(opts[:reason]) do

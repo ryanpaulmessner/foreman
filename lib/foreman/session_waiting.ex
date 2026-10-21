@@ -91,7 +91,7 @@ defmodule Foreman.SessionWaiting do
   defp wait_without_asking(key, session, existing) do
     for %{facts: facts} = request <- existing,
         is_nil(facts["tool"]),
-        do: Requests.resolve(request.id, :facts_changed, %{"reason" => "session_idle"})
+        do: supersede_unquestioned(request, "session_idle")
 
     Sessions.signal(key, session, :waiting)
   end
@@ -99,8 +99,8 @@ defmodule Foreman.SessionWaiting do
   defp ask_or_reuse(key, params, facts, existing) do
     identity = Map.take(facts, ~w(reason question))
 
-    case Enum.map(existing, &{&1, Map.take(&1.facts, ~w(reason question))}) do
-      [{request, ^identity}] ->
+    case Enum.find(existing, &(Map.take(&1.facts, ~w(reason question)) == identity)) do
+      %Request{} = request ->
         if facts["target"] == "planning",
           do: Sessions.signal(key, params["session"], :waiting)
 
@@ -109,7 +109,7 @@ defmodule Foreman.SessionWaiting do
       _ ->
         Enum.each(
           existing,
-          &Requests.resolve(&1.id, :facts_changed, %{"reason" => "waiting_changed"})
+          &supersede_unquestioned(&1, "waiting_changed")
         )
 
         with {:ok, request} <-
@@ -263,10 +263,10 @@ defmodule Foreman.SessionWaiting do
           {:ok, facts} ->
             if Map.take(facts, ~w(pane pid snapshot)) !=
                  Map.take(request.facts, ~w(pane pid snapshot)),
-               do: Requests.resolve(request.id, :facts_changed, %{"reason" => "session_resumed"})
+               do: supersede_unquestioned(request, "session_resumed")
 
           _ ->
-            Requests.resolve(request.id, :facts_changed, %{"reason" => "window_gone"})
+            supersede_unquestioned(request, "window_gone")
         end
       end)
     end)
@@ -276,9 +276,20 @@ defmodule Foreman.SessionWaiting do
 
   def clear(key, session) do
     for request <- pending(key, session),
-        do: Requests.resolve(request.id, :facts_changed, %{"reason" => "session_resumed"})
+        do: supersede_unquestioned(request, "session_resumed")
 
     :ok
+  end
+
+  # A card question resumes the agent, not the request. Keep that conversation
+  # pending across fresh hooks, but not after the session window is gone.
+  defp supersede_unquestioned(request, reason) do
+    transaction(fn ->
+      lock(request.repo_key)
+
+      if reason == "window_gone" or not Foreman.CardMessages.questioned?(request.id),
+        do: Requests.resolve(request.id, :facts_changed, %{"reason" => reason})
+    end)
   end
 
   def pending({project, ticket}, session),

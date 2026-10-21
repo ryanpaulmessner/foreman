@@ -85,6 +85,16 @@ defmodule Foreman.AgentCommands do
     end
   end
 
+  defp command(%{"action" => "card_reply", "id" => id} = request) do
+    case Foreman.CardMessages.reply(id, request["actor"], request["session"], request["body"]) do
+      {:ok, message} -> {200, %{id: message.id, request_id: message.request_id}}
+      {:error, :not_found} -> {404, %{error: :not_found}}
+      {:error, reason} -> {422, %{error: reason}}
+    end
+  end
+
+  defp command(%{"action" => "card_reply"}), do: {422, %{error: :invalid_message}}
+
   defp command(%{"action" => "withdraw", "id" => id} = request) do
     case Foreman.Requests.withdraw(
            id,

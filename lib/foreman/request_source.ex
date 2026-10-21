@@ -85,6 +85,30 @@ defmodule Foreman.RequestSource do
     ErlangError -> {:error, :tmux_unavailable}
   end
 
+  def pane(source, opts \\ []) do
+    runner = Keyword.get(opts, :runner, &System.cmd/3)
+
+    args = [
+      "list-panes",
+      "-a",
+      "-F",
+      "\#{pane_id}\t\#{window_id}\t\#{session_name}\t\#{window_name}\t\#{pane_active}"
+    ]
+
+    case runner.("tmux", server_args(source) ++ args, stderr_to_stdout: true) do
+      {output, 0} ->
+        case target(output, source.target) do
+          {:ok, pane, _window} -> {:ok, pane}
+          error -> error
+        end
+
+      _ ->
+        {:error, :tmux_unavailable}
+    end
+  rescue
+    ErlangError -> {:error, :tmux_unavailable}
+  end
+
   def command(source) do
     tmux = "tmux -L " <> quote_arg(socket(source))
     target = quote_arg(source.target)

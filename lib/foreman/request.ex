@@ -19,6 +19,8 @@ defmodule Foreman.Request do
   event(:withdraw)
   event(:continue)
   event(:reply)
+  event(:card_question)
+  event(:card_reply)
   event(:start)
   event(:facts_changed, source: :observed)
   event(:succeeded, source: :observed)
@@ -45,13 +47,30 @@ defmodule Foreman.Request do
   transition(:continue, from: :pending, to: :pending, guard: :usage_limit?, do: [send: :continue])
   transition(:reply, from: :pending, to: :answered, guard: :inline_question?, do: [send: :answer])
   transition(:reply, from: :pending, to: :answered, guard: :chat_question?, do: [send: :prompt])
+  transition(:card_question, from: :pending, to: :pending, do: [send: :prompt])
+  transition(:card_reply, from: :pending, to: :pending, do: [record: :message])
   transition(:facts_changed, from: :pending, to: :superseded, do: [notify: :asker])
   transition(:start, from: :approved, to: :executing, do: [audit: :intent])
   transition(:succeeded, from: :executing, to: :done, do: [audit: :result, notify: :asker])
   transition(:failed, from: :executing, to: :failed, do: [audit: :reason, notify: :asker])
   transition(:orphaned, from: :executing, to: :failed, do: [audit: :unknown, notify: :asker])
   ignore([:facts_changed, :succeeded, :failed, :orphaned], from: :any)
-  invalid([:ask, :approve, :answer, :decline, :withdraw, :start, :continue, :reply], from: :any)
+
+  invalid(
+    [
+      :ask,
+      :approve,
+      :answer,
+      :decline,
+      :withdraw,
+      :start,
+      :continue,
+      :reply,
+      :card_question,
+      :card_reply
+    ],
+    from: :any
+  )
 
   def usage_limit?(%{kind: "session_waiting", reason: "usage_limit"}, _), do: true
   def usage_limit?(_, _), do: false

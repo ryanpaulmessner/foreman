@@ -203,15 +203,63 @@ defmodule Foreman.SessionTmux do
   def reply_external(facts, text, opts \\ []) do
     with :ok <- Foreman.Preview.allow_external_write(),
          {:ok, current} <- external_pane(facts, opts) do
-      if Map.take(current, ~w(pane pid)) == Map.take(facts, ~w(pane pid)),
-        do: type_reply(facts["pane"], text, &external_cmd(&1, opts), opts),
-        else: {:error, :window_gone}
+      if Map.take(current, ~w(pane pid)) == Map.take(facts, ~w(pane pid)) do
+        check = if opts[:harness] == "pi", do: &pi_prompt/2, else: &prompt_idle/2
+        type_reply(facts["pane"], text, &external_cmd(&1, opts), opts, check)
+      else
+        {:error, :window_gone}
+      end
     end
   end
 
-  defp type_reply(pane, text, run, opts) do
+  def reply_source(source, text, opts \\ []) do
+    run = if source.server == :board, do: &cmd(&1, opts), else: &external_cmd(&1, opts)
+
+    with :ok <- Foreman.Preview.allow_external_write(),
+         {:ok, pane} <- Foreman.RequestSource.pane(source, opts) do
+      case source.harness do
+        "claude" -> type_reply(pane, text, run, opts)
+        "pi" -> type_reply(pane, text, run, opts, &pi_prompt/2)
+        _ -> {:error, :prompt_busy}
+      end
+    end
+  end
+
+  defp pi_prompt(pane, run) do
+    with {:ok, identity} <-
+           tmux(run, [
+             "display-message",
+             "-p",
+             "-t",
+             pane,
+             "\#{pane_current_command}\t\#{pane_start_command}"
+           ]),
+         [command, start] <- String.split(String.trim(identity), "\t", parts: 2),
+         true <- command in ["node", "pi"] and Regex.match?(~r/(?:^|\s)pi(?:\s|$)/, start),
+         {:ok, screen} <- tmux(run, ["capture-pane", "-p", "-J", "-t", pane]),
+         true <- empty_pi_editor?(screen) do
+      :ok
+    else
+      _ -> {:error, :prompt_busy}
+    end
+  end
+
+  defp empty_pi_editor?(screen) do
+    lines = screen |> String.trim_trailing() |> String.split("\n") |> Enum.reverse()
+    not_rule? = &(not Regex.match?(~r/\A─{3,}/u, &1))
+
+    with {footer, [_bottom | rest]} <- Enum.split_while(lines, not_rule?),
+         true <- length(footer) <= 4,
+         {input, [_top | _]} <- Enum.split_while(rest, not_rule?) do
+      input != [] and Enum.all?(input, &(String.trim(&1) == ""))
+    else
+      _ -> false
+    end
+  end
+
+  defp type_reply(pane, text, run, opts, check \\ &prompt_idle/2) do
     with {:ok, [{:literal, text}, :enter]} <- Foreman.ChatPrompt.keys(text),
-         :ok <- prompt_idle(pane, run),
+         :ok <- check.(pane, run),
          {:ok, _} <- tmux(run, ["send-keys", "-t", pane, "-l", "--", text]) do
       # Claude reads typed text and Enter on separate renders; never coalesce them.
       Process.sleep(Keyword.get(opts, :key_delay, 150))

@@ -13,6 +13,8 @@ stateDiagram-v2
     pending --> pending: continue [usage_limit?] / send(continue)
     pending --> answered: reply [inline_question?] / send(answer)
     pending --> answered: reply [chat_question?] / send(prompt)
+    pending --> pending: card_question / send(prompt)
+    pending --> pending: card_reply / record(message)
     pending --> superseded: facts_changed / notify(asker)
     approved --> executing: start / audit(intent)
     executing --> done: succeeded / audit(result), notify(asker)
@@ -29,6 +31,8 @@ stateDiagram-v2
 | new | withdraw | invalid |  |
 | new | continue | invalid |  |
 | new | reply | invalid |  |
+| new | card_question | invalid |  |
+| new | card_reply | invalid |  |
 | new | start | invalid |  |
 | new | facts_changed | ignored |  |
 | new | succeeded | ignored |  |
@@ -46,6 +50,8 @@ stateDiagram-v2
 | pending | reply [inline_question?] | -> answered | send(answer) |
 | pending | reply [chat_question?] | -> answered | send(prompt) |
 | pending | reply | invalid |  |
+| pending | card_question | -> pending | send(prompt) |
+| pending | card_reply | -> pending | record(message) |
 | pending | start | invalid |  |
 | pending | facts_changed | -> superseded | notify(asker) |
 | pending | succeeded | ignored |  |
@@ -58,6 +64,8 @@ stateDiagram-v2
 | approved | withdraw | invalid |  |
 | approved | continue | invalid |  |
 | approved | reply | invalid |  |
+| approved | card_question | invalid |  |
+| approved | card_reply | invalid |  |
 | approved | start | -> executing | audit(intent) |
 | approved | facts_changed | ignored |  |
 | approved | succeeded | ignored |  |
@@ -70,6 +78,8 @@ stateDiagram-v2
 | answered | withdraw | invalid |  |
 | answered | continue | invalid |  |
 | answered | reply | invalid |  |
+| answered | card_question | invalid |  |
+| answered | card_reply | invalid |  |
 | answered | start | invalid |  |
 | answered | facts_changed | ignored |  |
 | answered | succeeded | ignored |  |
@@ -82,6 +92,8 @@ stateDiagram-v2
 | declined | withdraw | invalid |  |
 | declined | continue | invalid |  |
 | declined | reply | invalid |  |
+| declined | card_question | invalid |  |
+| declined | card_reply | invalid |  |
 | declined | start | invalid |  |
 | declined | facts_changed | ignored |  |
 | declined | succeeded | ignored |  |
@@ -94,6 +106,8 @@ stateDiagram-v2
 | withdrawn | withdraw | invalid |  |
 | withdrawn | continue | invalid |  |
 | withdrawn | reply | invalid |  |
+| withdrawn | card_question | invalid |  |
+| withdrawn | card_reply | invalid |  |
 | withdrawn | start | invalid |  |
 | withdrawn | facts_changed | ignored |  |
 | withdrawn | succeeded | ignored |  |
@@ -106,6 +120,8 @@ stateDiagram-v2
 | superseded | withdraw | invalid |  |
 | superseded | continue | invalid |  |
 | superseded | reply | invalid |  |
+| superseded | card_question | invalid |  |
+| superseded | card_reply | invalid |  |
 | superseded | start | invalid |  |
 | superseded | facts_changed | ignored |  |
 | superseded | succeeded | ignored |  |
@@ -118,6 +134,8 @@ stateDiagram-v2
 | executing | withdraw | invalid |  |
 | executing | continue | invalid |  |
 | executing | reply | invalid |  |
+| executing | card_question | invalid |  |
+| executing | card_reply | invalid |  |
 | executing | start | invalid |  |
 | executing | facts_changed | ignored |  |
 | executing | succeeded | -> done | audit(result), notify(asker) |
@@ -130,6 +148,8 @@ stateDiagram-v2
 | done | withdraw | invalid |  |
 | done | continue | invalid |  |
 | done | reply | invalid |  |
+| done | card_question | invalid |  |
+| done | card_reply | invalid |  |
 | done | start | invalid |  |
 | done | facts_changed | ignored |  |
 | done | succeeded | ignored |  |
@@ -142,6 +162,8 @@ stateDiagram-v2
 | failed | withdraw | invalid |  |
 | failed | continue | invalid |  |
 | failed | reply | invalid |  |
+| failed | card_question | invalid |  |
+| failed | card_reply | invalid |  |
 | failed | start | invalid |  |
 | failed | facts_changed | ignored |  |
 | failed | succeeded | ignored |  |

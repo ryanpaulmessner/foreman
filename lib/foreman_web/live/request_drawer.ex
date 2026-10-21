@@ -9,6 +9,7 @@ defmodule ForemanWeb.RequestDrawer do
     |> assign(
       drawer_state: Foreman.RequestDrawer.__fsm__(:initial),
       drawer_ids: MapSet.new(),
+      drawer_versions: %{},
       drawer_headings: MapSet.new(),
       drawer_error: nil
     )
@@ -21,6 +22,7 @@ defmodule ForemanWeb.RequestDrawer do
     if socket.assigns.drawer_state == :open do
       ids = MapSet.new(pending, & &1.id)
       previous = socket.assigns.drawer_ids
+      versions = Foreman.CardMessages.versions(MapSet.to_list(ids))
 
       socket =
         Enum.reduce(MapSet.difference(previous, ids), socket, fn id, socket ->
@@ -34,11 +36,13 @@ defmodule ForemanWeb.RequestDrawer do
       |> Enum.with_index()
       |> Enum.reduce(socket, fn {item, index}, socket ->
         if MapSet.member?(previous, item.id) and
-             MapSet.member?(socket.assigns.drawer_headings, item.id) == item.heading,
+             MapSet.member?(socket.assigns.drawer_headings, item.id) == item.heading and
+             socket.assigns.drawer_versions[item.id] == versions[item.id],
            do: socket,
            else: stream_insert(socket, :drawer_requests, item, at: index)
       end)
       |> assign(:drawer_ids, ids)
+      |> assign(:drawer_versions, versions)
       |> assign(:drawer_headings, headings)
     else
       socket
@@ -148,6 +152,7 @@ defmodule ForemanWeb.RequestDrawer do
           id={id}
           request={item.request}
           card={item.card}
+          question={item.question}
           focus={item.focus}
           heading={item.heading}
           prefix="drawer-"
