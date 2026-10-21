@@ -1,6 +1,8 @@
 repos = []
 
 [board]
+timezone = "America/Chicago"
+week_repos = ["work"]
 swimlanes = "project"
 stale_session_after = "2h"
 

@@ -7,6 +7,10 @@
 # General application configuration
 import Config
 
+config :elixir, :time_zone_database, Tzdata.TimeZoneDatabase
+# Use the packaged database; page reads must never trigger network access.
+config :tzdata, :autoupdate, :disabled
+
 config :foreman,
   ecto_repos: [Foreman.Repo],
   generators: [timestamp_type: :utc_datetime]

@@ -67,6 +67,7 @@ defmodule Foreman.MixProject do
        depth: 1},
       {:swoosh, "~> 1.16"},
       {:req, "0.6.1"},
+      {:tzdata, "~> 1.1"},
       {:toml_elixir, "~> 3.2"},
       {:yaml_elixir, "~> 2.12"},
       {:telemetry_metrics, "~> 1.0"},

@@ -1,11 +1,19 @@
 defmodule Foreman.Config.Schema do
   @moduledoc false
 
+  # Escript has no unpacked tzdata priv directory. Keep name validation offline.
+  @timezones (case Application.ensure_all_started(:tzdata) do
+                {:ok, _} -> MapSet.new(Tzdata.zone_list())
+                {:error, reason} -> raise "Cannot load time zones: #{inspect(reason)}"
+              end)
+
   def validate(config, complete? \\ false) do
     schema = %{
       "board" =>
         {:table,
          %{
+           "timezone" => :timezone,
+           "week_repos" => {:list, :key},
            "swimlanes" => {:one_of, ~w(project epic none)},
            "stale_session_after" => :duration,
            "terminal_app" => :app,
@@ -155,6 +163,12 @@ defmodule Foreman.Config.Schema do
     if value in options,
       do: :ok,
       else: {:error, "#{field}: expected one of #{Enum.join(options, ", ")}"}
+  end
+
+  defp check(value, :timezone, field) do
+    if is_binary(value) and MapSet.member?(@timezones, value),
+      do: :ok,
+      else: {:error, "#{field}: unknown time zone"}
   end
 
   defp check(value, :boolean, _) when is_boolean(value), do: :ok

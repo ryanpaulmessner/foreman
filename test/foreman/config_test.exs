@@ -336,7 +336,13 @@ defmodule Foreman.ConfigTest do
                home: "/tmp/config-home"
              )
 
-    assert config["board"] == %{"swimlanes" => "epic", "stale_session_after" => "30m"}
+    assert config["board"] == %{
+             "swimlanes" => "epic",
+             "stale_session_after" => "30m",
+             "timezone" => "America/Chicago",
+             "week_repos" => ["work"]
+           }
+
     assert config["backfill"] == %{"closed" => "done", "default" => "queued"}
 
     assert config["columns"] == [

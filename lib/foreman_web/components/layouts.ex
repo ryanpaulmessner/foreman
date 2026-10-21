@@ -51,6 +51,14 @@ defmodule ForemanWeb.Layouts do
             <.icon name="hero-bars-3-bottom-left" class="size-4" /> Initiatives
           </.link>
           <.link
+            id="this-week-link"
+            navigate={~p"/week"}
+            class={["bb-nav", @active == :week && "bb-nav-active"]}
+            aria-current={@active == :week && "page"}
+          >
+            <.icon name="hero-calendar-days" class="size-4" /> This week
+          </.link>
+          <.link
             navigate={~p"/pull-requests"}
             class={["bb-nav", @active == :pull_requests && "bb-nav-active"]}
             aria-current={@active == :pull_requests && "page"}
