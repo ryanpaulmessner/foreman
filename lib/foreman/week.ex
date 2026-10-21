@@ -37,24 +37,27 @@ defmodule Foreman.Week do
       )
       |> Enum.map(&%{&1 | epic: Map.get(aliases, &1.epic, &1.epic)})
 
+    pr_rows =
+      for repo <- repos,
+          repo["key"] in keys and repo["forge"] == "github" and is_binary(repo["github"]),
+          pr <- Foreman.Week.PrLinks.list(repo["key"], repo["github"]),
+          do: {repo["key"], pr}
+
+    containment =
+      Map.new(pr_rows, fn {repo, pr} ->
+        {{repo, pr.number, pr.head_sha}, Map.take(pr, [:in_production, :in_staging, :checked_at])}
+      end)
+
     prs =
-      Repo.all(
-        from s in "forge_snapshots",
-          where: s.repo_key in ^keys,
-          select: %{repo: s.repo_key, remote: s.remote, snapshot: s.snapshot}
-      )
-      |> Enum.filter(fn s ->
-        Enum.any?(
-          repos,
-          &(&1["key"] == s.repo and &1["github"] == s.remote and &1["forge"] == "github")
-        )
+      Enum.group_by(pr_rows, fn {repo, pr} -> {repo, pr.ticket_id} end, fn {_, pr} ->
+        %{
+          "number" => pr.number,
+          "url" => pr.url,
+          "head_sha" => pr.head_sha,
+          "state" => pr.state,
+          "target_branch" => pr.base_branch
+        }
       end)
-      |> Enum.flat_map(fn s ->
-        for pr <- s.snapshot["change_requests"] || [],
-            link <- pr["links"] || [],
-            do: {{s.repo, link["bead_id"]}, pr}
-      end)
-      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
 
     tickets =
       Repo.all(from b in "beads", select: %{repo: b.repo_key, raw: b.raw})
@@ -131,7 +134,7 @@ defmodule Foreman.Week do
         requests: Enum.map(requests, canonical),
         repos: repos,
         links: links,
-        pr_containment: [],
+        pr_containment: containment,
         sent_reports: []
       },
       now,

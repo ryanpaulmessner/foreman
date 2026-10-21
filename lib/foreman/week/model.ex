@@ -10,8 +10,10 @@ defmodule Foreman.Week.Model do
     {"unsorted", "Unsorted"}
   ]
   @stages [
+    "Shipped",
     "Done",
     "Closed, not done",
+    "On staging",
     "Waiting on you",
     "Waiting on others",
     "Building",
@@ -25,7 +27,8 @@ defmodule Foreman.Week.Model do
   `edges`, `status`, string board `stage`, projected file `raw`, and cached `prs`.
   Events carry `key` and UTC `inserted_at`; requests also carry `id`, `kind`, and
   `state`. Optional `repos` and board `links` support effective kind resolution.
-  `pr_containment` and `sent_reports` are reserved for later slices, unused here.
+  `pr_containment` maps `{repo, number, head_sha}` to cached ancestry results.
+  `sent_reports` is reserved for a later slice.
   Options are `timezone` and `week_repos`. The week end is exclusive.
   """
   def build(facts, now, opts \\ []) do
@@ -76,10 +79,25 @@ defmodule Foreman.Week.Model do
 
           epic = epic([ticket.key], nodes, MapSet.new(), Map.get(facts, :links, []))
 
+          cache = Map.get(facts, :pr_containment, %{})
+          cache = if is_map(cache), do: cache, else: %{}
+
+          results =
+            for pr <- ticket.prs,
+                pr["state"] == "merged",
+                do: Map.get(cache, {ticket.repo, pr["number"], pr["head_sha"]}, %{})
+
+          stage = plain_stage(ticket, pending, results)
+          last_activity = Enum.max_by(times, &DateTime.to_unix/1)
+
           [
             Map.merge(ticket, %{
-              last_activity: Enum.max_by(times, &DateTime.to_unix/1),
-              plain_stage: plain_stage(ticket, pending),
+              last_activity: last_activity,
+              activity_day: activity_day(last_activity, now, window.timezone),
+              progress_step: progress_step(stage, ticket),
+              missing_staging:
+                Enum.any?(results, &(&1[:in_production] == false and &1[:in_staging] == false)),
+              plain_stage: stage,
               request_ids: Enum.map(pending, & &1.id),
               epic: epic && Map.take(epic, [:key, :title])
             })
@@ -117,7 +135,7 @@ defmodule Foreman.Week.Model do
   end
 
   @closed_prefixes ["won't do", "duplicate", "superseded", "out of scope"]
-  defp plain_stage(ticket, pending) do
+  defp plain_stage(ticket, pending, results) do
     not_done =
       String.starts_with?(
         String.downcase(String.trim(ticket.raw["close_reason"] || "")),
@@ -125,9 +143,17 @@ defmodule Foreman.Week.Model do
       )
 
     rules = [
-      {ticket.status == "closed" and ticket.prs == [] and not not_done, "Done"},
+      {results != [] and Enum.all?(results, &(&1[:in_production] == true)), "Shipped"},
+      {ticket.status == "closed" and
+         not Enum.any?(ticket.prs, &(&1["state"] in ["open", "merged"])) and not not_done,
+       "Done"},
       {(ticket.status == "closed" and not_done) or ticket.stage == "abandoned",
        "Closed, not done"},
+      {Enum.any?(
+         results,
+         &(&1[:in_staging] == true or
+             (&1[:in_staging] == false and &1[:in_production] == false))
+       ), "On staging"},
       {pending != [], "Waiting on you"},
       {ticket.status == "parked" or Enum.any?(ticket.prs, &(&1["state"] == "open")),
        "Waiting on others"},
@@ -140,6 +166,38 @@ defmodule Foreman.Week.Model do
     ]
 
     Enum.find_value(rules, fn {matches, label} -> if matches, do: label end)
+  end
+
+  defp activity_day(time, now, timezone) do
+    date = time |> DateTime.shift_zone!(timezone) |> DateTime.to_date()
+    today = now |> DateTime.shift_zone!(timezone) |> DateTime.to_date()
+
+    case Date.diff(today, date) do
+      0 -> "Today"
+      1 -> "Yesterday"
+      _ -> Calendar.strftime(date, "%a")
+    end
+  end
+
+  defp progress_step("Shipped", _), do: "In production"
+  defp progress_step("On staging", _), do: "On staging"
+  defp progress_step(stage, _) when stage in ["Done", "Closed, not done"], do: stage
+
+  defp progress_step(stage, ticket) do
+    cond do
+      Enum.any?(ticket.prs, &(&1["state"] == "merged")) ->
+        "Merged, checking…"
+
+      Enum.any?(ticket.prs, &(&1["state"] == "open")) ->
+        "PR open"
+
+      stage == "Building" or ticket.status == "in_progress" or
+          ticket.stage in ~w(dispatched building reported in_review committed) ->
+        "Building"
+
+      true ->
+        nil
+    end
   end
 
   defp epic([], _nodes, _seen, _links), do: nil

@@ -25,6 +25,105 @@ defmodule Foreman.Week.ModelTest do
     for section <- model.sections, group <- section.groups, item <- group.items, do: item
   end
 
+  test "all merged heads must reach production; staging and missing heads stay on staging" do
+    for {containment, expected} <- [
+          {%{
+             1 => %{in_production: true, in_staging: true},
+             2 => %{in_production: true, in_staging: true}
+           }, "Shipped"},
+          {%{
+             1 => %{in_production: true, in_staging: true},
+             2 => %{in_production: false, in_staging: true}
+           }, "On staging"},
+          {%{
+             1 => %{in_production: false, in_staging: false},
+             2 => %{in_production: false, in_staging: false}
+           }, "On staging"}
+        ] do
+      t =
+        ticket("a", %{
+          prs: for(n <- [1, 2], do: %{"number" => n, "state" => "merged", "head_sha" => "head"})
+        })
+
+      cache = Map.new(containment, fn {n, result} -> {{"work", n, "head"}, result} end)
+
+      [item] =
+        Model.build(
+          %{
+            tickets: [t],
+            events: [%{key: t.key, inserted_at: ~U[2026-10-20 12:00:00Z]}],
+            pr_containment: cache
+          },
+          ~U[2026-10-21 12:00:00Z]
+        )
+        |> items()
+
+      assert item.plain_stage == expected
+
+      assert item.progress_step ==
+               if(expected == "Shipped", do: "In production", else: "On staging")
+
+      assert item.activity_day == "Yesterday"
+    end
+  end
+
+  test "progress tracks work while waiting labels remain independent" do
+    for {attrs, requests, expected} <- [
+          {%{stage: "building"}, [], "Building"},
+          {%{stage: "building"},
+           [
+             %{
+               id: "r",
+               kind: "decision",
+               state: "pending",
+               key: {"work", "a"},
+               inserted_at: ~U[2026-10-20 12:00:00Z]
+             }
+           ], "Building"},
+          {%{prs: [%{"state" => "open"}]}, [], "PR open"},
+          {%{status: "closed"}, [], "Done"},
+          {%{status: "closed", prs: [%{"state" => "closed"}]}, [], "Done"},
+          {%{status: "closed", prs: [%{"state" => "merged"}]}, [], "Merged, checking…"},
+          {%{stage: "abandoned"}, [], "Closed, not done"},
+          {%{}, [], nil}
+        ] do
+      t = ticket("a", attrs)
+
+      [item] =
+        Model.build(
+          %{
+            tickets: [t],
+            requests: requests,
+            events: [%{key: t.key, inserted_at: ~U[2026-10-20 12:00:00Z]}]
+          },
+          ~U[2026-10-21 12:00:00Z]
+        )
+        |> items()
+
+      assert item.progress_step == expected
+    end
+  end
+
+  test "activity day is in Central time, including Monday UTC on the previous Sunday" do
+    t = ticket("a")
+
+    for {now, time, label} <- [
+          {~U[2026-10-20 15:00:00Z], ~U[2026-10-20 03:00:00Z], "Yesterday"},
+          {~U[2026-10-19 04:00:00Z], ~U[2026-10-19 03:00:00Z], "Today"},
+          {~U[2026-10-19 04:00:00Z], ~U[2026-10-18 03:00:00Z], "Yesterday"},
+          {~U[2026-10-19 04:00:00Z], ~U[2026-10-16 12:00:00Z], "Fri"}
+        ] do
+      [item] =
+        Model.build(
+          %{tickets: [t], events: [%{key: t.key, inserted_at: time}]},
+          now
+        )
+        |> items()
+
+      assert item.activity_day == label
+    end
+  end
+
   test "activity sources include only the local week and configured repos" do
     tickets =
       for id <- ~w(stage request event note closed parked old boundary future other),

@@ -94,11 +94,86 @@ defmodule ForemanWeb.WeekLive do
                     <span class="min-w-0 flex-1 break-words font-medium">{item.title}</span>
                     <span class="shrink-0 font-mono text-xs text-foreground-softer">{item.id}</span>
                   </button>
+                  <div class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 pb-4 text-xs sm:pl-11">
+                    <span
+                      :if={item.progress_step in ["Done", "Closed, not done"]}
+                      id={"week-terminal-#{item_key(item)}"}
+                      class="font-medium text-foreground"
+                    >
+                      {item.progress_step}
+                    </span>
+                    <ol
+                      :if={item.progress_step not in ["Done", "Closed, not done"]}
+                      id={"week-progress-#{item_key(item)}"}
+                      aria-label="Progress"
+                      class="flex flex-wrap items-center gap-1"
+                    >
+                      <li
+                        :for={
+                          step <- [
+                            "Building",
+                            "PR open",
+                            if(item.progress_step == "Merged, checking…",
+                              do: "Merged, checking…",
+                              else: "On staging"
+                            ),
+                            "In production"
+                          ]
+                        }
+                        aria-current={if item.progress_step == step, do: "step"}
+                        class={[
+                          "rounded px-2 py-1",
+                          if(item.progress_step == step,
+                            do:
+                              "bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200 font-medium",
+                            else: "text-foreground-softer"
+                          )
+                        ]}
+                      >
+                        {step}
+                      </li>
+                    </ol>
+                    <span
+                      :if={item.plain_stage in ["Waiting on you", "Waiting on others", "Discussed"]}
+                      id={"week-status-#{item_key(item)}"}
+                      class="text-foreground-softer"
+                    >
+                      {item.plain_stage}
+                    </span>
+                    <a
+                      :for={pr <- item.prs}
+                      id={"week-pr-#{item_key(item)}-#{pr["number"]}"}
+                      href={pr["url"]}
+                      class="underline underline-offset-4 hover:text-foreground-softer"
+                    >
+                      #{pr["number"]}
+                    </a>
+                    <time
+                      id={"week-day-#{item_key(item)}"}
+                      datetime={DateTime.to_iso8601(item.last_activity)}
+                      title={
+                        Calendar.strftime(
+                          DateTime.shift_zone!(item.last_activity, @week.timezone),
+                          "%b %-d, %Y at %-I:%M %p %Z"
+                        )
+                      }
+                      class="text-foreground-softer sm:ml-auto"
+                    >
+                      {item.activity_day}
+                    </time>
+                  </div>
                   <div
                     :if={@disclosures[item_key(item)] == :expanded}
                     id={"week-details-#{item_key(item)}"}
                     class="border-t border-base bg-sunken px-4 py-4 sm:pl-11"
                   >
+                    <p
+                      :if={item.missing_staging}
+                      id={"week-missing-staging-#{item_key(item)}"}
+                      class="mb-3 text-sm text-foreground-softer"
+                    >
+                      Merged PR head not found in staging
+                    </p>
                     <dl class="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2">
                       <div>
                         <dt class="text-xs text-foreground-softer">Board stage</dt>

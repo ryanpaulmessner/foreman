@@ -22,7 +22,11 @@ config :foreman, Oban,
   queues: [external_reads: 4, external_writes: 1, previews: 1],
   # Lifeline frees jobs orphaned by a killed worker: unique-while-incomplete sync jobs
   # would otherwise block their repo forever. rescue_after stays above every job timeout.
-  plugins: [Oban.Plugins.Pruner, {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(5)}]
+  plugins: [
+    Oban.Plugins.Pruner,
+    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(5)},
+    {Oban.Plugins.Cron, crontab: [{"*/10 * * * *", Foreman.Week.HistoryJob}]}
+  ]
 
 # Configure the endpoint
 config :foreman, ForemanWeb.Endpoint,

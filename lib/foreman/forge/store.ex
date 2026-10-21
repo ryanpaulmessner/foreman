@@ -38,6 +38,8 @@ defmodule Foreman.Forge.Store do
           Map.put(pr, "links", links)
         end)
 
+      Foreman.Week.PrLinks.record(key, remote, prs)
+
       # Open all replacements first, so closing one of several links sees its siblings.
       Enum.each(Enum.filter(prs, &(&1["state"] == "open")), fn pr ->
         Enum.each(pr["links"], fn link ->
