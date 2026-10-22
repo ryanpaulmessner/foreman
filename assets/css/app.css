@@ -84,6 +84,9 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--focus); outline
 .fm-markdown th { background: var(--background-sunken); font-weight: 600; }
 .fm-markdown hr { border-color: var(--border-base); margin: 2em 0; }
 .fm-markdown img { max-width: 100%; }
+.fm-diagram { margin: 1.25rem 0; padding: 1rem; overflow-x: auto; border: 1px solid var(--border-base); border-radius: .5rem; background: var(--background-base); }
+.fm-diagram svg { display: block; margin-inline: auto; }
+.fm-diagram pre { white-space: pre; }
 .fm-markdown .footnotes { border-top: 1px solid var(--border-base); margin-top: 2em; font-size: 12px; color: var(--foreground-softer); }
 #ticket-sheet .fm-markdown :is(h1, h2, h3) { font-size: 15px; font-weight: 600; line-height: 1.5; margin: 1em 0 .5em; padding: 0; border: 0; }
 #ticket-sheet .fm-markdown > :is(h1, h2, h3):first-child { margin-top: 0; }

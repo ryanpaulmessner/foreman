@@ -27,7 +27,7 @@ defmodule Foreman.Overlay do
 
   @doc "Whether this exact document path was recorded for the project."
   def document_reference?(repo, path) when is_binary(path) do
-    fields = ~w(brief brief_path report report_path path spec spec_path spec_link)
+    fields = ~w(brief brief_path report report_path path spec spec_path spec_link design_link)
 
     predicate =
       Enum.reduce(fields, dynamic(false), fn field, query ->
@@ -35,7 +35,10 @@ defmodule Foreman.Overlay do
       end)
 
     Repo.exists?(from e in "stage_events", where: e.repo_key == ^repo, where: ^predicate) or
-      Repo.exists?(from e in "epics", where: e.repo_key == ^repo and e.spec_link == ^path)
+      Repo.exists?(
+        from e in "epics",
+          where: e.repo_key == ^repo and (e.spec_link == ^path or e.design_link == ^path)
+      )
   end
 
   def document_reference?(_, _), do: false
@@ -79,7 +82,7 @@ defmodule Foreman.Overlay do
       Repo.one(
         from e in "epics",
           where: e.repo_key == ^repo and (e.bead_id == ^id or e.beads_epic_id == ^id),
-          select: map(e, ^(@fields ++ [:beads_epic_id, :title, :spec_link]))
+          select: map(e, ^(@fields ++ [:beads_epic_id, :title, :spec_link, :design_link]))
       )
 
     ticket =
@@ -383,10 +386,13 @@ defmodule Foreman.Overlay do
     )
   end
 
-  defp persist_effect({:record, :spec_link}, _, row, _, payload, _) do
-    if Map.has_key?(payload, "spec_link") do
+  defp persist_effect({:record, field}, _, row, _, payload, _)
+       when field in [:spec_link, :design_link] do
+    key = Atom.to_string(field)
+
+    if Map.has_key?(payload, key) do
       Repo.update_all(from(e in "epics", where: e.id == ^row.id),
-        set: [spec_link: payload["spec_link"]]
+        set: [{field, payload[key]}]
       )
     end
   end

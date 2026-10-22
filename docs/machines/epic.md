@@ -7,7 +7,7 @@ stateDiagram-v2
     [*] --> new_draft
     new_draft --> idea: create / record(draft)
     idea --> speccing: start_spec
-    speccing --> spec_approved: approve_spec / record(spec_link)
+    speccing --> spec_approved: approve_spec / record(spec_link), record(design_link)
     spec_approved --> ticketed: ticket [beads_epic_id?] / link(beads_epic)
     draft --> abandoned: abandon
     abandoned --> idea: revive
@@ -37,7 +37,7 @@ stateDiagram-v2
 | idea | bead_epic_reopened | ignored |  |
 | speccing | create | invalid |  |
 | speccing | start_spec | invalid |  |
-| speccing | approve_spec | -> spec_approved | record(spec_link) |
+| speccing | approve_spec | -> spec_approved | record(spec_link), record(design_link) |
 | speccing | ticket | invalid |  |
 | speccing | abandon | -> abandoned |  |
 | speccing | revive | invalid |  |

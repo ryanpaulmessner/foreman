@@ -549,6 +549,9 @@ defmodule ForemanWeb.TicketDetail do
   attr :repo, :string, required: true
   attr :path, :string, required: true
 
+  attr :id, :string, default: nil
+  attr :label, :string, default: nil
+
   def document_link(assigns) do
     uri = URI.parse(assigns.path)
 
@@ -561,10 +564,11 @@ defmodule ForemanWeb.TicketDetail do
 
     ~H"""
     <.link
+      id={@id}
       navigate={@target}
       class="break-words font-mono text-xs underline decoration-current/30 underline-offset-4 hover:decoration-current"
     >
-      {@path}
+      {@label || @path}
     </.link>
     """
   end

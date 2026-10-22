@@ -44,6 +44,21 @@ defmodule Foreman.OverlayTest do
              Overlay.apply_event(key, {:dispatch, %{window: "second"}})
   end
 
+  test "spec approval records an optional design link" do
+    key = {"sample", "draft:design"}
+    assert {:ok, _} = Overlay.apply_event(key, {:create, %{title: "Design"}})
+    assert {:ok, _} = Overlay.apply_event(key, :start_spec)
+
+    assert {:ok, _} =
+             Overlay.apply_event(
+               key,
+               {:approve_spec, %{spec_link: "docs/spec.md", design_link: "docs/design.md"}}
+             )
+
+    assert Map.get(Overlay.get(key), :design_link) == "docs/design.md"
+    assert Overlay.document_reference?("sample", "docs/design.md")
+  end
+
   test "draft creation and ticket linkage preserve one epic identity and its history" do
     key = {"sample", "draft:new-board"}
 

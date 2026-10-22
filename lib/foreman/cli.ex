@@ -51,6 +51,7 @@ defmodule Foreman.CLI do
     sha: :string,
     title: :string,
     spec: :string,
+    design: :string,
     beads_epic_id: :string,
     epic: :string,
     epic_project: :string,
@@ -388,6 +389,9 @@ defmodule Foreman.CLI do
             )
 
           payload = if opts[:spec], do: Map.put(payload, "spec_link", opts[:spec]), else: payload
+
+          payload =
+            if opts[:design], do: Map.put(payload, "design_link", opts[:design]), else: payload
 
           payload =
             if length(rest) == 2, do: Map.put(payload, "body", List.last(rest)), else: payload

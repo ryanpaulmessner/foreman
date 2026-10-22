@@ -29,7 +29,8 @@ defmodule Foreman.Initiatives do
             beads_epic_id: e.beads_epic_id,
             stage: e.stage,
             title: e.title,
-            spec_link: e.spec_link
+            spec_link: e.spec_link,
+            design_link: e.design_link
           }
       )
 
@@ -87,6 +88,7 @@ defmodule Foreman.Initiatives do
           labels: raw["labels"] || [],
           stage: stage,
           spec_link: epic && epic.spec_link,
+          design_link: epic && epic.design_link,
           planning_session: planning_sessions[key],
           stale: stale?(raw, stage, sessions[key], threshold),
           edges:
@@ -125,6 +127,7 @@ defmodule Foreman.Initiatives do
           labels: [],
           stale: false,
           spec_link: e.spec_link,
+          design_link: e.design_link,
           planning_session: planning_sessions[{e.repo_key, e.bead_id}]
         }
       end)

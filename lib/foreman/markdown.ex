@@ -51,7 +51,30 @@ defmodule Foreman.Markdown do
     document =
       if resolver = opts[:link_paths], do: link_paths(document, resolver), else: document
 
-    MDEx.to_html!(document)
+    # Only these generated placeholders become HTML; user HTML remains disabled.
+    prefix = "fm-diagram-" <> Ecto.UUID.generate()
+
+    {document, diagrams} =
+      MDEx.traverse_and_update(document, [], fn
+        %MDEx.CodeBlock{info: "mermaid", literal: source}, diagrams ->
+          id = prefix <> "-#{length(diagrams)}-end"
+          node = %MDEx.Paragraph{nodes: [%MDEx.Text{literal: id}]}
+          {node, [{id, source} | diagrams]}
+
+        node, diagrams ->
+          {node, diagrams}
+      end)
+
+    Enum.reduce(diagrams, MDEx.to_html!(document), fn {id, source}, html ->
+      escaped = source |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
+
+      block =
+        ~s(<div id="#{id}" class="fm-diagram" phx-hook="Mermaid" phx-update="ignore"><pre>#{escaped}</pre></div>)
+
+      html
+      |> String.replace("<p>#{id}</p>", id)
+      |> String.replace(id, block)
+    end)
   end
 
   # Bare Markdown paths in text or inline code become links when `resolver`

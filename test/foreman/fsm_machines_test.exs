@@ -50,7 +50,9 @@ defmodule Foreman.FsmMachinesTest do
   test "epic draft lifecycle requires the linked beads id" do
     assert Epic.step(:new_draft, :create, %{}) == {:idea, [record: :draft]}
     assert Epic.step(:idea, :start_spec, %{}) == {:speccing, []}
-    assert Epic.step(:speccing, :approve_spec, %{}) == {:spec_approved, [record: :spec_link]}
+
+    assert Epic.step(:speccing, :approve_spec, %{}) ==
+             {:spec_approved, [record: :spec_link, record: :design_link]}
 
     assert Epic.step(:spec_approved, :ticket, %{}) ==
              {:error, {:invalid, :spec_approved, :ticket}}

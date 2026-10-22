@@ -8,7 +8,7 @@ Implemented and verified. No commits, pushes, bd commands, subagents, or user-di
 - `Board.CLI` is the escript entry point. It does not start the board application. `CLITransport` uses Req for HTTP and Postgrex for the offline insert.
 - `DeliveryMachine` declares HTTP/fallback/exit behavior. `SpoolMachine` declares pending/applied/rejected delivery. Both have generated golden docs.
 - The migration adds `spooled_events` and `agent_receipts`. `SpoolWorker` runs only with the worker role, at boot and every three seconds. The web role has the authenticated `/api` routes.
-- Board-side links work across repos and survive draft ticketing. Approving without a new spec link preserves the existing link. Beads content remains untouched.
+- Board-side links work across repos and survive draft ticketing. Approving without a new spec or design link preserves the existing link. `--design` is optional and records `design_link`; the draft epic page shows the design document inline, including Mermaid diagrams. Beads content remains untouched.
 
 ## API contract
 
@@ -52,7 +52,7 @@ The CLI returns 3 only for a 409 carrying a stage and allowed events. Every othe
 | revive | `board revive fe-813.4` |
 | epic create | `board epic create looper --project form-engine --title "Looper" --spec docs/looper.md` |
 | epic spec | `board epic spec looper --project form-engine` |
-| epic approve | `board epic approve looper --project form-engine --spec docs/looper.md` |
+| epic approve | `board epic approve looper --project form-engine --spec docs/looper.md --design docs/looper-design.md` |
 | epic ticket | `board epic ticket looper --project form-engine --beads-epic-id fe-813` |
 | epic abandon | `board epic abandon looper --project form-engine` |
 | epic revive | `board epic revive looper --project form-engine` |

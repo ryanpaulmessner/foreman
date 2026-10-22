@@ -1,6 +1,36 @@
 defmodule Foreman.MarkdownTest do
   use ExUnit.Case, async: true
 
+  test "mermaid source is preserved as inert text in a diagram hook" do
+    source = "graph TD\n A[\"<script>alert(1)</script>\"] --> B\n"
+    html = Foreman.Markdown.render("```mermaid\n" <> source <> "```\n")
+    doc = LazyHTML.from_fragment(html)
+    assert LazyHTML.query(doc, "[phx-hook=Mermaid] pre") |> LazyHTML.text() == source
+    assert LazyHTML.query(doc, "script") |> LazyHTML.to_tree() == []
+    assert html =~ "phx-update=\"ignore\""
+  end
+
+  test "twelve mermaid diagrams each retain their own source exactly once" do
+    sources = Enum.map(0..11, &"graph TD\n Node#{&1} --> End#{&1}\n")
+    markdown = Enum.map_join(sources, "\n", &("```mermaid\n" <> &1 <> "```\n"))
+    doc = markdown |> Foreman.Markdown.render() |> LazyHTML.from_fragment()
+
+    assert length(LazyHTML.query(doc, "div.fm-diagram") |> LazyHTML.to_tree()) == 12
+    assert LazyHTML.query(doc, ".fm-diagram .fm-diagram") |> LazyHTML.to_tree() == []
+
+    for {source, index} <- Enum.with_index(sources, 1) do
+      block = LazyHTML.query(doc, "div.fm-diagram:nth-of-type(#{index})")
+      assert length(LazyHTML.query(block, "pre") |> LazyHTML.to_tree()) == 1
+      assert LazyHTML.text(block) == source
+    end
+  end
+
+  test "mermaid diagrams inside lists keep their source" do
+    html = Foreman.Markdown.render("- ```mermaid\n  graph TD\n    A --> B\n  ```\n")
+    assert html =~ "phx-hook=\"Mermaid\""
+    assert html =~ "A --&gt; B"
+  end
+
   test "relative Markdown links stay in the project viewer" do
     html =
       Foreman.Markdown.render(

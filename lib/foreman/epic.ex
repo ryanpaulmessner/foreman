@@ -25,7 +25,12 @@ defmodule Foreman.Epic do
 
   transition(:create, from: :new_draft, to: :idea, do: [record: :draft])
   transition(:start_spec, from: :idea, to: :speccing)
-  transition(:approve_spec, from: :speccing, to: :spec_approved, do: [record: :spec_link])
+
+  transition(:approve_spec,
+    from: :speccing,
+    to: :spec_approved,
+    do: [record: :spec_link, record: :design_link]
+  )
 
   transition(:ticket,
     from: :spec_approved,

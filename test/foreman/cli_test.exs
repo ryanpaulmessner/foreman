@@ -52,6 +52,18 @@ defmodule Foreman.CLITest do
     refute Map.has_key?(facts, "docs")
   end
 
+  test "approve carries the optional design path" do
+    assert {:ok,
+            %{
+              request: %{
+                "payload" => %{"spec_link" => "docs/spec.md", "design_link" => "docs/design.md"}
+              }
+            }} =
+             CLI.parse(
+               ~w(epic approve draft:pack --project sample --spec docs/spec.md --design docs/design.md)
+             )
+  end
+
   test "draft verbs use slugs and cwd or explicit project" do
     for {verb, event} <- [
           {"create", "create"},

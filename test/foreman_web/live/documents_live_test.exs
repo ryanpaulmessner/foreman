@@ -21,6 +21,69 @@ defmodule ForemanWeb.DocumentsLiveTest do
     %{root: root}
   end
 
+  test "draft epic shows the design pack inline and in the document viewer", %{
+    conn: conn,
+    root: root
+  } do
+    File.write!(
+      Path.join(root, "docs/design.md"),
+      "# Design pack\n\n## Database\n\n```mermaid\nerDiagram\n USER ||--o{ POST : writes\n```\n\n## Approval\n\n```mermaid\nsequenceDiagram\n Ryan->>Board: Approve\n```\n"
+    )
+
+    key = {"sample", "draft:pack"}
+    Foreman.Overlay.apply_event(key, {:create, %{title: "Pack"}})
+    Foreman.Overlay.apply_event(key, :start_spec)
+
+    Foreman.Overlay.apply_event(
+      key,
+      {:approve_spec, %{spec_link: "docs/spec.md", design_link: "docs/design.md"}}
+    )
+
+    {:ok, view, _} = live(conn, "/epics/sample/draft:pack")
+    assert has_element?(view, "#epic-design-link", "Design")
+    assert has_element?(view, "#epic-spec-link", "Spec")
+    assert has_element?(view, "#epic-design h2", "Database")
+    assert has_element?(view, "#epic-design h2", "Approval")
+    assert has_element?(view, "#epic-design [phx-hook=Mermaid] pre", "erDiagram")
+    assert has_element?(view, "#epic-design [phx-hook=Mermaid] pre", "sequenceDiagram")
+    {:ok, viewer, _} = live(conn, Foreman.Markdown.viewer_path("sample", "docs/design.md"))
+    assert has_element?(viewer, "#document-content [phx-hook=Mermaid] pre", "erDiagram")
+  end
+
+  test "recorded design files use the same removed-worktree fallback as specs", %{
+    conn: conn,
+    root: root
+  } do
+    File.write!(
+      Path.join(root, "docs/design.md"),
+      "# Design\n\n```mermaid\ngraph TD\n A --> B\n```\n"
+    )
+
+    old = root <> "-removed/docs/design.md"
+    key = {"sample", "draft:removed-design"}
+    Foreman.Overlay.apply_event(key, {:create, %{title: "Design"}})
+    Foreman.Overlay.apply_event(key, :start_spec)
+    Foreman.Overlay.apply_event(key, {:approve_spec, %{design_link: old}})
+    {:ok, view, _} = live(conn, Foreman.Markdown.viewer_path("sample", old))
+    assert has_element?(view, "#document-content [phx-hook=Mermaid] pre", "A --> B")
+    {:ok, epic, _} = live(conn, "/epics/sample/draft:removed-design")
+    assert has_element?(epic, "#epic-design [phx-hook=Mermaid] pre", "A --> B")
+    File.rm!(Path.join(root, "docs/design.md"))
+    send(epic.pid, :reconcile)
+    assert has_element?(epic, "#epic-design", "Design file unavailable.")
+  end
+
+  test "draft spec links still support external URLs", %{conn: conn} do
+    Foreman.Overlay.apply_event(
+      {"sample", "draft:external"},
+      {:create, %{title: "External", spec_link: "https://example.com/spec.md"}}
+    )
+
+    {:ok, view, _} = live(conn, "/epics/sample/draft:external")
+    assert has_element?(view, "#epic-spec-link[href='https://example.com/spec.md']", "Spec")
+    refute has_element?(view, "#epic-design")
+  end
+
   test "recorded artifacts survive a removed and pruned worktree", %{conn: conn, root: root} do
     old = root <> "-removed/docs/spec.md"
 

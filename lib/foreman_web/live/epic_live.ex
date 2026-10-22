@@ -51,6 +51,7 @@ defmodule ForemanWeb.EpicLive do
 
     socket
     |> ForemanWeb.TicketDetail.refresh()
+    |> design_pack(epic)
     |> assign(
       epic: epic && summary(epic),
       epic_priority: epic && Map.get(Foreman.Priority.for_keys([epic.key]), epic.key),
@@ -65,9 +66,30 @@ defmodule ForemanWeb.EpicLive do
     |> stream(:graph_edges, if(epic, do: epic.graph.edges, else: []), reset: true)
   end
 
+  defp design_pack(socket, epic) do
+    repo_key = elem(socket.assigns.epic_key, 0)
+    repo = Enum.find(Foreman.RuntimeState.repos(), &(&1["key"] == repo_key))
+    path = epic && epic.design_link
+
+    result = if repo && path, do: Foreman.Documents.open(repo, path)
+
+    if socket.assigns[:design_document] == {repo_key, result} do
+      socket
+    else
+      html =
+        case result do
+          {:ok, doc} -> Foreman.Markdown.render(doc.content, repo: repo_key, path: doc.path)
+          nil -> ""
+          _ -> "<p>Design file unavailable.</p>"
+        end
+
+      assign(socket, design_document: {repo_key, result}, design_html: html)
+    end
+  end
+
   defp summary(epic) do
     epic
-    |> Map.take([:title, :stage, :status, :spec_link, :total, :closed])
+    |> Map.take([:title, :stage, :status, :spec_link, :design_link, :total, :closed])
     |> Map.merge(%{
       planned_count: length(epic.planned),
       fallout_count: length(epic.fallout),
@@ -114,9 +136,22 @@ defmodule ForemanWeb.EpicLive do
             <p class="text-xs text-foreground-softer">
               {@epic.planned_count} planned · {@epic.fallout_count} fallout
             </p>
-            <p :if={@epic.spec_link}>
-              <ForemanWeb.TicketDetail.document_link repo={elem(@epic_key, 0)} path={@epic.spec_link} />
-            </p>
+            <div class="flex gap-4">
+              <ForemanWeb.TicketDetail.document_link
+                :if={@epic.spec_link}
+                id="epic-spec-link"
+                label="Spec"
+                repo={elem(@epic_key, 0)}
+                path={@epic.spec_link}
+              />
+              <ForemanWeb.TicketDetail.document_link
+                :if={@epic.design_link}
+                id="epic-design-link"
+                label="Design"
+                repo={elem(@epic_key, 0)}
+                path={@epic.design_link}
+              />
+            </div>
           </div>
           <ForemanWeb.PlanningSession.launch_button
             id="epic-launch"
@@ -139,6 +174,9 @@ defmodule ForemanWeb.EpicLive do
             </div>
           </div>
         </header>
+        <section :if={@epic.design_link} id="epic-design" class="fm-markdown min-w-0">
+          {Phoenix.HTML.raw(@design_html)}
+        </section>
         <ForemanWeb.PlanningSession.status id="epic" session={@planning_session} />
         <section>
           <h2 class="bb-label mb-3">Epic stage history</h2>
