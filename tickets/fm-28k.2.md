@@ -2,7 +2,7 @@
 id: fm-28k.2
 title: "/week crashes on every board event"
 type: bug
-status: open
+status: in_progress
 priority: 2
 parent: fm-28k
 blocked_by: []

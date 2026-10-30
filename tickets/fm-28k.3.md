@@ -2,7 +2,7 @@
 id: fm-28k.3
 title: "Closing a ticket supersedes its decision cards"
 type: bug
-status: open
+status: in_progress
 priority: 2
 parent: fm-28k
 blocked_by: []

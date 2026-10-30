@@ -2,7 +2,7 @@
 id: fm-28k.7
 title: "Tests leave tmux socket files behind"
 type: bug
-status: open
+status: in_progress
 priority: 2
 parent: fm-28k
 blocked_by: []

@@ -2,7 +2,7 @@
 id: fm-28k.6
 title: "board.log grows without limit at debug level"
 type: bug
-status: open
+status: in_progress
 priority: 2
 parent: fm-28k
 blocked_by: []

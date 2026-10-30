@@ -2,7 +2,7 @@
 id: fm-28k.1
 title: "foreman wait ends at once when one poll fails"
 type: bug
-status: open
+status: in_progress
 priority: 2
 parent: fm-28k
 blocked_by: []

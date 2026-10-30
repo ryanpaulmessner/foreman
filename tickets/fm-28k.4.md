@@ -2,7 +2,7 @@
 id: fm-28k.4
 title: "File-ticket epic stays a ticket after its file changes to type epic"
 type: bug
-status: open
+status: in_progress
 priority: 2
 parent: fm-28k
 blocked_by: []

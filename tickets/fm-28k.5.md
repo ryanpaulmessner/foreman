@@ -2,7 +2,7 @@
 id: fm-28k.5
 title: "New file tickets are not_found for about 20 s"
 type: bug
-status: open
+status: in_progress
 priority: 2
 parent: fm-28k
 blocked_by: []

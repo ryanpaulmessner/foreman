@@ -2,7 +2,7 @@
 id: fm-28k.8
 title: "Coordinator windows have no board session, so cards show Source unknown"
 type: bug
-status: open
+status: in_progress
 priority: 2
 parent: fm-28k
 blocked_by: []

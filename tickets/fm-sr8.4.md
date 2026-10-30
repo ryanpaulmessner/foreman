@@ -2,7 +2,7 @@
 id: fm-sr8.4
 title: "Focus switches the user's terminal to the session"
 type: feature
-status: open
+status: in_progress
 priority: 2
 parent: fm-sr8
 blocked_by: []
