@@ -2,9 +2,28 @@ defmodule Foreman.CLITest do
   use ExUnit.Case, async: true
   alias Foreman.CLI
 
+  test "registration requires a pane, absolute workdir and supported harness" do
+    for args <- [
+          ~w(session register),
+          ~w(session register --name coord --pane window --workdir /tmp --harness pi),
+          ~w(session register --name coord --pane %1 --workdir relative --harness pi),
+          ~w(session register --name coord --pane %1 --workdir /tmp --harness other)
+        ] do
+      assert {:error, message} = CLI.parse(args)
+      assert message =~ "--pane"
+    end
+  end
+
+  test "dispatch refuses the caller's identity unless --session names the build" do
+    assert {:error, message} = CLI.parse(~w(dispatch s-1 --window %4), session: "coordinator")
+    assert message =~ "--session"
+
+    assert {:ok, %{request: %{"session" => "build"}}} =
+             CLI.parse(~w(dispatch s-1 --window %4 --session build), session: "coordinator")
+  end
+
   test "ticket verbs encode their claims with actor/session defaults" do
     for {verb, event} <- [
-          {"dispatch", "dispatch"},
           {"progress", "progress"},
           {"report", "report"},
           {"review", "review"},
@@ -29,7 +48,7 @@ defmodule Foreman.CLITest do
              CLI.parse(["progress", "s-1", "working"])
 
     assert {:ok, %{request: %{"payload" => %{"window" => "build", "branch" => "feature"}}}} =
-             CLI.parse(["dispatch", "s-1", "--window", "build", "--branch", "feature"])
+             CLI.parse(~w(dispatch s-1 --window build --branch feature --session build))
   end
 
   test "ask decision --doc repeats; cwd-relative files become absolute, others stay repo-relative" do

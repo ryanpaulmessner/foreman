@@ -16,6 +16,14 @@ defmodule ForemanWeb.RequestContext do
         form: to_form(%{"reason" => ""}, as: :withdraw)
       )
 
+    assigns =
+      assign(
+        assigns,
+        :command_source,
+        assigns.source ||
+          if(assigns.request.session, do: %{target: assigns.request.session, server: :default})
+      )
+
     ~H"""
     <section
       id={@prefix <> "context-" <> @request.id}
@@ -44,7 +52,7 @@ defmodule ForemanWeb.RequestContext do
         <% end %>
       </p>
       <button
-        :if={@source}
+        :if={@source && !Map.get(@source, :ended_at)}
         id={@prefix <> "go-session-" <> @request.id}
         type="button"
         phx-click={@event}
@@ -55,6 +63,13 @@ defmodule ForemanWeb.RequestContext do
         Go to session
       </button>
       <p
+        :if={@source && Map.get(@source, :ended_at)}
+        id={@prefix <> "session-ended-" <> @request.id}
+        class="text-sm"
+      >
+        This session has ended.
+      </p>
+      <p
         :if={@focus == :window_gone}
         id={@prefix <> "session-closed-" <> @request.id}
         role="status"
@@ -63,21 +78,26 @@ defmodule ForemanWeb.RequestContext do
         The session window is closed.
       </p>
       <div
-        :if={@source && @focus in [:unattached, :tmux_unavailable]}
+        :if={
+          @command_source && @focus != :window_gone &&
+            (!@source || @focus in [:unattached, :tmux_unavailable])
+        }
         id={@prefix <> "session-command-" <> @request.id}
         class="space-y-2 text-sm"
         role="status"
       >
-        <p>Cannot focus the session. Copy this command to your terminal.</p>
+        <p>
+          {if @focus == :unattached, do: "No terminal is attached.", else: "Cannot focus the session."} Copy this command to your terminal.
+        </p>
         <code class="block select-all break-all rounded bg-sunken p-2">
-          {Foreman.RequestSource.command(@source)}
+          {Foreman.RequestSource.command(@command_source)}
         </code>
         <button
           id={@prefix <> "copy-session-" <> @request.id}
           type="button"
           phx-hook=".CopySession"
           phx-update="ignore"
-          data-command={Foreman.RequestSource.command(@source)}
+          data-command={Foreman.RequestSource.command(@command_source)}
           class="rounded border border-base px-3 py-2 hover:bg-sunken"
         >
           Copy command

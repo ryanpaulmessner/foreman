@@ -78,8 +78,19 @@ defmodule ForemanWeb.InitiativesLive do
 
     socket =
       case result do
-        {:error, reason} -> put_flash(socket, :error, Foreman.Sessions.error_message(reason))
-        _ -> socket
+        {:ok, :no_client} ->
+          put_flash(
+            socket,
+            :info,
+            "No terminal is attached. Run: " <>
+              Foreman.SessionTmux.attach_command(Foreman.Sessions.coordinator())
+          )
+
+        {:error, reason} ->
+          put_flash(socket, :error, Foreman.Sessions.error_message(reason))
+
+        _ ->
+          socket
       end
 
     {:noreply, refresh(socket)}
@@ -369,6 +380,10 @@ defmodule ForemanWeb.InitiativesLive do
           </Button.button>
           <Button.button
             id="coordinator-relaunch"
+            title={
+              if @coordinator && @coordinator.state in [:starting, :running, :waiting],
+                do: "The coordinator is still running."
+            }
             size="sm"
             variant="outline"
             phx-click="coordinator"
@@ -379,6 +394,10 @@ defmodule ForemanWeb.InitiativesLive do
           </Button.button>
           <Button.button
             id="coordinator-fresh"
+            title={
+              if @coordinator && @coordinator.state in [:starting, :running, :waiting],
+                do: "The coordinator is still running."
+            }
             size="sm"
             variant="ghost"
             phx-click="coordinator"

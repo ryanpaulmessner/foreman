@@ -1,19 +1,21 @@
 defmodule Foreman.RequestSource do
-  @moduledoc "Resolves a request to its registered session without guessing a tmux target."
+  @moduledoc "Resolves the card's own named session before a unique live tmux name or tag."
   import Ecto.Query
 
-  def for_request(request) do
+  def for_request(request, opts \\ [])
+  def for_request(%{session: nil}, _opts), do: nil
+
+  def for_request(request, opts) do
     dispatches =
       Foreman.Repo.all(
         from s in "sessions",
-          where:
-            s.repo_key == ^request.repo_key and s.bead_id == ^request.bead_id and
-              s.started_at <= ^request.inserted_at,
-          order_by: [desc: s.id],
-          select: %{window: s.window, details: s.details}
+          where: fragment("?->>'session'", s.details) == ^request.session,
+          order_by: [desc: s.repo_key == "__foreman__" and s.bead_id == "registered", desc: s.id],
+          select: %{window: s.window, details: s.details, ended_at: s.ended_at}
       )
 
-    resolve(request, dispatches, Foreman.Sessions.get({request.repo_key, request.bead_id}))
+    resolve(request, dispatches, Foreman.Sessions.get({request.repo_key, request.bead_id})) ||
+      live_source(request, opts)
   end
 
   def resolve(request, dispatches, planning \\ nil) do
@@ -24,39 +26,37 @@ defmodule Foreman.RequestSource do
       planning && planning.session_id == request.session && planning.window ->
         %{name: planning.ticket, harness: "claude", target: planning.window, server: :board}
 
-      dispatch =
-          Enum.find(dispatches, &matches?(&1, request.session)) ||
-            legacy_pane(List.first(dispatches), request.actor) ->
+      dispatch = Enum.find(dispatches, &matches?(&1, request.session)) ->
         %{
           name: request.session,
           harness: dispatch.details["harness"] || request.actor,
           target: dispatch.window,
           server: :default
         }
-
-      pane = external_waiting_pane(request) ->
-        %{name: request.session, harness: request.actor, target: pane, server: :default}
+        |> ended(dispatch)
 
       true ->
         nil
     end
   end
 
-  defp legacy_pane(%{window: "%" <> _, details: details} = dispatch, actor) do
-    if is_nil(details["session"]) and details["harness"] == actor, do: dispatch
+  defp live_source(request, opts) do
+    case Foreman.SessionTargets.lookup(request.session, opts) do
+      {:ok, pane} ->
+        %{name: request.session, harness: request.actor, target: pane, server: :default}
+
+      _ ->
+        nil
+    end
   end
 
-  defp legacy_pane(_, _), do: nil
+  defp ended(source, %{ended_at: at}) when not is_nil(at), do: Map.put(source, :ended_at, at)
+  defp ended(source, _), do: source
 
-  defp external_waiting_pane(%{
-         kind: "session_waiting",
-         facts: %{"target" => "external", "pane" => "%" <> _ = pane}
-       }),
-       do: pane
+  def focus(source, opts \\ [])
+  def focus(%{ended_at: at}, _opts) when not is_nil(at), do: {:error, :window_gone}
 
-  defp external_waiting_pane(_), do: nil
-
-  def focus(source, opts \\ []) do
+  def focus(source, opts) do
     run = fn args ->
       runner = Keyword.get(opts, :runner, &System.cmd/3)
 
@@ -74,18 +74,16 @@ defmodule Foreman.RequestSource do
              "-F",
              "\#{pane_id}\t\#{window_id}\t\#{session_name}\t\#{window_name}\t\#{pane_active}"
            ]),
-         {:ok, pane, window} <- target(panes, source.target),
-         {:ok, clients} <- run.(["list-clients", "-F", "\#{client_activity}\t\#{client_name}"]),
-         {:ok, client} <- client(clients),
-         {:ok, _} <- run.(["switch-client", "-c", client, "-t", pane]),
-         {:ok, _} <- run.(["select-window", "-t", window]),
-         {:ok, _} <- run.(["select-pane", "-t", pane]),
-         do: :ok
+         {:ok, pane, _window} <- target(panes, source.target),
+         do: Foreman.SessionFocus.show(pane, run, opts)
   rescue
     ErlangError -> {:error, :tmux_unavailable}
   end
 
-  def pane(source, opts \\ []) do
+  def pane(source, opts \\ [])
+  def pane(%{ended_at: at}, _opts) when not is_nil(at), do: {:error, :window_gone}
+
+  def pane(source, opts) do
     runner = Keyword.get(opts, :runner, &System.cmd/3)
 
     args = [
@@ -110,7 +108,7 @@ defmodule Foreman.RequestSource do
   end
 
   def command(source) do
-    tmux = "tmux -L " <> quote_arg(socket(source))
+    tmux = "tmux"
     target = quote_arg(source.target)
 
     pane =
@@ -148,19 +146,6 @@ defmodule Foreman.RequestSource do
     case Enum.uniq_by(matches, &elem(&1, 1)) do
       [{pane, window}] -> {:ok, pane, window}
       _ -> {:error, :window_gone}
-    end
-  end
-
-  defp client(output) do
-    clients =
-      for line <- String.split(output, "\n", trim: true),
-          [activity, client] <- [String.split(line, "\t")],
-          {time, ""} <- [Integer.parse(activity)],
-          do: {time, client}
-
-    case Enum.sort(clients, :desc) do
-      [{_, client} | _] -> {:ok, client}
-      [] -> {:error, :no_client}
     end
   end
 

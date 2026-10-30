@@ -78,6 +78,13 @@ defmodule Foreman.AgentCommands do
 
   defp command(%{"action" => "answer"}), do: {422, %{error: "invalid_answer"}}
 
+  defp command(%{"action" => "session_register"} = request) do
+    case Foreman.SessionRegistry.register(request) do
+      {:ok, body} -> {200, body}
+      {:error, reason} -> {422, %{error: reason}}
+    end
+  end
+
   defp command(%{"action" => "coordinator"} = request) do
     case Foreman.Sessions.coordinator_command(request) do
       {:ok, body} -> {200, body}

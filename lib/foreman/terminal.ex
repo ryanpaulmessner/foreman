@@ -2,16 +2,19 @@ defmodule Foreman.Terminal do
   @moduledoc """
   Brings the user's terminal app to the front after a session is shown in tmux.
   macOS only (osascript); elsewhere a no-op. The app is `board.terminal_app` in
-  foreman.toml, Ghostty by default. Failure never blocks the tmux switch.
+  foreman.toml, WezTerm by default. Failure never blocks the tmux switch.
   """
 
-  @default "Ghostty"
+  @default "WezTerm"
 
   def activate(opts \\ []) do
-    app = Keyword.get_lazy(opts, :app, &configured_app/0)
     runner = Keyword.get(opts, :runner, &System.cmd/3)
 
-    if Keyword.get(opts, :platform, :os.type()) == {:unix, :darwin} and app?(app) do
+    app =
+      if Keyword.get(opts, :platform, :os.type()) == {:unix, :darwin},
+        do: Keyword.get_lazy(opts, :app, &configured_app/0)
+
+    if app?(app) do
       try do
         runner.("osascript", ["-e", ~s(tell application "#{app}" to activate)],
           stderr_to_stdout: true

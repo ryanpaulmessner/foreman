@@ -322,7 +322,7 @@ defmodule Foreman.SessionWaitingTest do
              &Enum.take(elem(&1, 1), -5)
            )
 
-    assert {"osascript", ["-e", ~s(tell application "Ghostty" to activate)]} in calls
+    assert {"osascript", ["-e", ~s(tell application "WezTerm" to activate)]} in calls
     assert Requests.get(request.id).state == "pending"
 
     assert :ok =
@@ -555,7 +555,7 @@ defmodule Foreman.SessionWaitingTest do
   test "waiting is deduplicated, non-executable and cleared by resumed activity", %{session: s} do
     params = %{"session" => s.session_id, "facts" => %{"reason" => "permission"}}
     assert {:ok, request} = Requests.ask({"sample", "s-1"}, "session_waiting", params)
-    assert request.facts["attach"] =~ "tmux -L"
+    assert request.facts["attach"] =~ "tmux attach"
     assert {:ok, again} = Requests.ask({"sample", "s-1"}, "session_waiting", params)
     assert again.id == request.id
     assert Sessions.get({"sample", "s-1"}).state == :waiting
