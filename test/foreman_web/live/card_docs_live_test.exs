@@ -31,7 +31,10 @@ defmodule ForemanWeb.CardDocsLiveTest do
 
   defp decision(facts) do
     {:ok, request} =
-      Requests.ask({"sample", "s-1"}, "decision", %{"actor" => "pi", "facts" => facts})
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "actor" => "pi",
+        "facts" => Foreman.DecisionFacts.valid(facts)
+      })
 
     request
   end
@@ -89,14 +92,22 @@ defmodule ForemanWeb.CardDocsLiveTest do
     refute has_element?(view, "#{card} a[href*='secret']")
   end
 
-  test "explicit --doc links show on the card, open in the side panel and in the viewer",
-       %{conn: conn} do
-    request = decision(%{"question" => "Ship it?", "docs" => ["slices/one/reviews/27-r1.md"]})
+  test "explicit relative and absolute doc paths open in the side panel and viewer",
+       %{conn: conn, root: root} do
+    request =
+      decision(%{
+        "question" => "Ship it?",
+        "docs" => ["slices/one/reviews/27-r1.md", root <> "/docs/spec.md"]
+      })
+
     href = doc_href("slices/one/reviews/27-r1.md")
 
     {:ok, view, _} = live(conn, "/needs-you")
     assert has_element?(view, "#docs-#{request.id} a[href='#{href}']", "27-r1.md")
     refute has_element?(view, "#card-panel")
+    assert has_element?(view, "#docs-#{request.id} a[href='#{doc_href("docs/spec.md")}']")
+    render_hook(view, "open-doc", %{"href" => doc_href("docs/spec.md")})
+    assert has_element?(view, "#card-panel #panel-document h1", "Spec")
 
     render_hook(view, "open-doc", %{"href" => href})
 

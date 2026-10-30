@@ -21,7 +21,10 @@ defmodule Foreman.CLITransport do
   defp classify({:ok, %{status: status, body: body}}) when status in [400, 404, 422],
     do:
       {:refused,
-       %{"warning" => "foreman refused command: #{error(body)}", "error" => error(body)}}
+       Map.merge(
+         if(is_map(body), do: Map.take(body, ["stage", "next_command", "missing"]), else: %{}),
+         %{"warning" => "foreman refused command: #{error(body)}", "error" => error(body)}
+       )}
 
   defp classify(_), do: {:unavailable, %{}}
 

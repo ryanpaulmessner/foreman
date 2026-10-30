@@ -334,6 +334,7 @@ defmodule Foreman.Sessions do
       end)
 
   def reconcile(opts \\ []) do
+    Foreman.SessionRegistry.reconcile(opts)
     Foreman.SessionWaiting.reconcile_external()
 
     Repo.all(from s in PlanningSession, where: s.state != :parked or s.previous_windows != [])
@@ -501,6 +502,7 @@ defmodule Foreman.Sessions do
   def error_message("refused in preview"), do: "refused in preview"
   def error_message(:not_launchable), do: "Ticket cannot be launched"
   def error_message(:session_parked), do: "Session window is gone"
+  def error_message(:window_gone), do: "The session window is closed."
   def error_message(:main_checkout_unavailable), do: "Main checkout unavailable"
   def error_message(:claude_unavailable), do: "Claude unavailable; check the web service PATH"
   def error_message(:prompt_unavailable), do: "Install the foreman skill session-launch templates"

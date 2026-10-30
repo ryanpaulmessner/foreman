@@ -120,7 +120,7 @@ defmodule Foreman.SessionWaitingTest do
 
   test "an external pi session waiting for input still asks" do
     Foreman.Overlay.backfill("sample", [%{bead_id: "s-2", status: "open", issue_type: "task"}])
-    socket = "fm-external-#{System.unique_integer([:positive])}"
+    socket = Foreman.TestTmux.socket("fm-external")
 
     {_, 0} =
       System.cmd("tmux", [
@@ -212,7 +212,7 @@ defmodule Foreman.SessionWaitingTest do
 
   test "Continue is click-only, refuses other reasons and stale requests, and clears on activity",
        %{session: s} do
-    socket = "fm-waiting-#{System.unique_integer([:positive])}"
+    socket = Foreman.TestTmux.socket("fm-waiting")
     dir = Path.join(System.tmp_dir!(), socket)
     File.mkdir_p!(dir)
     executable = Path.join(dir, "receiver")
@@ -322,7 +322,7 @@ defmodule Foreman.SessionWaitingTest do
              &Enum.take(elem(&1, 1), -5)
            )
 
-    assert {"osascript", ["-e", ~s(tell application "Ghostty" to activate)]} in calls
+    assert {"osascript", ["-e", ~s(tell application "WezTerm" to activate)]} in calls
     assert Requests.get(request.id).state == "pending"
 
     assert :ok =
@@ -486,7 +486,7 @@ defmodule Foreman.SessionWaitingTest do
 
   test "a chat reply to an external session needs the same pane and process", %{session: _} do
     Foreman.Overlay.backfill("sample", [%{bead_id: "s-2", status: "open", issue_type: "task"}])
-    socket = "fm-external-#{System.unique_integer([:positive])}"
+    socket = Foreman.TestTmux.socket("fm-external")
     dir = Path.join(System.tmp_dir!(), socket)
     File.mkdir_p!(dir)
     executable = Path.join(dir, "prompt")
@@ -555,7 +555,7 @@ defmodule Foreman.SessionWaitingTest do
   test "waiting is deduplicated, non-executable and cleared by resumed activity", %{session: s} do
     params = %{"session" => s.session_id, "facts" => %{"reason" => "permission"}}
     assert {:ok, request} = Requests.ask({"sample", "s-1"}, "session_waiting", params)
-    assert request.facts["attach"] =~ "tmux -L"
+    assert request.facts["attach"] =~ "tmux attach"
     assert {:ok, again} = Requests.ask({"sample", "s-1"}, "session_waiting", params)
     assert again.id == request.id
     assert Sessions.get({"sample", "s-1"}).state == :waiting

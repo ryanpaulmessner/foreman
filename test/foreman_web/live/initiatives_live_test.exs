@@ -150,6 +150,27 @@ defmodule ForemanWeb.InitiativesLiveTest do
     assert has_element?(view, "#coordinator-fresh[data-confirm]")
   end
 
+  test "coordinator focus without a client gives an attach command and explains disabled actions",
+       %{conn: conn} do
+    {:ok, _, :fresh} = Foreman.Sessions.prepare_coordinator(:resume, window: "@123")
+    Mimic.stub(Foreman.SessionTmux, :focus, fn _ -> {:ok, :no_client} end)
+    {:ok, view, _} = live(conn, "/")
+    Mimic.allow(Foreman.SessionTmux, self(), view.pid)
+
+    assert has_element?(
+             view,
+             "#coordinator-relaunch[disabled][title='The coordinator is still running.']"
+           )
+
+    assert has_element?(
+             view,
+             "#coordinator-fresh[disabled][title='The coordinator is still running.']"
+           )
+
+    view |> element("#coordinator-focus") |> render_click()
+    assert has_element?(view, "#flash-group", "No terminal is attached. Run: tmux attach")
+  end
+
   test "an idle coordinator shows waiting on its row with nothing in Needs you", %{conn: conn} do
     {:ok, s, :fresh} = Foreman.Sessions.prepare_coordinator(:resume, window: "@123")
     {:waiting, facts} = Foreman.SessionHooks.facts("Stop", %{})

@@ -28,7 +28,9 @@ defmodule Foreman.CardReplyCLITest do
     )
 
     {:ok, r} =
-      Foreman.Requests.ask({"sample", "s-1"}, "decision", %{"facts" => %{"question" => "Which?"}})
+      Foreman.Requests.ask({"sample", "s-1"}, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
+      })
 
     assert {:ok, %{request: command, json: true}} =
              Foreman.CLI.parse(["card-reply", r.id, "--text", "**Because**", "--json"],

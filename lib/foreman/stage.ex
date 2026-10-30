@@ -47,6 +47,7 @@ defmodule Foreman.Stage do
   effects([:record, :append, :link, :unlink, :flag, :suggest, :emit])
   guard(:new_session?)
   guard(:other_open_cr?)
+  guard(:coordinator?)
 
   transition(:dispatch, from: :queued, to: :dispatched, do: [record: :session, emit: :stage])
 
@@ -66,6 +67,13 @@ defmodule Foreman.Stage do
     from: :in_review,
     to: :building,
     do: [append: :finding, emit: :stage]
+  )
+
+  transition(:commit,
+    from: [:queued, :dispatched, :building],
+    to: :committed,
+    guard: :coordinator?,
+    do: [record: :commit, emit: :stage]
   )
 
   transition(:commit, from: :in_review, to: :committed, do: [record: :commit, emit: :stage])
@@ -103,6 +111,9 @@ defmodule Foreman.Stage do
   invalid([:dispatch, :progress, :report, :review, :request_changes, :commit, :abandon, :revive],
     from: :any
   )
+
+  def coordinator?(_, %{actor: "claude"}), do: true
+  def coordinator?(_, _), do: false
 
   def new_session?(%{session_window: current}, %{window: window}), do: window != current
   def new_session?(_, _), do: false

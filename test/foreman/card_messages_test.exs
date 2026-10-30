@@ -14,7 +14,7 @@ defmodule Foreman.CardMessagesTest do
       Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "pi",
         "session" => "build",
-        "facts" => %{"question" => "Which?"}
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
       })
 
     %{request: request}
@@ -109,6 +109,14 @@ defmodule Foreman.CardMessagesTest do
   end
 
   test "external waiting cards refuse a replaced pane process", %{request: r} do
+    assert {:ok, _} =
+             Foreman.SessionRegistry.register(%{
+               "name" => r.session,
+               "pane" => "%42",
+               "workdir" => "/tmp",
+               "harness" => "pi"
+             })
+
     r =
       r
       |> Ecto.Changeset.change(

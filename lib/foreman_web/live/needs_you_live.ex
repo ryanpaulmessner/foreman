@@ -96,7 +96,12 @@ defmodule ForemanWeb.NeedsYouLive do
   @doc "Resolves a shared request form, regardless of its page or drawer location."
   def resolve(%{"id" => id, "decision" => params, "action" => "answer"}) do
     answer = if params["choice"] in [nil, ""], do: params["note"], else: params["choice"]
-    Requests.resolve(id, :answer, %{"answer" => answer, "note" => params["note"]})
+
+    Requests.resolve(id, :answer, %{
+      "answer" => answer,
+      "note" => params["note"],
+      "image_comments" => params["image_comments"]
+    })
   end
 
   def resolve(%{"id" => id, "decision" => params, "action" => action})
@@ -792,7 +797,9 @@ defmodule ForemanWeb.NeedsYouLive do
         heading={@heading}
       />
       <div class="mb-4 flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
-        <Badge.badge>Decision</Badge.badge>
+        <Badge.badge>
+          {if @request.kind == "review_ui", do: "UI review", else: "Decision"}
+        </Badge.badge>
         <ForemanWeb.RequestCard.ticket_link
           id={@prefix <> "ticket-link-" <> @request.id}
           request={@request}
@@ -827,6 +834,11 @@ defmodule ForemanWeb.NeedsYouLive do
         phx-value-id={@request.id}
         class="mt-5 space-y-4"
       >
+        <ForemanWeb.ReviewImages.grid
+          :if={@request.kind == "review_ui"}
+          request={@request}
+          prefix={@prefix}
+        />
         <fieldset :if={@request.facts["options"] != []} class="space-y-2">
           <legend class="sr-only">Options</legend>
           <label

@@ -15,7 +15,7 @@ defmodule ForemanWeb.CardQuestionsTest do
       Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "pi",
         "session" => "build",
-        "facts" => %{"question" => "Which?"}
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
       })
 
     %{request: r}
@@ -54,7 +54,7 @@ defmodule ForemanWeb.CardQuestionsTest do
     assert has_element?(view, "#card-question-copy-#{r.id}", "[card question #{r.id}] Why?")
     assert has_element?(view, "#card-question-retry-#{r.id}")
     assert has_element?(view, "#go-session-#{r.id}")
-    assert has_element?(view, "#card-conversation-#{r.id} code", "tmux -L")
+    assert has_element?(view, "#card-conversation-#{r.id} code", "tmux select-window")
     assert CardMessages.list(r.id) == []
   end
 
@@ -140,7 +140,7 @@ defmodule ForemanWeb.CardQuestionsTest do
         Requests.ask({r.repo_key, r.bead_id}, "decision", %{
           "actor" => "pi",
           "session" => "build-#{n}",
-          "facts" => %{"question" => "Which #{n}?"}
+          "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which #{n}?"})
         })
 
       {:ok, _} = CardMessages.reply(request.id, "pi", nil, "Reply #{n}")

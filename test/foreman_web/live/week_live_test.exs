@@ -165,5 +165,7 @@ defmodule ForemanWeb.WeekLiveTest do
   test "empty week has a clear empty state", %{conn: conn} do
     {:ok, view, _} = live(conn, "/week")
     assert has_element?(view, "#week-empty")
+    send(view.pid, {:unrelated_board_event, "work"})
+    assert has_element?(view, "#week-empty")
   end
 end

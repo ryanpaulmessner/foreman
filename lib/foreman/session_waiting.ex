@@ -181,7 +181,7 @@ defmodule Foreman.SessionWaiting do
              &SessionTmux.open_session(&1, opts),
              &SessionTmux.open_external(&1, opts)
            ) do
-      Foreman.Terminal.activate(opts)
+      :ok
     else
       nil -> {:error, :not_found}
       %Request{} -> {:error, :invalid}

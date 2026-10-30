@@ -14,7 +14,9 @@ defmodule Foreman.RequestsTest do
       "facts" => %{
         "question" => "Which layout?",
         "options" => ["Wide", "Compact"],
-        "recommendation" => "Compact"
+        "recommendation" => "Compact",
+        "text" => "What: Layout\nPart of: Cards\nWhy now: Review",
+        "option_details" => %{"Wide" => "Use wide layout", "Compact" => "Use compact layout"}
       }
     })
   end
@@ -52,8 +54,8 @@ defmodule Foreman.RequestsTest do
     end
   end
 
-  test "unknown options and blank consequence text are refused" do
-    for details <- [%{"Other" => "Do something"}, %{"A" => " "}, ["bad"]] do
+  test "unknown options and malformed consequence details are refused" do
+    for details <- [%{"Other" => "Do something"}, %{"A" => 1}, ["bad"]] do
       assert {:error, :invalid_facts} =
                Requests.ask({"sample", "s-1"}, "decision", %{
                  "facts" => %{
@@ -80,7 +82,9 @@ defmodule Foreman.RequestsTest do
     on_exit(fn -> File.rm_rf!(root) && File.rm_rf!(outside) end)
     Foreman.ScratchDocs.configure(%{"sample" => root})
 
-    facts = fn docs -> %{"facts" => %{"question" => "Ship?", "docs" => docs}} end
+    facts = fn docs ->
+      %{"facts" => Foreman.DecisionFacts.valid(%{"question" => "Ship?", "docs" => docs})}
+    end
 
     assert {:ok, request} =
              Requests.ask(
@@ -104,7 +108,9 @@ defmodule Foreman.RequestsTest do
     Foreman.Overlay.apply_event({"sample", "draft:plan"}, {:create, %{title: "Mobile access"}})
 
     {:ok, request} =
-      Requests.ask({"sample", "draft:plan"}, "decision", %{"facts" => %{"question" => "Build?"}})
+      Requests.ask({"sample", "draft:plan"}, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Build?"})
+      })
 
     assert Foreman.RequestHeader.for_request(request).title == "Mobile access"
   end
@@ -125,18 +131,25 @@ defmodule Foreman.RequestsTest do
     Overlay.backfill("sample", [%{bead_id: "s-e", status: "open", issue_type: "epic"}])
 
     {:ok, original} =
-      Requests.ask({"sample", "s-e"}, "decision", %{"facts" => %{"question" => "Original?"}})
+      Requests.ask({"sample", "s-e"}, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Original?"})
+      })
 
     key = {"sample", "draft:plan"}
     Overlay.apply_event(key, {:create, %{title: "Plan"}})
-    {:ok, draft} = Requests.ask(key, "decision", %{"facts" => %{"question" => "Draft?"}})
+
+    {:ok, draft} =
+      Requests.ask(key, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Draft?"})
+      })
+
     Overlay.apply_event(key, :start_spec)
     Overlay.apply_event(key, :approve_spec)
     Overlay.apply_event(key, {:ticket, %{beads_epic_id: "s-e"}})
     assert MapSet.new(Requests.for_ticket(key), & &1.id) == MapSet.new([original.id, draft.id])
     assert {:ok, _} = Overlay.apply_event(key, :bead_epic_closed)
-    assert Requests.get(original.id).state == "superseded"
-    assert Requests.get(draft.id).state == "superseded"
+    assert Requests.get(original.id).state == "pending"
+    assert Requests.get(draft.id).state == "pending"
   end
 
   test "blank answer is rejected without changing the request" do
@@ -147,12 +160,22 @@ defmodule Foreman.RequestsTest do
   end
 
   for event <- [:abandon, :bead_closed] do
-    test "#{event} supersedes pending requests, preserves answered ones, refuses fresh asks" do
+    test "#{event} supersedes action requests but keeps decisions and other kinds" do
+      actions =
+        for kind <- ~w(push open_pr merge) do
+          {:ok, request} = ask()
+          request |> Ecto.Changeset.change(kind: kind) |> Repo.update!()
+        end
+
+      {:ok, other} = ask()
+      other |> Ecto.Changeset.change(kind: "session_waiting") |> Repo.update!()
       {:ok, pending} = ask()
       {:ok, answered} = ask()
       Requests.resolve(answered.id, :answer, %{"answer" => "Other"})
       Overlay.apply_event({"sample", "s-1"}, unquote(event))
-      assert Requests.get(pending.id).state == "superseded"
+      for request <- actions, do: assert(Requests.get(request.id).state == "superseded")
+      assert Requests.get(other.id).state == "pending"
+      assert Requests.get(pending.id).state == "pending"
       assert Requests.get(answered.id).state == "answered"
       assert {:error, :ticket_finished} = ask()
     end

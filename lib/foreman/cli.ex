@@ -19,6 +19,8 @@ defmodule Foreman.CLI do
     "revive" => "revive"
   }
   @switches [
+    name: :string,
+    pane: :string,
     reason: :string,
     provider: :string,
     reset_at: :string,
@@ -33,6 +35,10 @@ defmodule Foreman.CLI do
     recommendation: :string,
     text: :string,
     doc: :keep,
+    image: :keep,
+    artifact: :string,
+    look_at: :string,
+    scratchpad: :string,
     timeout: :integer,
     json: :boolean,
     actor: :string,
@@ -147,24 +153,35 @@ defmodule Foreman.CLI do
     :exit, _ -> warn(args, "foreman unavailable; agent may continue")
   end
 
-  defp wait(request, opts, deadline) do
+  defp wait(request, opts, deadline, state \\ :waiting, snapshot \\ nil) do
     {_, body} = Foreman.CLITransport.deliver(request, opts)
+    {next, effects} = Foreman.RequestWait.step(state, {:response, body}, %{})
 
-    case Foreman.RequestWait.step(:waiting, {:response, body}, %{}) do
+    if {:warn, :unavailable} in effects,
+      do: IO.puts(:stderr, "warning: wait poll failed; retrying until the deadline")
+
+    snapshot = if Foreman.RequestWait.snapshot?(nil, body), do: body, else: snapshot
+
+    case {next, effects} do
       {:finished, _} ->
         {0, body}
 
-      {:waiting, _} ->
+      {state, _} when state in [:waiting, :retrying] ->
         remaining = deadline - System.monotonic_time(:millisecond)
 
         if remaining <= 0 do
-          {:finished, _} = Foreman.RequestWait.step(:waiting, :timeout, %{})
-          {0, body}
+          {:finished, _} = Foreman.RequestWait.step(state, :timeout, %{})
+          {0, snapshot || body}
         else
           receive do
           after
             min(remaining, Keyword.get(opts, :poll_interval, 500)) ->
-              wait(request, opts, deadline)
+              if System.monotonic_time(:millisecond) >= deadline do
+                {:finished, _} = Foreman.RequestWait.step(state, :timeout, %{})
+                {0, snapshot || body}
+              else
+                wait(request, opts, deadline, state, snapshot)
+              end
           end
         end
     end
@@ -184,6 +201,12 @@ defmodule Foreman.CLI do
         " " <>
         String.trim_trailing(System.get_env("FOREMAN_URL", "http://127.0.0.1:4747"), "/") <> url
 
+  defp format(%{"stage" => stage, "next_command" => command} = body),
+    do: "#{body["error"] || "Command refused"}; current stage: #{stage}; next: #{command}"
+
+  defp format(%{"error" => "card_unclear", "missing" => missing}),
+    do: "card_unclear: Missing " <> Enum.join(missing, ", ")
+
   defp format(%{"warning" => warning}), do: "warning: " <> warning
 
   defp format(%{"stage" => stage, "allowed" => allowed}),
@@ -198,6 +221,18 @@ defmodule Foreman.CLI do
       "session" => opts[:session] || defaults[:session] || System.get_env("FOREMAN_SESSION"),
       "project" => opts[:project] || opts[:repo],
       "cwd" => defaults[:cwd] || File.cwd!()
+    }
+  end
+
+  defp ask_facts("review_ui", opts, cwd) do
+    %{
+      "question" => opts[:question],
+      "text" => opts[:text],
+      "artifact" => opts[:artifact],
+      "look_at" => opts[:look_at],
+      "scratchpad" => if(opts[:scratchpad], do: Path.expand(opts[:scratchpad], cwd)),
+      "images" =>
+        Foreman.ReviewImageInput.expand(Keyword.get_values(opts, :image), cwd, opts[:look_at])
     }
   end
 
@@ -298,7 +333,26 @@ defmodule Foreman.CLI do
         rest -> {"ticket", rest}
       end
 
+    session = opts[:session]
+
     case {invalid, args} do
+      {[], ["session", "register"]} ->
+        request =
+          Map.new(Keyword.take(opts, [:name, :pane, :workdir, :harness]), fn {k, v} ->
+            {to_string(k), v}
+          end)
+
+        if Foreman.SessionRegistry.valid?(request) do
+          {:ok,
+           %{
+             request: Map.merge(request, %{"action" => "session_register", "transient" => true}),
+             json: opts[:json] || false
+           }}
+        else
+          {:error,
+           "session register requires --name <name> --pane <%id> --workdir <absolute-path> --harness claude|pi"}
+        end
+
       {[], ["ask", request_kind, id]} when kind == "ticket" ->
         request =
           request_identity(opts, defaults)
@@ -352,6 +406,9 @@ defmodule Foreman.CLI do
         else
           {:error, :usage}
         end
+
+      {[], ["dispatch" | _]} when not is_binary(session) or session == "" ->
+        {:error, "dispatch requires --session <build-name>"}
 
       {[], [verb | rest]} ->
         event = if(kind == "epic", do: @epic, else: @ticket)[verb]

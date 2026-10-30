@@ -9,9 +9,11 @@ defmodule Foreman.Requests.Decision do
     if text?(facts["question"]) and is_list(options) and length(options) <= 30 and
          Enum.all?(options, &text?/1) and details?(facts["option_details"], options) and
          (is_nil(recommendation) or recommendation in options) and
-         (is_nil(facts["text"]) or text?(facts["text"])) do
+         (is_nil(facts["text"]) or
+            (is_binary(facts["text"]) and byte_size(facts["text"]) <= 20_000)) do
       # --doc paths must name Markdown files in a configured repo; stored as {repo, path}.
-      with {:ok, docs} <- Foreman.CardText.docs(facts["docs"], row.repo_key) do
+      with :ok <- clear?(facts, options),
+           {:ok, docs} <- Foreman.CardText.docs(facts["docs"], row.repo_key) do
         facts =
           facts
           |> Map.put("options", Enum.uniq(options))
@@ -28,10 +30,32 @@ defmodule Foreman.Requests.Decision do
   @impl true
   def enqueue(_), do: {:error, :decision_not_executable}
 
+  defp clear?(facts, options) do
+    text = facts["text"] || ""
+
+    labels =
+      Enum.reject(["What", "Part of", "Why now"], fn label ->
+        Regex.match?(
+          Regex.compile!("(?:^|\\n)\\s*(?:\\*\\*)?" <> label <> "\\s*:(?:\\*\\*)?", "i"),
+          text
+        )
+      end)
+
+    details = facts["option_details"] || %{}
+
+    missing =
+      labels ++ for option <- options, not text?(details[option]), do: "option detail: " <> option
+
+    if missing == [], do: :ok, else: {:error, %{error: "card_unclear", missing: missing}}
+  end
+
   defp details?(nil, _), do: true
 
   defp details?(details, options) when is_map(details),
-    do: Enum.all?(details, fn {option, text} -> option in options and text?(text) end)
+    do:
+      Enum.all?(details, fn {option, text} ->
+        option in options and is_binary(text) and byte_size(text) <= 20_000
+      end)
 
   defp details?(_, _), do: false
 

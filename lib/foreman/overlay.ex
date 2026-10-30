@@ -51,7 +51,19 @@ defmodule Foreman.Overlay do
           lock(key)
           machine = if bead.issue_type in [:epic, "epic"], do: Epic, else: Stage
 
-          if is_nil(get(key)) do
+          existing = get(key)
+
+          if is_nil(existing) or existing.machine != machine do
+            if existing do
+              if existing.bead_id != bead.bead_id do
+                apply_event({repo, existing.bead_id}, :bead_reclassified, %{actor: "backfill"})
+              else
+                Repo.delete_all(
+                  from row in table(existing.machine), where: row.id == ^existing.id
+                )
+              end
+            end
+
             stage =
               if bead.status in [:closed, "closed"],
                 do: :done,
@@ -67,7 +79,9 @@ defmodule Foreman.Overlay do
 
             row = if machine == Epic, do: Map.put(row, :beads_epic_id, bead.bead_id), else: row
             Repo.insert_all(table(machine), [row])
-            record(key, machine, :backfill, %{}, "backfill", "beads", nil, stage, "row", [])
+            event = if existing, do: :reclassify, else: :backfill
+            from_stage = if existing, do: existing.stage
+            record(key, machine, event, %{}, "backfill", "beads", from_stage, stage, "row", [])
           end
         end)
 
@@ -152,11 +166,19 @@ defmodule Foreman.Overlay do
                guard_payload = %{
                  window: payload["window"],
                  number: payload["number"],
-                 beads_epic_id: payload["beads_epic_id"]
+                 beads_epic_id: payload["beads_epic_id"],
+                 actor: Map.get(metadata, :actor, "user")
                }
 
                source = Map.get(row.machine.__fsm__(:sources), name, :claimed) |> to_string()
                actor = Map.get(metadata, :actor, "user")
+
+               source =
+                 if row.machine == Foreman.Stage and name == :commit and actor == "claude" and
+                      row.stage in [:queued, :dispatched, :building],
+                    do: "coordinator",
+                    else: source
+
                result = row.machine.step(row.stage, {name, guard_payload}, data)
 
                case result do
@@ -175,7 +197,13 @@ defmodule Foreman.Overlay do
                    )
 
                    notify(key)
-                   {:error, %{stage: row.stage, allowed: allowed(row, data)}}
+
+                   {:error,
+                    %{
+                      stage: row.stage,
+                      allowed: allowed(row, data),
+                      next_command: Foreman.StageGuidance.next(row.stage, elem(key, 1), actor)
+                    }}
 
                  {stage, effects} ->
                    validate_effects!(effects, payload)
@@ -395,6 +423,10 @@ defmodule Foreman.Overlay do
         set: [{field, payload[key]}]
       )
     end
+  end
+
+  defp persist_effect({:unlink, :beads_epic}, _, row, _, _, _) do
+    Repo.update_all(from(e in "epics", where: e.id == ^row.id), set: [beads_epic_id: nil])
   end
 
   defp persist_effect({:link, :beads_epic}, {repo, id}, row, _, payload, _) do

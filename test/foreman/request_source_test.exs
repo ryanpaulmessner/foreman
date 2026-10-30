@@ -15,13 +15,13 @@ defmodule Foreman.RequestSourceTest do
     end
   end
 
-  test "legacy pane dispatches retain the request's logical build name" do
+  test "unnamed legacy dispatches never borrow the request's identity" do
     source =
       RequestSource.resolve(%{session: "build", actor: "pi"}, [
         %{window: "%464", details: %{"harness" => "pi"}}
       ])
 
-    assert source == %{name: "build", harness: "pi", target: "%464", server: :default}
+    assert source == nil
   end
 
   test "legacy pane dispatch does not borrow another actor's session" do
@@ -30,7 +30,7 @@ defmodule Foreman.RequestSourceTest do
            ]) == nil
   end
 
-  test "configured sockets are used by focus and copied commands" do
+  test "configured sockets are used internally but copied commands use the default server" do
     for {server, key} <- [board: :planning_tmux_socket, default: :external_tmux_socket] do
       old = Application.fetch_env(:foreman, key)
 
@@ -50,7 +50,8 @@ defmodule Foreman.RequestSourceTest do
       end
 
       assert RequestSource.focus(source, runner: runner) == {:error, :tmux_unavailable}
-      assert RequestSource.command(source) =~ "tmux -L 'custom-'\\''socket'"
+      refute RequestSource.command(source) =~ " -L "
+      assert RequestSource.command(source) =~ "tmux select-window"
     end
   end
 
@@ -63,7 +64,7 @@ defmodule Foreman.RequestSourceTest do
            ) == {:error, :window_gone}
   end
 
-  test "validated external waiting facts name their pane" do
+  test "old waiting facts are not a substitute for named session resolution" do
     request = %{
       session: "external",
       actor: "pi",
@@ -71,12 +72,7 @@ defmodule Foreman.RequestSourceTest do
       facts: %{"target" => "external", "pane" => "%464"}
     }
 
-    assert RequestSource.resolve(request, []) == %{
-             name: "external",
-             harness: "pi",
-             target: "%464",
-             server: :default
-           }
+    assert RequestSource.resolve(request, []) == nil
   end
 
   test "unknown and unrelated sessions do not guess a target" do
@@ -100,18 +96,15 @@ defmodule Foreman.RequestSourceTest do
       end
     end
 
-    assert RequestSource.focus(source, runner: runner) == :ok
+    assert RequestSource.focus(source, runner: runner, platform: {:unix, :linux}) == :ok
     assert_receive {:tmux, ["-N", "-L", "default", "list-panes" | _]}
     assert_receive {:tmux, ["-N", "-L", "default", "list-clients" | _]}
 
     assert_receive {:tmux,
                     ["-N", "-L", "default", "switch-client", "-c", "/dev/ttys001", "-t", "%464"]}
 
-    assert_receive {:tmux, ["-N", "-L", "default", "select-window", "-t", "@12"]}
-    assert_receive {:tmux, ["-N", "-L", "default", "select-pane", "-t", "%464"]}
-
     assert RequestSource.command(source) ==
-             ~S|tmux -L 'default' select-window -t '%464' && tmux -L 'default' select-pane -t '%464' && if [ -n "$TMUX" ]; then tmux -L 'default' switch-client -t "$(tmux -L 'default' display-message -p -t '%464' '#{session_id}')"; else tmux -L 'default' attach-session -t "$(tmux -L 'default' display-message -p -t '%464' '#{session_id}')"; fi|
+             ~S|tmux select-window -t '%464' && tmux select-pane -t '%464' && if [ -n "$TMUX" ]; then tmux switch-client -t "$(tmux display-message -p -t '%464' '#{session_id}')"; else tmux attach-session -t "$(tmux display-message -p -t '%464' '#{session_id}')"; fi|
   end
 
   test "a window target keeps its active pane" do
@@ -134,7 +127,7 @@ defmodule Foreman.RequestSourceTest do
       end
     end
 
-    assert RequestSource.focus(source, runner: runner) == :ok
+    assert RequestSource.focus(source, runner: runner, platform: {:unix, :linux}) == :ok
   end
 
   test "no attached client returns a failure without tmux writes" do
