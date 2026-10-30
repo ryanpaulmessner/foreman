@@ -63,33 +63,14 @@ defmodule Foreman.SessionTmux do
 
   def focus(session, opts \\ []) do
     with :ok <- Foreman.Preview.allow_external_write(),
-         {:ok, %{window: window}} <- observe(session, opts),
-         {:ok, _} <- cmd(["select-window", "-t", window], opts),
-         do: switch_latest_client(window, opts)
-  end
-
-  # Selecting a window only changes what an attached client sees if that client
-  # is on the window's session; move the most recently active client there too.
-  defp switch_latest_client(window, opts) do
-    with {:ok, out} <- cmd(["list-clients", "-F", ~S(#{client_activity} #{client_name})], opts) do
-      latest =
-        out
-        |> String.split("\n", trim: true)
-        |> Enum.flat_map(fn line ->
-          with [activity, client] <- String.split(line, " ", parts: 2),
-               {activity, ""} <- Integer.parse(activity),
-               do: [{activity, client}],
-               else: (_ -> [])
-        end)
-        |> Enum.max_by(&elem(&1, 0), fn -> nil end)
-
-      case latest do
-        nil ->
-          :ok
-
-        {_, client} ->
-          with {:ok, _} <- cmd(["switch-client", "-c", client, "-t", window], opts), do: :ok
+         {:ok, %{window: window}} <- observe(session, opts) do
+      case Foreman.SessionFocus.show(window, &cmd(&1, opts), opts) do
+        {:error, :no_client} -> {:ok, :no_client}
+        result -> result
       end
+    else
+      {:ok, :window_gone} -> {:error, :window_gone}
+      error -> error
     end
   end
 
@@ -125,9 +106,7 @@ defmodule Foreman.SessionTmux do
          "pane" => pane,
          "pid" => pid,
          "snapshot" => digest(content),
-         "attach" =>
-           "tmux -L " <>
-             quote_arg(external_socket(opts)) <> " attach -t " <> quote_arg(project <> ":" <> wid)
+         "attach" => "tmux attach -t " <> quote_arg(project <> ":" <> wid)
        }}
     else
       _ -> {:error, :invalid_window}
@@ -168,13 +147,13 @@ defmodule Foreman.SessionTmux do
   def open_session(session, opts \\ []) do
     with :ok <- Foreman.Preview.allow_external_write(),
          {:ok, pane} <- session_pane(session, opts),
-         do: show(pane, &cmd(&1, opts))
+         do: Foreman.SessionFocus.show(pane, &cmd(&1, opts), opts)
   end
 
   def open_external(facts, opts \\ []) do
     with :ok <- Foreman.Preview.allow_external_write(),
          {:ok, current} <- external_pane(facts, opts),
-         do: show(current["pane"], &external_cmd(&1, opts))
+         do: Foreman.SessionFocus.show(current["pane"], &external_cmd(&1, opts), opts)
   end
 
   @doc "Answers a question prompt that is still on screen; otherwise `{:error, :prompt_changed}`."
@@ -283,27 +262,6 @@ defmodule Foreman.SessionTmux do
     else
       {:error, :tmux_unavailable} -> {:error, :tmux_unavailable}
       _ -> {:error, :window_gone}
-    end
-  end
-
-  defp show(pane, run) do
-    with {:ok, output} <-
-           tmux(run, ["list-clients", "-F", "\#{client_activity}\t\#{client_name}"]) do
-      clients =
-        for line <- String.split(output, "\n", trim: true),
-            [activity, name] <- [String.split(line, "\t", parts: 2)],
-            {activity, ""} <- [Integer.parse(activity)],
-            do: {activity, name}
-
-      case clients do
-        [] ->
-          {:error, :no_client}
-
-        clients ->
-          {_, client} = Enum.max(clients)
-
-          with {:ok, _} <- tmux(run, ["switch-client", "-c", client, "-t", pane]), do: :ok
-      end
     end
   end
 
@@ -417,8 +375,17 @@ defmodule Foreman.SessionTmux do
           create(session, prompt, windows, opts)
 
         window ->
-          with {:ok, _} <- cmd(["select-window", "-t", window.window], opts),
-               do: {:ok, window.window}
+          case Foreman.SessionFocus.show(window.window, &cmd(&1, opts), opts) do
+            :ok ->
+              {:ok, window.window}
+
+            {:error, :no_client} ->
+              with {:ok, _} <- cmd(["select-window", "-t", window.window], opts),
+                   do: {:ok, window.window}
+
+            error ->
+              error
+          end
       end
     end
   end
@@ -477,8 +444,8 @@ defmodule Foreman.SessionTmux do
     end
   end
 
-  def attach_command(session, opts \\ []) do
-    "tmux -L #{quote_arg(socket(opts))} attach -t #{quote_arg(tmux_project(session) <> ":" <> (Map.get(session, :window) || session.ticket))}"
+  def attach_command(session, _opts \\ []) do
+    "tmux attach -t #{quote_arg(tmux_project(session) <> ":" <> (Map.get(session, :window) || session.ticket))}"
   end
 
   defp create(s, prompt, windows, opts) do

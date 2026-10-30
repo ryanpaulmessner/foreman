@@ -19,6 +19,8 @@ defmodule Foreman.CLI do
     "revive" => "revive"
   }
   @switches [
+    name: :string,
+    pane: :string,
     reason: :string,
     provider: :string,
     reset_at: :string,
@@ -298,7 +300,26 @@ defmodule Foreman.CLI do
         rest -> {"ticket", rest}
       end
 
+    session = opts[:session]
+
     case {invalid, args} do
+      {[], ["session", "register"]} ->
+        request =
+          Map.new(Keyword.take(opts, [:name, :pane, :workdir, :harness]), fn {k, v} ->
+            {to_string(k), v}
+          end)
+
+        if Foreman.SessionRegistry.valid?(request) do
+          {:ok,
+           %{
+             request: Map.merge(request, %{"action" => "session_register", "transient" => true}),
+             json: opts[:json] || false
+           }}
+        else
+          {:error,
+           "session register requires --name <name> --pane <%id> --workdir <absolute-path> --harness claude|pi"}
+        end
+
       {[], ["ask", request_kind, id]} when kind == "ticket" ->
         request =
           request_identity(opts, defaults)
@@ -352,6 +373,9 @@ defmodule Foreman.CLI do
         else
           {:error, :usage}
         end
+
+      {[], ["dispatch" | _]} when not is_binary(session) or session == "" ->
+        {:error, "dispatch requires --session <build-name>"}
 
       {[], [verb | rest]} ->
         event = if(kind == "epic", do: @epic, else: @ticket)[verb]

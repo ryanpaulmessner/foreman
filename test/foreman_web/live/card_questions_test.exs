@@ -54,7 +54,7 @@ defmodule ForemanWeb.CardQuestionsTest do
     assert has_element?(view, "#card-question-copy-#{r.id}", "[card question #{r.id}] Why?")
     assert has_element?(view, "#card-question-retry-#{r.id}")
     assert has_element?(view, "#go-session-#{r.id}")
-    assert has_element?(view, "#card-conversation-#{r.id} code", "tmux -L")
+    assert has_element?(view, "#card-conversation-#{r.id} code", "tmux select-window")
     assert CardMessages.list(r.id) == []
   end
 

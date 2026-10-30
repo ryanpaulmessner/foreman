@@ -109,6 +109,14 @@ defmodule Foreman.CardMessagesTest do
   end
 
   test "external waiting cards refuse a replaced pane process", %{request: r} do
+    assert {:ok, _} =
+             Foreman.SessionRegistry.register(%{
+               "name" => r.session,
+               "pane" => "%42",
+               "workdir" => "/tmp",
+               "harness" => "pi"
+             })
+
     r =
       r
       |> Ecto.Changeset.change(

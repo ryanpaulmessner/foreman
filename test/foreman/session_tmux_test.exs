@@ -75,6 +75,58 @@ defmodule Foreman.SessionTmuxTest do
     assert {_, 0} = System.cmd("tmux", ["-L", c.socket, "has-session", "-t", "=sample"])
   end
 
+  test "focus switches a scratch client from its own session to coordinator and ticket", c do
+    {_, 0} = System.cmd("tmux", ["-L", c.socket, "new-session", "-d", "-s", "viewer"])
+
+    client =
+      Port.open({:spawn_executable, System.find_executable("tmux")}, [
+        :binary,
+        :exit_status,
+        args: ["-L", c.socket, "-C", "attach", "-t", "viewer"]
+      ])
+
+    on_exit(fn -> if Port.info(client), do: Port.close(client) end)
+
+    assert eventually(fn ->
+             {output, 0} =
+               System.cmd("tmux", ["-L", c.socket, "list-clients", "-F", "\#{session_name}"])
+
+             String.trim(output) == "viewer"
+           end)
+
+    for {project, ticket, expected} <- [
+          {"__foreman__", "coordinator", "coordinator"},
+          {"sample", "x-1.2", "sample"}
+        ] do
+      session = %{c.session | project: project, ticket: ticket}
+      {:ok, window} = Tmux.launch(session, "flow", c.opts)
+
+      assert :ok =
+               Tmux.focus(
+                 Map.put(session, :window, window),
+                 Keyword.put(c.opts, :platform, {:unix, :linux})
+               )
+
+      assert {output, 0} =
+               System.cmd("tmux", [
+                 "-L",
+                 c.socket,
+                 "list-clients",
+                 "-F",
+                 "\#{session_name}:\#{window_id}"
+               ])
+
+      assert String.trim(output) == expected <> ":" <> window
+    end
+
+    Port.close(client)
+  end
+
+  test "focus with no attached scratch client succeeds with an attach result", c do
+    {:ok, window} = Tmux.launch(c.session, "flow", c.opts)
+    assert {:ok, :no_client} = Tmux.focus(Map.put(c.session, :window, window), c.opts)
+  end
+
   test "parking refuses attached clients and foreign identities", c do
     assert {:ok, window} = Tmux.launch(c.session, "flow", c.opts)
     session = Map.put(c.session, :window, window)
@@ -105,7 +157,7 @@ defmodule Foreman.SessionTmuxTest do
 
   test "attach addresses the recorded window even when ticket names repeat", c do
     session = Map.put(c.session, :window, "@42")
-    assert Tmux.attach_command(session, c.opts) == "tmux -L '#{c.socket}' attach -t 'sample:@42'"
+    assert Tmux.attach_command(session, c.opts) == "tmux attach -t 'sample:@42'"
   end
 
   test "an unmarked window cannot be mistaken for the stored conversation", c do
@@ -152,7 +204,7 @@ defmodule Foreman.SessionTmuxTest do
     assert {:ok, facts} = Tmux.external_target("x-1.2", c.opts)
     assert facts["window"] == window
     assert facts["target"] == "external"
-    assert facts["attach"] =~ "tmux -L '#{c.socket}' attach"
+    assert facts["attach"] =~ "tmux attach"
     assert {:error, _} = Tmux.external_target("x-1", c.opts)
     assert {:error, _} = Tmux.external_target("; send-keys bad", c.opts)
   end

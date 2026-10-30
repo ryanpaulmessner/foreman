@@ -2,12 +2,26 @@ defmodule ForemanWeb.PlanningSession do
   use ForemanWeb, :html
 
   def launch(socket, %{"project" => project, "ticket" => ticket} = params) do
+    session = Foreman.Sessions.get({project, ticket})
+
     result =
-      if params["action"] == "relaunch",
-        do: Foreman.Sessions.relaunch({project, ticket}),
-        else: Foreman.Sessions.launch({project, ticket})
+      case params["action"] do
+        "focus" when not is_nil(session) -> Foreman.SessionTmux.focus(session)
+        "relaunch" -> Foreman.Sessions.relaunch({project, ticket})
+        _ -> Foreman.Sessions.launch({project, ticket})
+      end
 
     case result do
+      {:ok, :no_client} ->
+        Phoenix.LiveView.put_flash(
+          socket,
+          :info,
+          "No terminal is attached. Run: " <> Foreman.SessionTmux.attach_command(session)
+        )
+
+      :ok ->
+        Phoenix.LiveView.clear_flash(socket, :error)
+
       {:ok, _} ->
         Phoenix.LiveView.clear_flash(socket, :error)
 
@@ -35,7 +49,7 @@ defmodule ForemanWeb.PlanningSession do
         true -> "Launch"
       end
 
-    assigns = assign(assigns, label: label, relaunch?: !!relaunch?)
+    assigns = assign(assigns, label: label, relaunch?: !!relaunch?, focus?: !!focus?)
 
     ~H"""
     <button
@@ -45,7 +59,13 @@ defmodule ForemanWeb.PlanningSession do
       phx-click="launch-session"
       phx-value-project={elem(@key, 0)}
       phx-value-ticket={elem(@key, 1)}
-      phx-value-action={if @relaunch?, do: "relaunch", else: "launch"}
+      phx-value-action={
+        cond do
+          @relaunch? -> "relaunch"
+          @focus? -> "focus"
+          true -> "launch"
+        end
+      }
       phx-disable-with={@label <> "…"}
       class="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-base bg-base px-3 py-1.5 text-xs font-medium transition-colors hover:bg-sunken focus-visible:outline-2 focus-visible:outline-offset-2"
     >

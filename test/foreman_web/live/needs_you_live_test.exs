@@ -23,6 +23,24 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     %{request: request}
   end
 
+  test "ended registered sessions explain why Go to session is hidden", %{
+    conn: conn,
+    request: request
+  } do
+    assert {:ok, _} =
+             Foreman.SessionRegistry.register(%{
+               "name" => "build",
+               "pane" => "%99999999",
+               "workdir" => "/tmp",
+               "harness" => "pi"
+             })
+
+    assert :ok = Foreman.SessionRegistry.reconcile(runner: fn _, _, _ -> {"", 0} end)
+    {:ok, view, _} = live(conn, "/needs-you")
+    assert has_element?(view, "#session-ended-#{request.id}", "This session has ended.")
+    refute has_element?(view, "#go-session-#{request.id}")
+  end
+
   test "every card has ticket context and agent asks can be withdrawn", %{
     conn: conn,
     request: request
@@ -32,6 +50,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     refute has_element?(view, "#context-#{request.id} h2")
     assert has_element?(view, "#context-#{request.id}", "One-off")
     assert has_element?(view, "#source-#{request.id}", "Source unknown")
+    assert has_element?(view, "#copy-session-#{request.id}[data-command]")
     assert has_element?(view, "#withdraw-#{request.id}")
 
     view
@@ -42,6 +61,50 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     assert has_element?(view, "#recent-requests", "withdrawn")
     assert has_element?(view, "#recent-requests", "Answered in chat")
     assert Requests.get(request.id).state == "withdrawn"
+  end
+
+  test "a registered coordinator card keeps its own Go to session target after dispatch", %{
+    conn: conn
+  } do
+    old = System.get_env("PREVIEW")
+    System.put_env("PREVIEW", "1")
+
+    on_exit(fn ->
+      if old, do: System.put_env("PREVIEW", old), else: System.delete_env("PREVIEW")
+    end)
+
+    assert {:ok, _} =
+             Foreman.SessionRegistry.register(%{
+               "name" => "coordinator",
+               "pane" => "%99999998",
+               "workdir" => "/tmp",
+               "harness" => "claude"
+             })
+
+    assert {200, _} =
+             Foreman.Agent.event("sample", "s-1", %{
+               "event" => "dispatch",
+               "actor" => "pi",
+               "session" => "build",
+               "payload" => %{"window" => "%99999999", "harness" => "pi"}
+             })
+
+    {:ok, request} =
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "actor" => "claude",
+        "session" => "coordinator",
+        "facts" => %{"question" => "Proceed?"}
+      })
+
+    {:ok, view, _} = live(conn, "/needs-you")
+    assert has_element?(view, "#source-#{request.id}", "coordinator · claude")
+    view |> element("#go-session-#{request.id}") |> render_click()
+
+    assert has_element?(
+             view,
+             "#session-command-#{request.id} code",
+             "tmux select-window -t '%99999998'"
+           )
   end
 
   test "registered sources and preview fallback commands appear on page and drawer", %{conn: conn} do
@@ -87,7 +150,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       assert has_element?(
                view,
                "##{prefix}session-command-#{request.id} code",
-               "tmux -L 'default' select-window -t '%99999999'"
+               "tmux select-window -t '%99999999'"
              )
 
       assert has_element?(view, "##{prefix}copy-session-#{request.id}[data-command]")
