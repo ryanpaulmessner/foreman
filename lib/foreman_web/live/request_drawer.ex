@@ -22,7 +22,8 @@ defmodule ForemanWeb.RequestDrawer do
     if socket.assigns.drawer_state == :open do
       ids = MapSet.new(pending, & &1.id)
       previous = socket.assigns.drawer_ids
-      versions = Foreman.CardMessages.versions(MapSet.to_list(ids))
+      messages = Foreman.CardMessages.versions(MapSet.to_list(ids))
+      versions = Map.new(pending, &{&1.id, {messages[&1.id], &1.edited_at, &1.similar_question}})
 
       socket =
         Enum.reduce(MapSet.difference(previous, ids), socket, fn id, socket ->

@@ -10,7 +10,7 @@ defmodule ForemanWeb.RequestCard do
     ~H"""
     <article id={@id} class="space-y-2 rounded-lg border border-base p-4">
       <div class="flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
-        <Badge.badge>{@request.state}</Badge.badge>
+        <Badge.badge>{String.replace(@request.state, "_", " ")}</Badge.badge>
         <.ticket_link id={@id <> "-ticket-link"} request={@request} link={@link} />
         <span>{@request.actor}</span>
         <span class="ml-auto"><ForemanWeb.TicketDetail.timestamp at={@request.updated_at} /></span>
@@ -32,7 +32,7 @@ defmodule ForemanWeb.RequestCard do
       />
       <.merge_facts :if={@request.kind == "merge"} request={@request} />
       <.agent_text
-        :if={@request.kind in ["decision", "review_ui"]}
+        :if={@request.kind in ["decision", "review_ui", "chore"]}
         id={@id <> "-question"}
         text={@request.facts["question"]}
         repo={@request.repo_key}
