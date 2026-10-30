@@ -74,7 +74,7 @@ defmodule Foreman.SessionRegistrationTest do
       Foreman.Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "claude",
         "session" => "coord",
-        "facts" => %{"question" => "Ship?"}
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Ship?"})
       })
 
     assert %{target: "%42", name: "coord", harness: "claude"} =
@@ -84,7 +84,7 @@ defmodule Foreman.SessionRegistrationTest do
       Foreman.Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "pi",
         "session" => "build",
-        "facts" => %{"question" => "Build ready?"}
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Build ready?"})
       })
 
     assert %{target: "%50", harness: "pi"} = Foreman.RequestSource.for_request(build_card)

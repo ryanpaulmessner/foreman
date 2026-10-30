@@ -141,7 +141,9 @@ defmodule Foreman.PriorityTest do
 
       ask = fn id ->
         {:ok, request} =
-          Requests.ask({"sample", id}, "decision", %{"facts" => %{"question" => "Go?"}})
+          Requests.ask({"sample", id}, "decision", %{
+            "facts" => Foreman.DecisionFacts.valid(%{"question" => "Go?"})
+          })
 
         request
       end

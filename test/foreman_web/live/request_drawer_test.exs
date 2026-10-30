@@ -12,7 +12,11 @@ defmodule ForemanWeb.RequestDrawerTest do
     {:ok, request} =
       Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "pi",
-        "facts" => %{"question" => "Which layout?", "options" => ["Wide", "Compact"]}
+        "facts" =>
+          Foreman.DecisionFacts.valid(%{
+            "question" => "Which layout?",
+            "options" => ["Wide", "Compact"]
+          })
       })
 
     %{request: request}
@@ -161,7 +165,7 @@ defmodule ForemanWeb.RequestDrawerTest do
     {:ok, other} =
       Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "pi",
-        "facts" => %{"question" => "Another?"}
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Another?"})
       })
 
     Requests.resolve(request.id, :decline, %{})

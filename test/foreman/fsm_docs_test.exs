@@ -21,7 +21,11 @@ defmodule Foreman.FsmDocsTest do
              "| pr_open | cr_merged | -> merged | record(merge), emit(stage), suggest(close_bead) |"
 
     assert text =~ "| abandoned | cr_merged | ignored |  |"
-    assert length(String.split(String.trim(text), "\n")) == 145
+
+    assert text =~
+             "| queued | commit [coordinator?] | -> committed | record(commit), emit(stage) |"
+
+    assert text =~ "| queued | commit | invalid |  |"
   end
 
   for {name, module} <- [

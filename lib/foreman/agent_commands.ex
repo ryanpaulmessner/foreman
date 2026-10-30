@@ -178,10 +178,30 @@ defmodule Foreman.AgentCommands do
           Agent.ensure_entity(key)
 
           case Foreman.Requests.ask(key, request["request_kind"], request) do
-            {:ok, %Foreman.PlanningSession{} = session} -> {200, %{state: session.state}}
-            {:ok, ask} -> {200, %{id: ask.id, state: ask.state}}
-            {:error, :not_found} -> {404, %{error: "not_found"}}
-            {:error, reason} -> {422, %{error: reason}}
+            {:ok, %Foreman.PlanningSession{} = session} ->
+              {200, %{state: session.state}}
+
+            {:ok, ask} ->
+              {200, %{id: ask.id, state: ask.state}}
+
+            {:error, %{error: "card_unclear"} = refusal} ->
+              {422, refusal}
+
+            {:error, reason} when reason in [:not_committed, :ticket_finished] ->
+              row = Overlay.get(key)
+
+              {422,
+               %{
+                 error: reason,
+                 stage: row.stage,
+                 next_command: Foreman.StageGuidance.next(row.stage, id, request["actor"])
+               }}
+
+            {:error, :not_found} ->
+              {404, %{error: "not_found"}}
+
+            {:error, reason} ->
+              {422, %{error: reason}}
           end
 
         action when action in ["session_resumed", "session_activity"] ->

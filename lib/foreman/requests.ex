@@ -336,7 +336,8 @@ defmodule Foreman.Requests do
   defp transition(request, event, payload) do
     state = Enum.find(Machine.__fsm__(:states), &(to_string(&1) == request.state))
 
-    with :ok <- validate(event, payload),
+    with {:ok, payload} <- answer_payload(request, event, payload),
+         :ok <- validate(event, payload),
          {next, effects} when next != :error <- Machine.step(state, event, context(request)) do
       if next == state do
         {:ok, request}
@@ -374,6 +375,11 @@ defmodule Foreman.Requests do
       {:error, _} -> {:error, :invalid}
     end
   end
+
+  defp answer_payload(%{kind: "review_ui"} = request, :answer, payload),
+    do: Foreman.Requests.ReviewUI.answer(request, payload)
+
+  defp answer_payload(_, _, payload), do: {:ok, payload}
 
   @doc false
   def context(request),

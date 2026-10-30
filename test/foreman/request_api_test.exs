@@ -52,6 +52,10 @@ defmodule Foreman.RequestAPITest do
                    "B",
                    "--option-detail",
                    "B=Keep the compact layout",
+                   "--option-detail",
+                   "A=Use wide layout",
+                   "--text",
+                   "What: Layout\nPart of: Cards\nWhy now: Review",
                    "--actor",
                    "pi",
                    "--session",
@@ -64,7 +68,12 @@ defmodule Foreman.RequestAPITest do
     id = String.trim(output)
     assert {:ok, _} = Ecto.UUID.cast(id)
     request = Requests.get(id)
-    assert request.facts["option_details"] == %{"B" => "Keep the compact layout"}
+
+    assert request.facts["option_details"] == %{
+             "A" => "Use wide layout",
+             "B" => "Keep the compact layout"
+           }
+
     assert request.facts["options"] == ["A", "B"]
     assert request.session == "build"
     output = capture_io(fn -> assert CLI.run(["wait", id, "--timeout", "0"], opts) == 0 end)
@@ -79,7 +88,7 @@ defmodule Foreman.RequestAPITest do
       Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "pi",
         "session" => "build",
-        "facts" => %{"question" => "Which?"}
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
       })
 
     opts = [req_options: [plug: {Req.Test, __MODULE__}]]
@@ -107,6 +116,38 @@ defmodule Foreman.RequestAPITest do
     assert Jason.decode!(output)["warning"] =~ "invalid"
   end
 
+  test "a non-JSON refusal remains a refusal, not an unavailable service" do
+    Req.Test.stub(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 422, "Invalid") end)
+
+    output =
+      capture_io(fn ->
+        CLI.run(["ask", "decision", "s-1", "--json"], req_options: [plug: {Req.Test, __MODULE__}])
+      end)
+
+    assert Jason.decode!(output)["error"] == "invalid request"
+  end
+
+  test "lint refusal lists missing parts in plain output and JSON" do
+    opts = [req_options: [plug: {Req.Test, __MODULE__}]]
+
+    args = [
+      "ask",
+      "decision",
+      "s-1",
+      "--project",
+      "sample",
+      "--question",
+      "Which?",
+      "--option",
+      "A"
+    ]
+
+    output = capture_io(fn -> CLI.run(args, opts) end)
+    assert output =~ "card_unclear: Missing What, Part of, Why now, option detail: A"
+    output = capture_io(fn -> CLI.run(args ++ ["--json"], opts) end)
+    assert Jason.decode!(output)["missing"] == ["What", "Part of", "Why now", "option detail: A"]
+  end
+
   test "malformed option details are usage errors, not transport failures" do
     output =
       capture_io(fn ->
@@ -121,7 +162,7 @@ defmodule Foreman.RequestAPITest do
       Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "pi",
         "session" => "build",
-        "facts" => %{"question" => "Which?"}
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
       })
 
     envelope = %{
@@ -144,7 +185,7 @@ defmodule Foreman.RequestAPITest do
       "repo" => "sample",
       "id" => "s-1",
       "request_kind" => "decision",
-      "facts" => %{"question" => "Which?"},
+      "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"}),
       "request_id" => Ecto.UUID.generate()
     }
 
@@ -172,7 +213,7 @@ defmodule Foreman.RequestAPITest do
       "repo" => "sample",
       "id" => "s-1",
       "request_kind" => "decision",
-      "facts" => %{"question" => "Offline?"},
+      "facts" => Foreman.DecisionFacts.valid(%{"question" => "Offline?"}),
       "request_id" => id
     }
 
@@ -277,7 +318,9 @@ defmodule Foreman.RequestAPITest do
 
   test "wait polls until the outcome and never spools a read" do
     {:ok, request} =
-      Requests.ask({"sample", "s-1"}, "decision", %{"facts" => %{"question" => "Which?"}})
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
+      })
 
     Req.Test.stub(__MODULE__, fn conn ->
       Requests.resolve(request.id, :answer, %{"answer" => "B"})

@@ -92,7 +92,7 @@ defmodule Foreman.Request do
   def chat_question?(%{kind: "session_waiting", reason: "question"}, _), do: true
   def chat_question?(_, _), do: false
 
-  def decision?(%{kind: "decision"}, _), do: true
+  def decision?(%{kind: kind}, _) when kind in ["decision", "review_ui"], do: true
   def decision?(_, _), do: false
   def action?(%{kind: kind}, _), do: kind in ["push", "open_pr", "merge"]
   def action?(_, _), do: false

@@ -32,7 +32,11 @@ defmodule Foreman.RequestCommitTest do
 
   test "concurrent answer and decline commit exactly one outcome", %{key: key} do
     {:ok, request} =
-      unboxed(fn -> Requests.ask(key, "decision", %{"facts" => %{"question" => "Which?"}}) end)
+      unboxed(fn ->
+        Requests.ask(key, "decision", %{
+          "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
+        })
+      end)
 
     results =
       race([
@@ -196,7 +200,11 @@ defmodule Foreman.RequestCommitTest do
 
   test "a decision accepted before ticket completion stays pending", %{key: key} do
     race([
-      fn -> Requests.ask(key, "decision", %{"facts" => %{"question" => "Which?"}}) end,
+      fn ->
+        Requests.ask(key, "decision", %{
+          "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
+        })
+      end,
       fn -> Overlay.apply_event(key, :bead_closed) end
     ])
 

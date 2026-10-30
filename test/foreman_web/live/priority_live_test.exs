@@ -145,7 +145,9 @@ defmodule ForemanWeb.PriorityLiveTest do
     ids =
       for id <- ~w(low none high) do
         {:ok, request} =
-          Requests.ask({"sample", id}, "decision", %{"facts" => %{"question" => "Go #{id}?"}})
+          Requests.ask({"sample", id}, "decision", %{
+            "facts" => Foreman.DecisionFacts.valid(%{"question" => "Go #{id}?"})
+          })
 
         request.id
       end

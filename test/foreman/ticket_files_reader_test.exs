@@ -38,7 +38,7 @@ defmodule Foreman.TicketFiles.ReaderTest do
     Foreman.Overlay.apply_event({"files", "demo-abc"}, {:dispatch, %{window: "reader-build"}})
 
     Foreman.Requests.ask({"files", "demo-abc"}, "decision", %{
-      "facts" => %{"question" => "Keep identity?"}
+      "facts" => Foreman.DecisionFacts.valid(%{"question" => "Keep identity?"})
     })
 
     Repo.insert_all("overlay_cr_links", [%{repo_key: "files", bead_id: "demo-abc", number: 42}])
@@ -97,7 +97,9 @@ defmodule Foreman.TicketFiles.ReaderTest do
     Overlay.apply_event(physical_key, {:dispatch, %{window: "reclassification-build"}})
 
     {:ok, decision} =
-      Foreman.Requests.ask(physical_key, "decision", %{"facts" => %{"question" => "Keep?"}})
+      Foreman.Requests.ask(physical_key, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Keep?"})
+      })
 
     history = Overlay.history(physical_key)
     sessions = Repo.query!("SELECT * FROM sessions WHERE repo_key = 'files' ORDER BY id").rows
@@ -136,7 +138,12 @@ defmodule Foreman.TicketFiles.ReaderTest do
     Overlay.apply_event(key, :start_spec)
     Overlay.apply_event(key, {:approve_spec, %{spec_link: "docs/spec.md"}})
     Overlay.apply_event(key, {:ticket, %{beads_epic_id: "demo-abc"}})
-    {:ok, request} = Requests.ask(key, "decision", %{"facts" => %{"question" => "Keep?"}})
+
+    {:ok, request} =
+      Requests.ask(key, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Keep?"})
+      })
+
     File.write!(path, text("Task"))
     assert {:ok, {:ok, :changed}} = Reader.publish(repo, Foreman.TicketFiles.snapshot(root))
     assert %{machine: Foreman.Stage, stage: :queued} = Overlay.get({"files", "demo-abc"})
@@ -183,7 +190,7 @@ defmodule Foreman.TicketFiles.ReaderTest do
                "repo" => "files",
                "id" => id,
                "request_kind" => "decision",
-               "facts" => %{"question" => "Proceed?"}
+               "facts" => Foreman.DecisionFacts.valid(%{"question" => "Proceed?"})
              })
 
     assert Foreman.Requests.get(request.id).state == "pending"
