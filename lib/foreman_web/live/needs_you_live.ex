@@ -852,7 +852,11 @@ defmodule ForemanWeb.NeedsYouLive do
         <span>{@request.actor}<span :if={@request.session}> · {@request.session}</span></span>
         <span class="ml-auto"><ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} /></span>
       </div>
-      <ForemanWeb.RequestCard.push_facts :if={@request.kind == "push"} request={@request} />
+      <ForemanWeb.RequestCard.push_facts
+        :if={@request.kind == "push"}
+        request={@request}
+        prefix={@prefix}
+      />
       <ForemanWeb.RequestCard.open_pr_facts
         :if={@request.kind == "open_pr"}
         request={@request}

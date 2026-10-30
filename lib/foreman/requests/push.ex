@@ -1,12 +1,13 @@
 defmodule Foreman.Requests.Push do
-  @moduledoc "Push facts and guards. Git's receive protocol is the atomic fast-forward guard."
+  @moduledoc "Push facts and guards. PR updates bind the old head; the job checks ancestry and uses an exact lease."
   @behaviour Foreman.Requests.Kind
   import Ecto.Query
   alias Foreman.{Repo, RuntimeState}
   alias Foreman.Requests.LocalRefs
 
   @impl true
-  def validate(_, %{stage: stage}) when stage != :committed, do: {:error, :not_committed}
+  def validate(_, %{stage: stage}) when stage not in [:committed, :pr_open],
+    do: {:error, :not_committed}
 
   def validate(facts, row) when is_map(facts) do
     with {:ok, repo} <- configured(row.repo_key),
@@ -16,10 +17,13 @@ defmodule Foreman.Requests.Push do
          %{remote: remote, snapshot: snapshot} <- Foreman.Forge.Store.get(row.repo_key),
          true <- remote == repo["github"] || {:error, :config_changed},
          :ok <- default_rule(facts, row, snapshot["default_branch"]),
-         :ok <- human_rule(facts, repo, snapshot["default_branch"]) do
+         :ok <- human_rule(facts, repo, snapshot["default_branch"]),
+         :ok <- update_rule(facts, snapshot, row.stage) do
       {:ok,
        facts
-       |> Map.take(["worktree", "local_branch", "expected_sha", "remote_branch"])
+       |> Map.take(
+         ~w(worktree local_branch expected_sha remote_branch expected_old_head force_with_lease)
+       )
        |> Map.put("remote", remote)}
     else
       nil -> {:error, :default_branch_unknown}
@@ -28,6 +32,36 @@ defmodule Foreman.Requests.Push do
   end
 
   def validate(_, _), do: {:error, :invalid_facts}
+
+  def update_rule(facts, snapshot, stage) do
+    pr =
+      Enum.find(
+        snapshot["change_requests"] || [],
+        &(&1["state"] == "open" and &1["source_branch"] == facts["remote_branch"])
+      )
+
+    old = facts["expected_old_head"]
+
+    cond do
+      facts["force_with_lease"] not in [nil, false, true] ->
+        {:error, :invalid_facts}
+
+      (pr || facts["force_with_lease"] == true) && not match?({:ok, _}, LocalRefs.sha(old)) ->
+        {:error, :expected_old_head_required}
+
+      pr && pr["head_sha"] != old ->
+        {:error, :head_moved}
+
+      stage == :pr_open && is_nil(pr) ->
+        {:error, :open_pr_required}
+
+      not is_nil(old) && not match?({:ok, _}, LocalRefs.sha(old)) ->
+        {:error, :invalid_facts}
+
+      true ->
+        :ok
+    end
+  end
 
   def configured(key) do
     case Enum.find(RuntimeState.repos(), &(&1["key"] == key)) do

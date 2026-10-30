@@ -53,6 +53,9 @@ defmodule Foreman.CLI do
     workdir: :string,
     branch: :string,
     base: :string,
+    base_ok: :boolean,
+    expected_old_head: :string,
+    force_with_lease: :boolean,
     brief: :string,
     report: :string,
     path: :string,
@@ -214,6 +217,9 @@ defmodule Foreman.CLI do
   defp format(%{"error" => "not_pending", "state" => state}),
     do: "Card cannot be updated; current state: #{state}"
 
+  defp format(%{"error" => code, "message" => message}),
+    do: code <> ": " <> message
+
   defp format(%{"error" => "card_unclear", "missing" => missing}),
     do: "card_unclear: Missing " <> Enum.join(missing, ", ")
 
@@ -270,9 +276,11 @@ defmodule Foreman.CLI do
       "head_branch" => opts[:head],
       "expected_sha" => opts[:sha],
       "base_branch" => opts[:base],
+      "base_ok" => opts[:base_ok],
       "title" => opts[:title],
       "body" => File.read!(opts[:body_file])
     }
+    |> Map.reject(fn {key, value} -> key == "base_ok" and is_nil(value) end)
   end
 
   defp ask_facts("merge", opts, _cwd), do: %{"number" => opts[:pr], "expected_sha" => opts[:sha]}
@@ -282,8 +290,13 @@ defmodule Foreman.CLI do
       "worktree" => opts[:worktree],
       "local_branch" => opts[:branch],
       "expected_sha" => opts[:sha],
-      "remote_branch" => opts[:remote_branch]
+      "remote_branch" => opts[:remote_branch],
+      "expected_old_head" => opts[:expected_old_head],
+      "force_with_lease" => opts[:force_with_lease]
     }
+    |> Map.reject(fn {key, value} ->
+      key in ["expected_old_head", "force_with_lease"] and is_nil(value)
+    end)
   end
 
   # Any other kind is sent with decision facts (the server refuses unknown kinds).

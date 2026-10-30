@@ -416,17 +416,16 @@ defmodule Foreman.Requests do
           |> Foreman.Merge.get()
           |> Foreman.Merge.reconcile()
 
-        if action && action.state in ["merged", "failed"] do
+        if action && (not is_nil(action.merge_sha) or action.state == "failed") do
           result = %{
             "action_id" => action.id,
             "merge_sha" => action.merge_sha,
             "state" => action.state
           }
 
-          event =
-            if action.state == "merged" and is_nil(action.error), do: :succeeded, else: :failed
-
-          resolve(request.id, event, %{"result" => result, "reason" => action.error})
+          event = if action.merge_sha, do: :succeeded, else: :failed
+          reason = if event == :failed, do: action.error
+          resolve(request.id, event, %{"result" => result, "reason" => reason})
         end
       end
     end)

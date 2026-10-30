@@ -23,7 +23,7 @@ defmodule ForemanWeb.RequestCard do
         repo={@request.repo_key}
         repos={@repos}
       />
-      <.push_facts :if={@request.kind == "push"} request={@request} />
+      <.push_facts :if={@request.kind == "push"} request={@request} prefix={@id <> "-"} />
       <.open_pr_facts
         :if={@request.kind == "open_pr"}
         request={@request}
@@ -208,6 +208,13 @@ defmodule ForemanWeb.RequestCard do
 
   def open_pr_facts(assigns) do
     ~H"""
+    <p
+      :if={@request.facts["base_ok"] == true}
+      id={@prefix <> "base-override-" <> @request.id}
+      class="text-warning"
+    >
+      Use this base even if it is not the target branch or a recorded stack parent (--base-ok).
+    </p>
     <dl class="grid min-w-0 grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
       <div
         :for={
@@ -241,6 +248,9 @@ defmodule ForemanWeb.RequestCard do
 
   def merge_facts(assigns) do
     ~H"""
+    <p :if={@request.facts["retarget"]} class="mb-3 text-sm">
+      Retarget PR #{@request.facts["retarget"]["number"]} to {@request.facts["retarget"]["base"]} after the merge.
+    </p>
     <dl class="grid min-w-0 grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
       <dt class="text-foreground-softer">Repository</dt>
       <dd class="break-all font-mono">{@request.facts["remote"]}</dd>
@@ -253,9 +263,17 @@ defmodule ForemanWeb.RequestCard do
   end
 
   attr :request, :any, required: true
+  attr :prefix, :string, default: ""
 
   def push_facts(assigns) do
     ~H"""
+    <p
+      :if={@request.facts["force_with_lease"] == true}
+      id={@prefix <> "force-push-" <> @request.id}
+      class="text-warning"
+    >
+      Replace the branch history. This can remove commits from the branch. Stop if the remote head has changed.
+    </p>
     <dl class="grid min-w-0 grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
       <dt class="text-foreground-softer">Destination</dt>
       <dd class="min-w-0 break-all font-mono">{destination(@request.facts)}</dd>
@@ -264,7 +282,8 @@ defmodule ForemanWeb.RequestCard do
           {label, key} <- [
             {"Branch", "local_branch"},
             {"Commit", "expected_sha"},
-            {"Worktree", "worktree"}
+            {"Worktree", "worktree"},
+            {"Expected remote commit", "expected_old_head"}
           ]
         }
         class="contents"

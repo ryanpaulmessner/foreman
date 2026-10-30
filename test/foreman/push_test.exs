@@ -75,6 +75,27 @@ defmodule Foreman.PushTest do
     assert request.facts["expected_sha"] == facts["expected_sha"]
   end
 
+  test "an open PR update requires its expected old head", %{facts: facts, sha: sha} do
+    Repo.update_all("tickets", set: [stage: "pr_open"])
+
+    Foreman.Forge.Store.replace("sample", "owner/repo", %{
+      "default_branch" => "main",
+      "change_requests" => [
+        %{"number" => 1, "state" => "open", "source_branch" => "feature", "head_sha" => sha}
+      ]
+    })
+
+    assert {:error, :expected_old_head_required} =
+             Requests.ask({"sample", "s-1"}, "push", %{"facts" => facts})
+
+    assert {:ok, request} =
+             Requests.ask({"sample", "s-1"}, "push", %{
+               "facts" => Map.put(facts, "expected_old_head", sha)
+             })
+
+    assert request.facts["expected_old_head"] == sha
+  end
+
   test "creation refuses a foreign worktree", %{facts: facts} do
     committed()
 
@@ -240,6 +261,183 @@ defmodule Foreman.PushTest do
     assert_receive :push_attempt
     assert :ok = Foreman.Requests.PushJob.run(request.id, opts)
     refute_receive :push_attempt
+  end
+
+  test "approved PR update pushes with an exact lease and records the new head", %{
+    facts: facts,
+    path: path,
+    git: git,
+    sha: old
+  } do
+    git.(["branch", "feature"])
+    bare = path <> "-pr-bare"
+    {_, 0} = System.cmd("git", ["clone", "--bare", path, bare], stderr_to_stdout: true)
+    on_exit(fn -> File.rm_rf!(bare) end)
+
+    git.([
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=f@example.com",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "update"
+    ])
+
+    new = git.(["rev-parse", "HEAD"])
+
+    snapshot = %{
+      "default_branch" => "main",
+      "branches" => %{"feature" => old},
+      "change_requests" => [
+        %{"number" => 1, "state" => "open", "source_branch" => "feature", "head_sha" => old}
+      ]
+    }
+
+    Foreman.Forge.Store.replace("sample", "owner/repo", snapshot)
+    Repo.update_all("tickets", set: [stage: "pr_open"])
+    fake = start_supervised!({Foreman.Forge.Fake, snapshot})
+    facts = Map.merge(facts, %{"expected_sha" => new, "expected_old_head" => old})
+    {:ok, request} = Requests.ask({"sample", "s-1"}, "push", %{"facts" => facts})
+    {:ok, _} = Requests.resolve(request.id, :approve, %{})
+
+    Foreman.Requests.PushJob.run(request.id,
+      adapter: Foreman.Forge.Fake,
+      forge_options: [server: fake],
+      command: fn args, options ->
+        unless hd(args) == "merge-base",
+          do: assert("--force-with-lease=refs/heads/feature:#{old}" in args)
+
+        System.cmd(
+          "git",
+          Enum.map(args, &if(&1 == "https://github.com/owner/repo.git", do: bare, else: &1)),
+          options
+        )
+      end
+    )
+
+    assert %{state: "done"} = Requests.get(request.id)
+    assert {head, 0} = System.cmd("git", ["--git-dir", bare, "rev-parse", "feature"])
+    assert String.trim(head) == new
+    assert [%{"head_sha" => ^new}] = Foreman.Forge.Store.get("sample").snapshot["change_requests"]
+    assert Foreman.Forge.Store.get("sample").snapshot["branches"]["feature"] == new
+  end
+
+  for {force, moved, graft, expected} <- [
+        {false, false, false, "failed"},
+        {true, false, false, "done"},
+        {true, true, false, "failed"},
+        {false, false, true, "failed"}
+      ] do
+    @force force
+    @moved moved
+    @graft graft
+    @expected expected
+    test "history replacement force=#{force} moved=#{moved} graft=#{graft} ends #{expected}", %{
+      facts: facts,
+      path: path,
+      git: git,
+      sha: initial
+    } do
+      git.([
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=f@example.com",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "old head"
+      ])
+
+      old = git.(["rev-parse", "HEAD"])
+      git.(["branch", "feature"])
+      bare = path <> "-replace-bare"
+      {_, 0} = System.cmd("git", ["clone", "--bare", path, bare], stderr_to_stdout: true)
+      on_exit(fn -> File.rm_rf!(bare) end)
+      git.(["reset", "--soft", initial])
+      if @graft, do: File.write!(Path.join(path, ".git/info/grafts"), "#{initial} #{old}\n")
+
+      snapshot = %{
+        "default_branch" => "main",
+        "change_requests" => [
+          %{"number" => 1, "state" => "open", "source_branch" => "feature", "head_sha" => old}
+        ]
+      }
+
+      Foreman.Forge.Store.replace("sample", "owner/repo", snapshot)
+      Repo.update_all("tickets", set: [stage: "pr_open"])
+      fake = start_supervised!({Foreman.Forge.Fake, snapshot})
+      facts = Map.merge(facts, %{"expected_old_head" => old, "force_with_lease" => @force})
+      {:ok, request} = Requests.ask({"sample", "s-1"}, "push", %{"facts" => facts})
+      {:ok, _} = Requests.resolve(request.id, :approve, %{})
+
+      if @moved,
+        do: System.cmd("git", ["--git-dir", bare, "update-ref", "-d", "refs/heads/feature"])
+
+      Foreman.Requests.PushJob.run(request.id,
+        adapter: Foreman.Forge.Fake,
+        forge_options: [server: fake],
+        command: fn args, options ->
+          System.cmd(
+            "git",
+            Enum.map(args, &if(&1 == "https://github.com/owner/repo.git", do: bare, else: &1)),
+            options
+          )
+        end
+      )
+
+      assert Requests.get(request.id).state == @expected
+      expected_head = if @expected == "done", do: initial, else: old
+
+      assert [%{"head_sha" => ^expected_head}] =
+               Foreman.Forge.Store.get("sample").snapshot["change_requests"]
+    end
+  end
+
+  for result <- [:real_missing_object, 1, 128] do
+    @ancestry_result result
+    test "ancestry check distinguishes #{@ancestry_result} and uses the command boundary", %{
+      facts: facts
+    } do
+      old = String.duplicate("c", 40)
+
+      snapshot = %{
+        "default_branch" => "main",
+        "change_requests" => [
+          %{"number" => 1, "state" => "open", "source_branch" => "feature", "head_sha" => old}
+        ]
+      }
+
+      Foreman.Forge.Store.replace("sample", "owner/repo", snapshot)
+      Repo.update_all("tickets", set: [stage: "pr_open"])
+      fake = start_supervised!({Foreman.Forge.Fake, snapshot})
+      facts = Map.put(facts, "expected_old_head", old)
+      {:ok, request} = Requests.ask({"sample", "s-1"}, "push", %{"facts" => facts})
+      {:ok, _} = Requests.resolve(request.id, :approve, %{})
+
+      Foreman.Requests.PushJob.run(request.id,
+        adapter: Foreman.Forge.Fake,
+        forge_options: [server: fake],
+        command: fn args, options ->
+          assert args == ["merge-base", "--is-ancestor", old, facts["expected_sha"]]
+          send(self(), :ancestry_checked)
+
+          if @ancestry_result == :real_missing_object,
+            do: System.cmd("git", args, options),
+            else: {"", @ancestry_result}
+        end
+      )
+
+      expected =
+        if @ancestry_result == 1,
+          do: "not a fast-forward; use --force-with-lease to replace the branch history",
+          else: "the old head #{old} is not in this worktree; fetch it first"
+
+      assert %{state: "failed", outcome: %{"reason" => ^expected}} = Requests.get(request.id)
+      assert_received :ancestry_checked
+    end
   end
 
   defp job_options(path) do
@@ -427,6 +625,29 @@ defmodule Foreman.PushTest do
              "expected_sha" => String.duplicate("a", 40),
              "remote_branch" => "published"
            }
+  end
+
+  test "CLI preserves the explicit old head and history replacement flag" do
+    assert {:ok, %{request: request}} =
+             Foreman.CLI.parse([
+               "ask",
+               "push",
+               "s-1",
+               "--worktree",
+               "/tmp/repo",
+               "--branch",
+               "feature",
+               "--sha",
+               String.duplicate("a", 40),
+               "--remote-branch",
+               "feature",
+               "--expected-old-head",
+               String.duplicate("b", 40),
+               "--force-with-lease"
+             ])
+
+    assert request["facts"]["expected_old_head"] == String.duplicate("b", 40)
+    assert request["facts"]["force_with_lease"] == true
   end
 
   test "job refuses config that could redirect credentials or execute helpers", %{

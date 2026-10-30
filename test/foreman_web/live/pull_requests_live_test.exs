@@ -93,7 +93,13 @@ defmodule ForemanWeb.PullRequestsLiveTest do
       {path, _} = assert_redirect(inbox)
       refute URI.decode_query(URI.parse(path).query) |> Map.has_key?("note")
       {:ok, view, _} = live(conn, path)
-      assert has_element?(view, "#merge-confirm[data-open=true]", "Retarget #6")
+
+      assert has_element?(
+               view,
+               "#merge-confirm[data-open=true]",
+               "Retarget #6"
+             )
+
       assert Foreman.Requests.get(request.id).state == "pending"
       assert Foreman.Repo.aggregate(Oban.Job, :count) == 0
       view |> element("#merge-confirm-cancel") |> render_click()
@@ -172,6 +178,7 @@ defmodule ForemanWeb.PullRequestsLiveTest do
     Foreman.Merge.MergeJob.run(row.id, Foreman.Forge.Fake, server: fake)
     send(view.pid, :reconcile)
     assert has_element?(view, "#merge-status[data-state=retargeting]")
+    refute has_element?(view, "#retarget-offers")
     Foreman.Merge.RetargetJob.run(row.id, Foreman.Forge.Fake, server: fake)
     send(view.pid, :reconcile)
     assert has_element?(view, "#merge-status[data-state=merged]")
@@ -181,6 +188,39 @@ defmodule ForemanWeb.PullRequestsLiveTest do
     render_patch(view, "/pull-requests?project=sample&ticket=sample%3Afe-813.3")
     assert has_element?(view, "#ticket-stage", "merged")
     assert has_element?(view, "#ticket-close-suggestion", "bd close fe-813.3")
+  end
+
+  test "Needs you merge card names the child and configured target", %{conn: conn} do
+    stored = Foreman.Forge.Store.get("sample")
+
+    config =
+      put_in(
+        Foreman.RuntimeState.config().config,
+        ["repos", Access.at(0), "merge_base"],
+        "staging"
+      )
+
+    Foreman.Repo.update_all("board_config", set: [config: config])
+
+    snapshot =
+      stored.snapshot
+      |> put_in(["change_requests", Access.at(0), "mergeable"], "mergeable")
+      |> put_in(["change_requests", Access.at(0), "target_branch"], "staging")
+
+    Foreman.Forge.Store.replace("sample", stored.remote, snapshot)
+
+    {:ok, request} =
+      Foreman.Requests.ask({"sample", "fe-813.3"}, "merge", %{
+        "facts" => %{"number" => 5, "expected_sha" => hd(snapshot["change_requests"])["head_sha"]}
+      })
+
+    {:ok, view, _} = live(conn, "/needs-you")
+
+    assert has_element?(
+             view,
+             "#request-#{request.id}",
+             "Retarget PR #6 to staging after the merge."
+           )
   end
 
   test "a head observed after opening confirmation requires a fresh confirmation", %{conn: conn} do

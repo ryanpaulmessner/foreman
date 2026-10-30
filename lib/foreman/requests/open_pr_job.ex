@@ -26,6 +26,9 @@ defmodule Foreman.Requests.OpenPrJob do
     end
   end
 
+  defp refusal_reason(%{error: code, message: message}), do: code <> ": " <> message
+  defp refusal_reason(reason), do: to_string(reason)
+
   defp execute(request) do
     facts = request.facts
     adapter = Foreman.Forge.adapter()
@@ -36,7 +39,7 @@ defmodule Foreman.Requests.OpenPrJob do
            {:ok, repo} <- Push.configured(request.repo_key),
            true <- repo["github"] == facts["remote"] || {:error, :config_changed},
            :ok <- OpenPr.shape(facts),
-           :ok <- OpenPr.guards(facts, adapter, opts, repo),
+           :ok <- OpenPr.guards(facts, adapter, opts, repo, {request.repo_key, request.bead_id}),
            {:ok, current} <- Push.configured(request.repo_key),
            true <- current == repo || {:error, :config_changed},
            %{stage: :committed} <- Overlay.get({request.repo_key, request.bead_id}) do
@@ -47,8 +50,11 @@ defmodule Foreman.Requests.OpenPrJob do
       end
 
     case result do
-      {:ok, result} -> Requests.resolve(request.id, :succeeded, %{"result" => result})
-      {:error, reason} -> Requests.resolve(request.id, :failed, %{"reason" => to_string(reason)})
+      {:ok, result} ->
+        Requests.resolve(request.id, :succeeded, %{"result" => result})
+
+      {:error, reason} ->
+        Requests.resolve(request.id, :failed, %{"reason" => refusal_reason(reason)})
     end
 
     :ok

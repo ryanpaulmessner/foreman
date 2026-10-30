@@ -217,6 +217,21 @@ defmodule Foreman.AgentCommands do
                  next_command: Foreman.StageGuidance.next(row.stage, id, request["actor"])
                }}
 
+            {:error, :expected_old_head_required} ->
+              {422,
+               %{
+                 error: "expected_old_head_required",
+                 message:
+                   "Supply --expected-old-head with the current remote commit before you update this branch."
+               }}
+
+            {:error, :open_pr_required} ->
+              {422,
+               %{
+                 error: "open_pr_required",
+                 message: "This ticket already has an open PR. Select a branch with an open PR."
+               }}
+
             {:error, :not_found} ->
               {404, %{error: "not_found"}}
 
