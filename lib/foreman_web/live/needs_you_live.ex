@@ -94,6 +94,11 @@ defmodule ForemanWeb.NeedsYouLive do
        |> ForemanWeb.TicketDetail.refresh()}
 
   @doc "Resolves a shared request form, regardless of its page or drawer location."
+  def resolve(%{"id" => id, "action" => "batch-answer"} = params) do
+    ids = get_in(params, ["batch", "items"]) || []
+    Requests.resolve(id, :answer, %{"answer" => ids})
+  end
+
   def resolve(%{"id" => id, "decision" => params, "action" => "answer"}) do
     answer = if params["choice"] in [nil, ""], do: params["note"], else: params["choice"]
 
@@ -320,6 +325,7 @@ defmodule ForemanWeb.NeedsYouLive do
     |> assign(:pending_headings, headings)
     |> ForemanWeb.RequestCount.refresh()
     |> stream(:recent, Requests.recent(), reset: true)
+    |> stream(:waiting_without_card, Foreman.WaitingWithoutCard.list(), reset: true)
   end
 
   def render(assigns) do
@@ -364,6 +370,42 @@ defmodule ForemanWeb.NeedsYouLive do
               repos={@card_repos}
             />
           </div>
+          <section
+            class="max-w-3xl space-y-3 border-t border-base pt-5"
+            aria-labelledby="waiting-without-card-heading"
+          >
+            <h2 id="waiting-without-card-heading" class="text-base font-semibold">
+              Waiting on you without a card
+            </h2>
+            <div id="waiting-without-card" phx-update="stream" class="space-y-3">
+              <p
+                id="waiting-without-card-empty"
+                class="hidden only:block text-sm text-foreground-softer"
+              >
+                No items
+              </p>
+              <article
+                :for={{id, item} <- @streams.waiting_without_card}
+                id={id}
+                class="space-y-2 rounded-lg border border-base p-4"
+              >
+                <p class="text-xs text-foreground-softer">
+                  {item.repo_key}<span :if={item.bead_id}> · {item.bead_id}</span>
+                </p>
+                <h3 class="break-words font-medium">{item.title}</h3>
+                <p :if={item.detail} class="break-words text-sm text-foreground-softer">
+                  {item.detail}
+                </p>
+                <.link
+                  patch={if String.starts_with?(item.href, "/needs-you?"), do: item.href}
+                  href={unless String.starts_with?(item.href, "/needs-you?"), do: item.href}
+                  class="inline-block rounded text-sm underline underline-offset-4 transition hover:text-primary"
+                >
+                  {item.action}
+                </.link>
+              </article>
+            </div>
+          </section>
           <details id="recent-outcomes" class="max-w-3xl border-t border-base pt-4">
             <summary class="cursor-pointer text-sm font-medium text-foreground-softer">
               Recent outcomes
@@ -564,9 +606,85 @@ defmodule ForemanWeb.NeedsYouLive do
   defp card_body(%{request: %{kind: kind}} = assigns) when kind in ["push", "open_pr", "merge"],
     do: action_card(assigns)
 
+  defp card_body(%{request: %{kind: "batch"}} = assigns), do: batch_card(assigns)
   defp card_body(%{request: %{kind: "chore"}} = assigns), do: chore_card(assigns)
   defp card_body(%{request: %{kind: "session_waiting"}} = assigns), do: waiting_card(assigns)
   defp card_body(assigns), do: decision_card(assigns)
+
+  defp batch_card(assigns) do
+    assigns = assign(assigns, :form, to_form(%{}, as: :batch))
+
+    ~H"""
+    <article id={@id} class="space-y-4 rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
+      <ForemanWeb.RequestContext.context
+        request={@request}
+        prefix={@prefix}
+        event={@event}
+        focus={@focus}
+        heading={@heading}
+      />
+      <div class="flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
+        <Badge.badge>Batch</Badge.badge>
+        <ForemanWeb.RequestCard.ticket_link
+          id={@prefix <> "ticket-link-" <> @request.id}
+          request={@request}
+          link={if(@prefix == "", do: :patch, else: :navigate)}
+        />
+        <ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} />
+      </div>
+      <ForemanWeb.RequestCard.agent_text
+        id={@prefix <> "question-" <> @request.id}
+        text={@request.facts["question"]}
+        repo={@request.repo_key}
+        repos={@repos}
+        class="fm-card-question"
+      />
+      <ForemanWeb.RequestCard.agent_text
+        id={@prefix <> "text-" <> @request.id}
+        text={@request.facts["text"]}
+        repo={@request.repo_key}
+        repos={@repos}
+      />
+      <ForemanWeb.RequestCard.doc_links id={@prefix <> "docs-" <> @request.id} request={@request} />
+      <.form
+        for={@form}
+        id={@prefix <> "batch-" <> @request.id}
+        phx-submit={@event}
+        phx-value-id={@request.id}
+        phx-value-action="batch-answer"
+        class="space-y-4"
+      >
+        <fieldset class="space-y-2">
+          <legend class="sr-only">Items</legend>
+          <label
+            :for={{item, index} <- Enum.with_index(@request.facts["items"])}
+            class="flex cursor-pointer items-start gap-3 rounded-lg border border-base p-3 transition hover:bg-sunken has-[:checked]:border-primary"
+          >
+            <input
+              id={"#{@prefix}batch-item-#{@request.id}-#{index}"}
+              type="checkbox"
+              name="batch[items][]"
+              value={item["id"]}
+              class="mt-1 size-4 shrink-0 accent-current"
+            />
+            <span class="min-w-0 break-words">
+              <span class="block">{item["label"]}</span>
+              <span
+                :if={item["detail"]}
+                class="mt-1 block whitespace-pre-wrap text-sm text-foreground-softer"
+              >
+                {item["detail"]}
+              </span>
+            </span>
+          </label>
+        </fieldset>
+        <Button.button id={@prefix <> "submit-batch-" <> @request.id} type="submit" variant="solid">
+          Submit
+        </Button.button>
+      </.form>
+    </article>
+    """
+  end
 
   defp chore_card(assigns) do
     ~H"""
