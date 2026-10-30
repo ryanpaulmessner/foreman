@@ -35,7 +35,9 @@ defmodule Foreman.Requests.PushJob do
            {:ok, snapshot} <- adapter.list(facts["remote"], forge_options),
            {:ok, current_repo} <- Push.configured(request.repo_key),
            true <- current_repo == repo || {:error, :config_changed},
-           %{stage: :committed} = row <- Overlay.get({request.repo_key, request.bead_id}),
+           %{stage: stage} = row when stage in [:committed, :pr_open] <-
+             Overlay.get({request.repo_key, request.bead_id}),
+           :ok <- Push.update_rule(facts, snapshot, stage),
            :ok <- Push.default_rule(facts, row, snapshot["default_branch"]),
            :ok <- Push.human_rule(facts, current_repo, snapshot["default_branch"]),
            :ok <- LocalRefs.safe_config(facts["worktree"]),
@@ -48,6 +50,7 @@ defmodule Foreman.Requests.PushJob do
 
     case result do
       :ok ->
+        Foreman.Forge.Store.record_push(request.repo_key, facts)
         Requests.resolve(request.id, :succeeded, %{"result" => %{"sha" => facts["expected_sha"]}})
 
       {:error, reason} ->
@@ -62,26 +65,37 @@ defmodule Foreman.Requests.PushJob do
   end
 
   defp push(facts, forge_options, opts) do
-    args = [
-      "-c",
-      "credential.helper=",
-      "-c",
-      "credential.helper=!gh auth git-credential",
-      "-c",
-      "core.hooksPath=/dev/null",
-      "-c",
-      "push.followTags=false",
-      "-c",
-      "push.negotiate=false",
-      "-c",
-      "http.followRedirects=false",
-      "push",
-      "--porcelain",
-      "--no-verify",
-      "--",
-      "https://github.com/" <> facts["remote"] <> ".git",
-      facts["expected_sha"] <> ":refs/heads/" <> facts["remote_branch"]
-    ]
+    lease =
+      if facts["expected_old_head"],
+        do: [
+          "--force-with-lease=refs/heads/#{facts["remote_branch"]}:#{facts["expected_old_head"]}"
+        ],
+        else: []
+
+    args =
+      [
+        "-c",
+        "credential.helper=",
+        "-c",
+        "credential.helper=!gh auth git-credential",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "push.followTags=false",
+        "-c",
+        "push.negotiate=false",
+        "-c",
+        "http.followRedirects=false",
+        "push",
+        "--porcelain",
+        "--no-verify"
+      ] ++
+        lease ++
+        [
+          "--",
+          "https://github.com/" <> facts["remote"] <> ".git",
+          facts["expected_sha"] <> ":refs/heads/" <> facts["remote_branch"]
+        ]
 
     command = Keyword.get(opts, :command, &System.cmd("git", &1, &2))
 
@@ -99,9 +113,40 @@ defmodule Foreman.Requests.PushJob do
           {"GIT_TERMINAL_PROMPT", "0"},
           {"GIT_CONFIG_NOSYSTEM", "1"},
           {"GIT_CONFIG_GLOBAL", "/dev/null"},
+          {"GIT_NO_REPLACE_OBJECTS", "1"},
+          {"GIT_GRAFT_FILE", "/dev/null"},
           {"GH_TOKEN", forge_options[:token]}
         ]
 
+    with :ok <- fast_forward(facts, env, command) do
+      send_push(command, args, facts, env)
+    end
+  end
+
+  defp fast_forward(%{"expected_old_head" => old} = facts, env, command) when is_binary(old) do
+    if facts["force_with_lease"] == true do
+      :ok
+    else
+      case command.(["merge-base", "--is-ancestor", old, facts["expected_sha"]],
+             cd: facts["worktree"],
+             env: env,
+             stderr_to_stdout: true
+           ) do
+        {_, 0} ->
+          :ok
+
+        {_, 1} ->
+          {:error, "not a fast-forward; use --force-with-lease to replace the branch history"}
+
+        _ ->
+          {:error, "the old head #{old} is not in this worktree; fetch it first"}
+      end
+    end
+  end
+
+  defp fast_forward(_, _, _), do: :ok
+
+  defp send_push(command, args, facts, env) do
     case command.(args, cd: facts["worktree"], env: env, stderr_to_stdout: true) do
       {_, 0} ->
         :ok

@@ -80,6 +80,45 @@ defmodule Foreman.OpenPrTest do
     assert {:error, :forge_disabled} = ask(facts)
   end
 
+  test "unexpected bases name the target and require an explicit override", %{
+    facts: facts,
+    fake: fake
+  } do
+    committed()
+
+    config =
+      put_in(
+        Foreman.RuntimeState.config().config,
+        ["repos", Access.at(0), "merge_base"],
+        "staging"
+      )
+
+    Repo.update_all("board_config", set: [config: config])
+    Agent.update(fake, &put_in(&1, ["branches", "staging"], @sha))
+    {:ok, snapshot} = Foreman.Forge.Fake.list("owner/repo", server: fake)
+    Foreman.Forge.Store.replace("sample", "owner/repo", snapshot)
+    assert {:error, %{error: "base_unexpected", expected_bases: ["staging"]}} = ask(facts)
+
+    assert {422, %{error: "base_unexpected", expected_bases: ["staging"], message: message}} =
+             Foreman.AgentCommands.execute(%{
+               "action" => "ask",
+               "repo" => "sample",
+               "id" => "s-1",
+               "request_kind" => "open_pr",
+               "facts" => facts
+             })
+
+    assert message =~ "staging"
+    assert {:ok, _} = ask(Map.put(facts, "base_branch", "staging"))
+    assert {:ok, request} = ask(Map.put(facts, "base_ok", true))
+    assert request.facts["base_ok"] == true
+    assert {:ok, _} = Requests.resolve(request.id, :approve, %{})
+    assert :ok = Foreman.Requests.OpenPrJob.run(request.id)
+    assert %{state: "done"} = Requests.get(request.id)
+    {:ok, created} = Foreman.Forge.Fake.list("owner/repo", server: fake)
+    assert [%{"target_branch" => "main"}] = created["change_requests"]
+  end
+
   test "creation checks observed head, base and absence of an open PR", %{
     facts: facts,
     fake: fake
@@ -87,7 +126,10 @@ defmodule Foreman.OpenPrTest do
     committed()
     assert {:error, :head_moved} = ask(Map.put(facts, "expected_sha", String.duplicate("c", 40)))
     assert {:error, :head_missing} = ask(Map.put(facts, "head_branch", "missing"))
-    assert {:error, :base_missing} = ask(Map.put(facts, "base_branch", "missing"))
+
+    assert {:error, %{error: "base_unexpected", expected_bases: ["main"]}} =
+             ask(Map.put(facts, "base_branch", "missing"))
+
     assert {:error, :invalid_facts} = ask(Map.put(facts, "title", "  "))
     assert {:error, :invalid_facts} = ask(Map.put(facts, "body", nil))
 
@@ -232,6 +274,7 @@ defmodule Foreman.OpenPrTest do
                @sha,
                "--base",
                "main",
+               "--base-ok",
                "--title",
                "Exact title",
                "--body-file",
@@ -243,6 +286,7 @@ defmodule Foreman.OpenPrTest do
              "expected_sha" => @sha,
              "base_branch" => "main",
              "title" => "Exact title",
+             "base_ok" => true,
              "body" => "Body\n\nExact.\n"
            }
 
@@ -441,7 +485,7 @@ defmodule Foreman.OpenPrTest do
       fake: fake
     } do
       committed()
-      assert {:error, :human_merge_base_branch} = ask(facts)
+      assert {:error, %{error: "base_unexpected"}} = ask(facts)
       assert {:ok, request} = ask(Map.put(facts, "base_branch", "staging"))
       Requests.resolve(request.id, :approve, %{})
       assert :ok = Foreman.Requests.OpenPrJob.run(request.id)
@@ -466,7 +510,7 @@ defmodule Foreman.OpenPrTest do
         )
 
       Repo.update_all("board_config", set: [config: config])
-      assert {:error, :human_merge_base_branch} = ask(facts)
+      assert {:error, %{error: "base_unexpected"}} = ask(facts)
       assert {:ok, request} = ask(Map.put(facts, "base_branch", "staging"))
       Requests.resolve(request.id, :approve, %{})
       assert :ok = Foreman.Requests.OpenPrJob.run(request.id)
@@ -474,7 +518,7 @@ defmodule Foreman.OpenPrTest do
       assert [%{"target_branch" => "staging"}] = snapshot["change_requests"]
     end
 
-    test "a stacked PR may target the head branch of an open PR", %{facts: facts, fake: fake} do
+    test "only a recorded blocker PR is an allowed stack parent", %{facts: facts, fake: fake} do
       committed()
 
       Agent.update(fake, fn snapshot ->
@@ -484,6 +528,7 @@ defmodule Foreman.OpenPrTest do
           %{
             "number" => 1,
             "source_branch" => "parent",
+            "title" => "s-2 parent",
             "target_branch" => "staging",
             "state" => "open"
           }
@@ -492,21 +537,39 @@ defmodule Foreman.OpenPrTest do
 
       {:ok, snapshot} = Foreman.Forge.Fake.list("owner/repo", server: fake)
       Foreman.Forge.Store.replace("sample", "owner/repo", snapshot)
-      assert {:ok, _} = ask(Map.put(facts, "base_branch", "parent"))
+      assert {:error, %{error: "base_unexpected"}} = ask(Map.put(facts, "base_branch", "parent"))
+
+      Repo.insert_all("bead_repos", [
+        %{key: "sample", export_sha256: "test", synced_at: DateTime.utc_now()}
+      ])
+
+      Repo.insert_all("beads", [
+        %{
+          repo_key: "sample",
+          bead_id: "s-1",
+          raw: %{"dependencies" => [%{"type" => "blocks", "depends_on_id" => "s-2"}]}
+        }
+      ])
+
+      assert {:ok, request} = ask(Map.put(facts, "base_branch", "parent"))
+      Requests.resolve(request.id, :approve, %{})
+      assert :ok = Foreman.Requests.OpenPrJob.run(request.id)
+      assert %{state: "done"} = Requests.get(request.id)
     end
 
     test "the job refuses a wrong base forced past creation", %{facts: facts, fake: fake} do
       committed()
       config = Foreman.RuntimeState.config().config
-      board = put_in(config, ["repos", Access.at(0), "merge_policy"], "board")
+      board = put_in(config, ["repos", Access.at(0), "merge_base"], "main")
       Repo.update_all("board_config", set: [config: board])
       {:ok, request} = ask(facts)
       Requests.resolve(request.id, :approve, %{})
       Repo.update_all("board_config", set: [config: config])
       assert :ok = Foreman.Requests.OpenPrJob.run(request.id)
 
-      assert %{state: "failed", outcome: %{"reason" => "human_merge_base_branch"}} =
-               Requests.get(request.id)
+      assert %{state: "failed", outcome: %{"reason" => reason}} = Requests.get(request.id)
+      assert reason =~ "base_unexpected"
+      assert reason =~ "staging"
 
       {:ok, snapshot} = Foreman.Forge.Fake.list("owner/repo", server: fake)
       assert snapshot["change_requests"] == []

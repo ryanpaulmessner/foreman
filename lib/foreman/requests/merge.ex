@@ -10,8 +10,21 @@ defmodule Foreman.Requests.Merge do
          true <- Foreman.Forge.adapter().capabilities().write || {:error, :read_only},
          facts = Map.put(Map.take(facts, ["number", "expected_sha"]), "remote", repo["github"]),
          :ok <- unchanged(row.repo_key, facts),
-         {:ok, _} <-
-           Foreman.Merge.prepare(Foreman.Forge.Store.get(row.repo_key).snapshot, facts["number"]) do
+         {:ok, prepared} <-
+           Foreman.Merge.prepare(
+             Foreman.Forge.Store.get(row.repo_key).snapshot,
+             facts["number"],
+             row.repo_key
+           ) do
+      facts =
+        if prepared["child"],
+          do:
+            Map.put(facts, "retarget", %{
+              "number" => prepared["child"]["number"],
+              "base" => prepared["default_branch"]
+            }),
+          else: facts
+
       {:ok, facts}
     end
   end

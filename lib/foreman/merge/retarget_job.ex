@@ -49,7 +49,7 @@ defmodule Foreman.Merge.RetargetJob do
     if child && child["state"] == "open" &&
          child["source_branch"] == row.facts["child"]["source_branch"] &&
          child["target_branch"] in [row.facts["pr"]["source_branch"], row.facts["default_branch"]] &&
-         snapshot["default_branch"] == row.facts["default_branch"],
+         Merge.target_branch(row.repo_key, snapshot) == row.facts["default_branch"],
        do: :ok,
        else: {:error, :child_changed}
   end
