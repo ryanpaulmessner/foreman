@@ -20,7 +20,8 @@ defmodule Foreman.Epic do
   event(:revive, source: :claimed)
   event(:bead_epic_closed, source: :observed)
   event(:bead_epic_reopened, source: :observed)
-  effects([:record, :link])
+  event(:bead_reclassified, source: :observed)
+  effects([:record, :link, :unlink])
   guard(:beads_epic_id?)
 
   transition(:create, from: :new_draft, to: :idea, do: [record: :draft])
@@ -43,7 +44,14 @@ defmodule Foreman.Epic do
   transition(:revive, from: :abandoned, to: :idea)
   transition(:bead_epic_closed, from: :any, to: :done)
   transition(:bead_epic_reopened, from: :done, to: :ticketed)
-  ignore([:bead_epic_closed, :bead_epic_reopened], from: :any)
+
+  transition(:bead_reclassified,
+    from: [:ticketed, :done],
+    to: :spec_approved,
+    do: [unlink: :beads_epic]
+  )
+
+  ignore([:bead_epic_closed, :bead_epic_reopened, :bead_reclassified], from: :any)
   invalid([:create, :start_spec, :approve_spec, :ticket, :abandon, :revive], from: :any)
 
   def beads_epic_id?(_, %{beads_epic_id: id}) when is_binary(id), do: byte_size(id) > 0

@@ -54,7 +54,7 @@ defmodule Foreman.ScratchPrompt do
   end
 
   defp launch(session, script) do
-    socket = "fm-prompt-#{System.unique_integer([:positive])}"
+    socket = Foreman.TestTmux.socket("fm-prompt")
     dir = Path.join(System.tmp_dir!(), socket)
     File.mkdir_p!(dir)
     executable = Path.join(dir, "prompt")

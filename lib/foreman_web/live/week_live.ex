@@ -14,6 +14,8 @@ defmodule ForemanWeb.WeekLive do
     {:noreply, refresh(socket)}
   end
 
+  def handle_info(_message, socket), do: {:noreply, socket}
+
   @impl true
   def handle_event("toggle-week-ticket", %{"key" => key}, socket) do
     {state, []} =

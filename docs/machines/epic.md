@@ -13,7 +13,9 @@ stateDiagram-v2
     abandoned --> idea: revive
     fsm_any --> done: bead_epic_closed
     done --> ticketed: bead_epic_reopened
+    fsm_set_8 --> spec_approved: bead_reclassified / unlink(beads_epic)
     state "draft: idea, speccing, spec_approved" as draft
+    state "ticketed, done" as fsm_set_8
     state "any state" as fsm_any
 ```
 
@@ -27,6 +29,7 @@ stateDiagram-v2
 | new_draft | revive | invalid |  |
 | new_draft | bead_epic_closed | -> done |  |
 | new_draft | bead_epic_reopened | ignored |  |
+| new_draft | bead_reclassified | ignored |  |
 | idea | create | invalid |  |
 | idea | start_spec | -> speccing |  |
 | idea | approve_spec | invalid |  |
@@ -35,6 +38,7 @@ stateDiagram-v2
 | idea | revive | invalid |  |
 | idea | bead_epic_closed | -> done |  |
 | idea | bead_epic_reopened | ignored |  |
+| idea | bead_reclassified | ignored |  |
 | speccing | create | invalid |  |
 | speccing | start_spec | invalid |  |
 | speccing | approve_spec | -> spec_approved | record(spec_link), record(design_link) |
@@ -43,6 +47,7 @@ stateDiagram-v2
 | speccing | revive | invalid |  |
 | speccing | bead_epic_closed | -> done |  |
 | speccing | bead_epic_reopened | ignored |  |
+| speccing | bead_reclassified | ignored |  |
 | spec_approved | create | invalid |  |
 | spec_approved | start_spec | invalid |  |
 | spec_approved | approve_spec | invalid |  |
@@ -52,6 +57,7 @@ stateDiagram-v2
 | spec_approved | revive | invalid |  |
 | spec_approved | bead_epic_closed | -> done |  |
 | spec_approved | bead_epic_reopened | ignored |  |
+| spec_approved | bead_reclassified | ignored |  |
 | ticketed | create | invalid |  |
 | ticketed | start_spec | invalid |  |
 | ticketed | approve_spec | invalid |  |
@@ -60,6 +66,7 @@ stateDiagram-v2
 | ticketed | revive | invalid |  |
 | ticketed | bead_epic_closed | -> done |  |
 | ticketed | bead_epic_reopened | ignored |  |
+| ticketed | bead_reclassified | -> spec_approved | unlink(beads_epic) |
 | abandoned | create | invalid |  |
 | abandoned | start_spec | invalid |  |
 | abandoned | approve_spec | invalid |  |
@@ -68,6 +75,7 @@ stateDiagram-v2
 | abandoned | revive | -> idea |  |
 | abandoned | bead_epic_closed | -> done |  |
 | abandoned | bead_epic_reopened | ignored |  |
+| abandoned | bead_reclassified | ignored |  |
 | done | create | invalid |  |
 | done | start_spec | invalid |  |
 | done | approve_spec | invalid |  |
@@ -76,3 +84,4 @@ stateDiagram-v2
 | done | revive | invalid |  |
 | done | bead_epic_closed | -> done |  |
 | done | bead_epic_reopened | -> ticketed |  |
+| done | bead_reclassified | -> spec_approved | unlink(beads_epic) |

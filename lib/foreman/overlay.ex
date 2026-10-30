@@ -51,7 +51,19 @@ defmodule Foreman.Overlay do
           lock(key)
           machine = if bead.issue_type in [:epic, "epic"], do: Epic, else: Stage
 
-          if is_nil(get(key)) do
+          existing = get(key)
+
+          if is_nil(existing) or existing.machine != machine do
+            if existing do
+              if existing.bead_id != bead.bead_id do
+                apply_event({repo, existing.bead_id}, :bead_reclassified, %{actor: "backfill"})
+              else
+                Repo.delete_all(
+                  from row in table(existing.machine), where: row.id == ^existing.id
+                )
+              end
+            end
+
             stage =
               if bead.status in [:closed, "closed"],
                 do: :done,
@@ -67,7 +79,9 @@ defmodule Foreman.Overlay do
 
             row = if machine == Epic, do: Map.put(row, :beads_epic_id, bead.bead_id), else: row
             Repo.insert_all(table(machine), [row])
-            record(key, machine, :backfill, %{}, "backfill", "beads", nil, stage, "row", [])
+            event = if existing, do: :reclassify, else: :backfill
+            from_stage = if existing, do: existing.stage
+            record(key, machine, event, %{}, "backfill", "beads", from_stage, stage, "row", [])
           end
         end)
 
@@ -395,6 +409,10 @@ defmodule Foreman.Overlay do
         set: [{field, payload[key]}]
       )
     end
+  end
+
+  defp persist_effect({:unlink, :beads_epic}, _, row, _, _, _) do
+    Repo.update_all(from(e in "epics", where: e.id == ^row.id), set: [beads_epic_id: nil])
   end
 
   defp persist_effect({:link, :beads_epic}, {repo, id}, row, _, payload, _) do

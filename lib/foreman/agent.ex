@@ -45,14 +45,30 @@ defmodule Foreman.Agent do
       case ensure_entity({repo, target}) do
         nil -> {404, %{error: "not_found"}}
         %{machine: Foreman.Epic} -> :ok
-        _ -> {422, %{error: "beads_epic_required"}}
+        _ -> epic_required(repo)
       end
     else
-      {422, %{error: "beads_epic_required"}}
+      epic_required(repo)
     end
   end
 
   defp validate_target(_, _, _), do: :ok
+
+  defp epic_required(repo) do
+    source = configured_repo(repo)
+
+    error =
+      if source && source["tickets"] == "files",
+        do: "file ticket must have type epic",
+        else: "beads_epic_required"
+
+    {422, %{error: error}}
+  end
+
+  defp configured_repo(key) do
+    snapshot = Foreman.RuntimeState.config()
+    snapshot && Enum.find(snapshot.config["repos"], &(&1["key"] == key and &1["enabled"]))
+  end
 
   def ensure_entity({repo, _} = key) do
     if is_nil(Overlay.get(key)), do: sync(repo)
@@ -64,10 +80,22 @@ defmodule Foreman.Agent do
       Application.get_env(
         :foreman,
         :agent_sync,
-        &Foreman.Beads.SyncJob.perform(%Oban.Job{args: %{"key" => &1}})
+        &sync_source/1
       )
 
     sync.(repo)
+  end
+
+  defp sync_source(key) do
+    case configured_repo(key) do
+      %{"tickets" => "files"} = repo ->
+        with {:ok, root} <- Foreman.TicketFiles.main_checkout(repo["path"]) do
+          Foreman.TicketFiles.Reader.publish(repo, Foreman.TicketFiles.snapshot(root))
+        end
+
+      _ ->
+        Foreman.Beads.SyncJob.perform(%Oban.Job{args: %{"key" => key}})
+    end
   end
 
   def link({repo, id} = key, {epic_repo, epic_id} = epic_key, action)
