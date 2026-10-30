@@ -3,7 +3,7 @@ defmodule Foreman.PaneEnvironmentTest do
   alias Foreman.SessionTmux
 
   test "service client environment does not reach new sessions, new windows or respawned panes" do
-    socket = "fm-pane-env-#{System.unique_integer([:positive])}"
+    socket = Foreman.TestTmux.socket("fm-pane-env")
     dir = Path.expand("tmp/#{socket}")
     File.mkdir_p!(dir)
     tmux = System.find_executable("tmux")

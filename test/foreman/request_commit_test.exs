@@ -194,7 +194,7 @@ defmodule Foreman.RequestCommitTest do
     end)
   end
 
-  test "ask racing ticket completion cannot leave a pending request", %{key: key} do
+  test "a decision accepted before ticket completion stays pending", %{key: key} do
     race([
       fn -> Requests.ask(key, "decision", %{"facts" => %{"question" => "Which?"}}) end,
       fn -> Overlay.apply_event(key, :bead_closed) end
@@ -202,7 +202,7 @@ defmodule Foreman.RequestCommitTest do
 
     unboxed(fn ->
       assert Overlay.get(key).stage == :done
-      assert Enum.all?(Requests.for_ticket(key), &(&1.state == "superseded"))
+      assert Enum.all?(Requests.for_ticket(key), &(&1.state == "pending"))
     end)
   end
 

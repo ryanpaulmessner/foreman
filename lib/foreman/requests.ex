@@ -324,7 +324,9 @@ defmodule Foreman.Requests do
   end
 
   def supersede(key) do
-    for request <- for_ticket(key), request.state == "pending" do
+    for request <- for_ticket(key),
+        request.state == "pending",
+        request.kind in ["push", "open_pr", "merge"] do
       transition(request, :facts_changed, %{"reason" => "ticket_finished"})
     end
 

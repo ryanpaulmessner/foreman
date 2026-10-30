@@ -147,24 +147,35 @@ defmodule Foreman.CLI do
     :exit, _ -> warn(args, "foreman unavailable; agent may continue")
   end
 
-  defp wait(request, opts, deadline) do
+  defp wait(request, opts, deadline, state \\ :waiting, snapshot \\ nil) do
     {_, body} = Foreman.CLITransport.deliver(request, opts)
+    {next, effects} = Foreman.RequestWait.step(state, {:response, body}, %{})
 
-    case Foreman.RequestWait.step(:waiting, {:response, body}, %{}) do
+    if {:warn, :unavailable} in effects,
+      do: IO.puts(:stderr, "warning: wait poll failed; retrying until the deadline")
+
+    snapshot = if Foreman.RequestWait.snapshot?(nil, body), do: body, else: snapshot
+
+    case {next, effects} do
       {:finished, _} ->
         {0, body}
 
-      {:waiting, _} ->
+      {state, _} when state in [:waiting, :retrying] ->
         remaining = deadline - System.monotonic_time(:millisecond)
 
         if remaining <= 0 do
-          {:finished, _} = Foreman.RequestWait.step(:waiting, :timeout, %{})
-          {0, body}
+          {:finished, _} = Foreman.RequestWait.step(state, :timeout, %{})
+          {0, snapshot || body}
         else
           receive do
           after
             min(remaining, Keyword.get(opts, :poll_interval, 500)) ->
-              wait(request, opts, deadline)
+              if System.monotonic_time(:millisecond) >= deadline do
+                {:finished, _} = Foreman.RequestWait.step(state, :timeout, %{})
+                {0, snapshot || body}
+              else
+                wait(request, opts, deadline, state, snapshot)
+              end
           end
         end
     end

@@ -11,7 +11,7 @@ defmodule Foreman.CoordinatorIntegrationTest do
   end
 
   setup do
-    name = "fm-coordinator-test-#{System.unique_integer([:positive])}"
+    name = Foreman.TestTmux.socket("fm-coordinator-test")
     dir = Path.expand("tmp/#{name}")
     File.mkdir_p!(dir)
     File.write!(Path.join(dir, ".zshrc"), "")

@@ -3,7 +3,7 @@ defmodule Foreman.SessionTmuxTest do
   alias Foreman.SessionTmux, as: Tmux
 
   setup do
-    socket = "fm-test-#{System.unique_integer([:positive])}"
+    socket = Foreman.TestTmux.socket("fm-test")
     dir = Path.join(System.tmp_dir!(), socket)
     File.mkdir_p!(dir)
 

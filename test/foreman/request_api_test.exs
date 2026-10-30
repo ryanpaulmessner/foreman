@@ -197,6 +197,84 @@ defmodule Foreman.RequestAPITest do
     assert Requests.pending_count() == 0
   end
 
+  test "wait retries failed polls before returning an answer" do
+    Req.Test.expect(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 503, "unavailable") end)
+
+    Req.Test.expect(__MODULE__, fn conn ->
+      Req.Test.json(conn, %{state: "answered", outcome: %{answer: "B"}})
+    end)
+
+    output =
+      capture_io(fn ->
+        warning =
+          capture_io(:stderr, fn ->
+            CLI.run(["wait", Ecto.UUID.generate(), "--timeout", "1"],
+              poll_interval: 0,
+              req_options: [plug: {Req.Test, __MODULE__}]
+            )
+          end)
+
+        assert warning =~ "wait poll failed"
+      end)
+
+    assert %{"state" => "answered", "outcome" => %{"answer" => "B"}} = Jason.decode!(output)
+  end
+
+  test "wait warns once per failure streak and resets after recovery" do
+    for body <- [%{}, %{}, %{"state" => "pending"}, %{}, %{"state" => "answered"}] do
+      Req.Test.expect(__MODULE__, fn conn -> Req.Test.json(conn, body) end)
+    end
+
+    warning =
+      capture_io(:stderr, fn ->
+        output =
+          capture_io(fn ->
+            CLI.run(["wait", Ecto.UUID.generate(), "--timeout", "1"],
+              poll_interval: 0,
+              req_options: [plug: {Req.Test, __MODULE__}]
+            )
+          end)
+
+        assert Jason.decode!(output)["state"] == "answered"
+      end)
+
+    assert length(String.split(String.trim(warning), "\n")) == 2
+  end
+
+  test "deadline does not start another transport call" do
+    Req.Test.stub(__MODULE__, fn conn ->
+      send(self(), :wait_polled)
+      Req.Test.json(conn, %{state: "pending"})
+    end)
+
+    capture_io(fn ->
+      CLI.run(["wait", Ecto.UUID.generate(), "--timeout", "1"],
+        poll_interval: 2000,
+        req_options: [plug: {Req.Test, __MODULE__}]
+      )
+    end)
+
+    assert_received :wait_polled
+    refute_received :wait_polled
+  end
+
+  test "deadline returns the last authoritative snapshot after failed polls" do
+    Req.Test.expect(__MODULE__, fn conn -> Req.Test.json(conn, %{state: "pending"}) end)
+    Req.Test.stub(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 503, "unavailable") end)
+
+    capture_io(:stderr, fn ->
+      output =
+        capture_io(fn ->
+          CLI.run(["wait", Ecto.UUID.generate(), "--timeout", "1"],
+            poll_interval: 100,
+            req_options: [plug: {Req.Test, __MODULE__}]
+          )
+        end)
+
+      assert Jason.decode!(output) == %{"state" => "pending"}
+    end)
+  end
+
   test "wait polls until the outcome and never spools a read" do
     {:ok, request} =
       Requests.ask({"sample", "s-1"}, "decision", %{"facts" => %{"question" => "Which?"}})
@@ -215,7 +293,9 @@ defmodule Foreman.RequestAPITest do
 
     output =
       capture_io(fn ->
-        assert CLI.run(["wait", request.id, "--timeout", "0"], url: "http://127.0.0.1:1") == 0
+        capture_io(:stderr, fn ->
+          assert CLI.run(["wait", request.id, "--timeout", "0"], url: "http://127.0.0.1:1") == 0
+        end)
       end)
 
     assert Jason.decode!(output)["warning"]
