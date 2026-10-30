@@ -2,7 +2,7 @@
 id: fm-cxv.2
 title: "Refuse unclear decision cards at post time"
 type: feature
-status: open
+status: closed
 priority: 2
 parent: fm-cxv
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-30
-closed: null
-close_reason: null
+closed: 2026-10-30
+close_reason: "Merged in PR #1 (f141b5b), reviewed, tests green vs baseline"
 ---
 
 75 cards had an empty body; 46% had no option details; none of 90 doc entries was clickable.

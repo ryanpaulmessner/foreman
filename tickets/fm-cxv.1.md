@@ -2,7 +2,7 @@
 id: fm-cxv.1
 title: "Visual review card with images inline"
 type: feature
-status: open
+status: closed
 priority: 2
 parent: fm-cxv
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-30
-closed: null
-close_reason: null
+closed: 2026-10-30
+close_reason: "Merged in PR #1 (f141b5b), reviewed, tests green vs baseline"
 ---
 
 24 visual cards; about 4 'where are these screenshots' replies (fd013347, a51e07ef); the one with an artifact link was answered in 5 min.

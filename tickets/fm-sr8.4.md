@@ -2,7 +2,7 @@
 id: fm-sr8.4
 title: "Focus switches the user's terminal to the session"
 type: feature
-status: in_progress
+status: closed
 priority: 2
 parent: fm-sr8
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-19
-closed: null
-close_reason: null
+closed: 2026-10-30
+close_reason: "Merged in PR #1 (f141b5b), reviewed, tests green vs baseline"
 ---
 
 ## What to build

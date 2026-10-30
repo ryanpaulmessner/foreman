@@ -2,7 +2,7 @@
 id: fm-28k.7
 title: "Tests leave tmux socket files behind"
 type: bug
-status: in_progress
+status: closed
 priority: 2
 parent: fm-28k
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-30
-closed: null
-close_reason: null
+closed: 2026-10-30
+close_reason: "Merged in PR #1 (f141b5b), reviewed, tests green vs baseline"
 ---
 
 2,723 stale tmux sockets in /private/tmp/tmux-504 from test servers.

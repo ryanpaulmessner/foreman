@@ -2,7 +2,7 @@
 id: fm-28k.3
 title: "Closing a ticket supersedes its decision cards"
 type: bug
-status: in_progress
+status: closed
 priority: 2
 parent: fm-28k
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-30
-closed: null
-close_reason: null
+closed: 2026-10-30
+close_reason: "Merged in PR #1 (f141b5b), reviewed, tests green vs baseline"
 ---
 
 requests.ex:326 supersedes every pending request kind when a ticket closes. 6 decisions were lost in 14 days (e.g. the n7p.7 'show Arnoldo' card). Docs (foreman SKILL.md:119) only promise this for push and open_pr.
