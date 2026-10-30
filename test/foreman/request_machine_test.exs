@@ -62,6 +62,10 @@ defmodule Foreman.RequestMachineTest do
           {:pending, :answer, "decision", :answered, [record: :answer, notify: :asker]},
           {:pending, :decline, "decision", :declined, [record: :note, notify: :asker]},
           {:pending, :withdraw, "decision", :withdrawn, []},
+          {:pending, :update, "decision", :pending, [record: :facts, notify: :pending]},
+          {:pending, :wrong_question, "decision", :wrong_question,
+           [record: :note, notify: :asker]},
+          {:pending, :complete, "chore", :done, [record: :result, notify: :asker]},
           {:pending, :card_question, "decision", :pending, [send: :prompt]},
           {:pending, :card_reply, "decision", :pending, [record: :message]},
           {:pending, :facts_changed, "decision", :superseded, [notify: :asker]},
@@ -77,6 +81,10 @@ defmodule Foreman.RequestMachineTest do
   test "wrong kind claims are invalid" do
     assert {:error, _} = Machine.step(:pending, :approve, %{kind: "decision"})
     assert {:error, _} = Machine.step(:pending, :answer, %{kind: "push"})
+
+    for kind <- ~w(decision review_ui push open_pr merge session_waiting) do
+      assert {:error, _} = Machine.step(:pending, :complete, %{kind: kind})
+    end
   end
 
   test "all other declared pairs reject claims and ignore observations" do
@@ -87,6 +95,8 @@ defmodule Foreman.RequestMachineTest do
         {:pending, :answer},
         {:pending, :decline},
         {:pending, :withdraw},
+        {:pending, :update},
+        {:pending, :wrong_question},
         {:pending, :card_question},
         {:pending, :card_reply},
         {:pending, :facts_changed},

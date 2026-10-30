@@ -20,7 +20,7 @@ defmodule Foreman.RequestWait do
   invalid([:response, :timeout], from: :any)
 
   def resolved?(_, body),
-    do: body["state"] in ~w(answered declined withdrawn superseded done failed)
+    do: body["state"] in ~w(answered declined wrong_question withdrawn superseded done failed)
 
   def snapshot?(_, body), do: body["state"] in ~w(pending approved executing)
 end

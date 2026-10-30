@@ -7,6 +7,7 @@ defmodule Foreman.Request do
   state(:approved)
   state(:answered)
   state(:declined)
+  state(:wrong_question)
   state(:withdrawn)
   state(:superseded)
   state(:executing)
@@ -15,8 +16,11 @@ defmodule Foreman.Request do
   event(:ask)
   event(:approve)
   event(:answer)
+  event(:complete)
   event(:decline)
+  event(:wrong_question)
   event(:withdraw)
+  event(:update)
   event(:continue)
   event(:reply)
   event(:card_question)
@@ -28,6 +32,7 @@ defmodule Foreman.Request do
   event(:orphaned, source: :observed)
   effects([:record, :notify, :enqueue, :audit, :send])
   guard(:decision?)
+  guard(:chore?)
   guard(:action?)
   guard(:usage_limit?)
   guard(:inline_question?)
@@ -42,8 +47,23 @@ defmodule Foreman.Request do
     do: [record: :answer, notify: :asker]
   )
 
+  transition(:complete,
+    from: :pending,
+    to: :done,
+    guard: :chore?,
+    do: [record: :result, notify: :asker]
+  )
+
   transition(:decline, from: :pending, to: :declined, do: [record: :note, notify: :asker])
+
+  transition(:wrong_question,
+    from: :pending,
+    to: :wrong_question,
+    do: [record: :note, notify: :asker]
+  )
+
   transition(:withdraw, from: :pending, to: :withdrawn)
+  transition(:update, from: :pending, to: :pending, do: [record: :facts, notify: :pending])
   transition(:continue, from: :pending, to: :pending, guard: :usage_limit?, do: [send: :continue])
   transition(:reply, from: :pending, to: :answered, guard: :inline_question?, do: [send: :answer])
   transition(:reply, from: :pending, to: :answered, guard: :chat_question?, do: [send: :prompt])
@@ -61,8 +81,11 @@ defmodule Foreman.Request do
       :ask,
       :approve,
       :answer,
+      :complete,
       :decline,
+      :wrong_question,
       :withdraw,
+      :update,
       :start,
       :continue,
       :reply,
@@ -91,6 +114,9 @@ defmodule Foreman.Request do
   @doc "A session that ended its turn asking in chat; the reply goes into its prompt."
   def chat_question?(%{kind: "session_waiting", reason: "question"}, _), do: true
   def chat_question?(_, _), do: false
+
+  def chore?(%{kind: "chore"}, _), do: true
+  def chore?(_, _), do: false
 
   def decision?(%{kind: kind}, _) when kind in ["decision", "review_ui"], do: true
   def decision?(_, _), do: false

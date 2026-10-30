@@ -102,6 +102,20 @@ defmodule Foreman.AgentCommands do
 
   defp command(%{"action" => "card_reply"}), do: {422, %{error: :invalid_message}}
 
+  defp command(%{"action" => "ask_update", "id" => id} = request) do
+    case Foreman.Requests.update(
+           id,
+           request["actor"] || "user",
+           request["session"],
+           request["facts"]
+         ) do
+      {:ok, updated} -> {200, %{id: updated.id, state: updated.state}}
+      {:error, :not_found} -> {404, %{error: "not_found"}}
+      {:error, reason} when is_map(reason) -> {422, reason}
+      {:error, reason} -> {422, %{error: reason}}
+    end
+  end
+
   defp command(%{"action" => "withdraw", "id" => id} = request) do
     case Foreman.Requests.withdraw(
            id,
@@ -182,9 +196,15 @@ defmodule Foreman.AgentCommands do
               {200, %{state: session.state}}
 
             {:ok, ask} ->
-              {200, %{id: ask.id, state: ask.state}}
+              body = %{id: ask.id, state: ask.state}
 
-            {:error, %{error: "card_unclear"} = refusal} ->
+              {200,
+               if(ask.standing_answer,
+                 do: Map.put(body, :standing_answer, ask.standing_answer),
+                 else: body
+               )}
+
+            {:error, %{error: _} = refusal} ->
               {422, refusal}
 
             {:error, reason} when reason in [:not_committed, :ticket_finished] ->

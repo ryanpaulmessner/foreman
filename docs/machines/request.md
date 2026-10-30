@@ -8,8 +8,11 @@ stateDiagram-v2
     new --> pending: ask / record(request), notify(pending)
     pending --> approved: approve [action?] / enqueue(job)
     pending --> answered: answer [decision?] / record(answer), notify(asker)
+    pending --> done: complete [chore?] / record(result), notify(asker)
     pending --> declined: decline / record(note), notify(asker)
+    pending --> wrong_question: wrong_question / record(note), notify(asker)
     pending --> withdrawn: withdraw
+    pending --> pending: update / record(facts), notify(pending)
     pending --> pending: continue [usage_limit?] / send(continue)
     pending --> answered: reply [inline_question?] / send(answer)
     pending --> answered: reply [chat_question?] / send(prompt)
@@ -27,8 +30,11 @@ stateDiagram-v2
 | new | ask | -> pending | record(request), notify(pending) |
 | new | approve | invalid |  |
 | new | answer | invalid |  |
+| new | complete | invalid |  |
 | new | decline | invalid |  |
+| new | wrong_question | invalid |  |
 | new | withdraw | invalid |  |
+| new | update | invalid |  |
 | new | continue | invalid |  |
 | new | reply | invalid |  |
 | new | card_question | invalid |  |
@@ -43,8 +49,12 @@ stateDiagram-v2
 | pending | approve | invalid |  |
 | pending | answer [decision?] | -> answered | record(answer), notify(asker) |
 | pending | answer | invalid |  |
+| pending | complete [chore?] | -> done | record(result), notify(asker) |
+| pending | complete | invalid |  |
 | pending | decline | -> declined | record(note), notify(asker) |
+| pending | wrong_question | -> wrong_question | record(note), notify(asker) |
 | pending | withdraw | -> withdrawn |  |
+| pending | update | -> pending | record(facts), notify(pending) |
 | pending | continue [usage_limit?] | -> pending | send(continue) |
 | pending | continue | invalid |  |
 | pending | reply [inline_question?] | -> answered | send(answer) |
@@ -60,8 +70,11 @@ stateDiagram-v2
 | approved | ask | invalid |  |
 | approved | approve | invalid |  |
 | approved | answer | invalid |  |
+| approved | complete | invalid |  |
 | approved | decline | invalid |  |
+| approved | wrong_question | invalid |  |
 | approved | withdraw | invalid |  |
+| approved | update | invalid |  |
 | approved | continue | invalid |  |
 | approved | reply | invalid |  |
 | approved | card_question | invalid |  |
@@ -74,8 +87,11 @@ stateDiagram-v2
 | answered | ask | invalid |  |
 | answered | approve | invalid |  |
 | answered | answer | invalid |  |
+| answered | complete | invalid |  |
 | answered | decline | invalid |  |
+| answered | wrong_question | invalid |  |
 | answered | withdraw | invalid |  |
+| answered | update | invalid |  |
 | answered | continue | invalid |  |
 | answered | reply | invalid |  |
 | answered | card_question | invalid |  |
@@ -88,8 +104,11 @@ stateDiagram-v2
 | declined | ask | invalid |  |
 | declined | approve | invalid |  |
 | declined | answer | invalid |  |
+| declined | complete | invalid |  |
 | declined | decline | invalid |  |
+| declined | wrong_question | invalid |  |
 | declined | withdraw | invalid |  |
+| declined | update | invalid |  |
 | declined | continue | invalid |  |
 | declined | reply | invalid |  |
 | declined | card_question | invalid |  |
@@ -99,11 +118,31 @@ stateDiagram-v2
 | declined | succeeded | ignored |  |
 | declined | failed | ignored |  |
 | declined | orphaned | ignored |  |
+| wrong_question | ask | invalid |  |
+| wrong_question | approve | invalid |  |
+| wrong_question | answer | invalid |  |
+| wrong_question | complete | invalid |  |
+| wrong_question | decline | invalid |  |
+| wrong_question | wrong_question | invalid |  |
+| wrong_question | withdraw | invalid |  |
+| wrong_question | update | invalid |  |
+| wrong_question | continue | invalid |  |
+| wrong_question | reply | invalid |  |
+| wrong_question | card_question | invalid |  |
+| wrong_question | card_reply | invalid |  |
+| wrong_question | start | invalid |  |
+| wrong_question | facts_changed | ignored |  |
+| wrong_question | succeeded | ignored |  |
+| wrong_question | failed | ignored |  |
+| wrong_question | orphaned | ignored |  |
 | withdrawn | ask | invalid |  |
 | withdrawn | approve | invalid |  |
 | withdrawn | answer | invalid |  |
+| withdrawn | complete | invalid |  |
 | withdrawn | decline | invalid |  |
+| withdrawn | wrong_question | invalid |  |
 | withdrawn | withdraw | invalid |  |
+| withdrawn | update | invalid |  |
 | withdrawn | continue | invalid |  |
 | withdrawn | reply | invalid |  |
 | withdrawn | card_question | invalid |  |
@@ -116,8 +155,11 @@ stateDiagram-v2
 | superseded | ask | invalid |  |
 | superseded | approve | invalid |  |
 | superseded | answer | invalid |  |
+| superseded | complete | invalid |  |
 | superseded | decline | invalid |  |
+| superseded | wrong_question | invalid |  |
 | superseded | withdraw | invalid |  |
+| superseded | update | invalid |  |
 | superseded | continue | invalid |  |
 | superseded | reply | invalid |  |
 | superseded | card_question | invalid |  |
@@ -130,8 +172,11 @@ stateDiagram-v2
 | executing | ask | invalid |  |
 | executing | approve | invalid |  |
 | executing | answer | invalid |  |
+| executing | complete | invalid |  |
 | executing | decline | invalid |  |
+| executing | wrong_question | invalid |  |
 | executing | withdraw | invalid |  |
+| executing | update | invalid |  |
 | executing | continue | invalid |  |
 | executing | reply | invalid |  |
 | executing | card_question | invalid |  |
@@ -144,8 +189,11 @@ stateDiagram-v2
 | done | ask | invalid |  |
 | done | approve | invalid |  |
 | done | answer | invalid |  |
+| done | complete | invalid |  |
 | done | decline | invalid |  |
+| done | wrong_question | invalid |  |
 | done | withdraw | invalid |  |
+| done | update | invalid |  |
 | done | continue | invalid |  |
 | done | reply | invalid |  |
 | done | card_question | invalid |  |
@@ -158,8 +206,11 @@ stateDiagram-v2
 | failed | ask | invalid |  |
 | failed | approve | invalid |  |
 | failed | answer | invalid |  |
+| failed | complete | invalid |  |
 | failed | decline | invalid |  |
+| failed | wrong_question | invalid |  |
 | failed | withdraw | invalid |  |
+| failed | update | invalid |  |
 | failed | continue | invalid |  |
 | failed | reply | invalid |  |
 | failed | card_question | invalid |  |

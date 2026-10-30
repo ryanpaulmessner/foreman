@@ -30,6 +30,8 @@ defmodule Foreman.CLI do
     worktree: :string,
     remote_branch: :string,
     question: :string,
+    step: :keep,
+    key: :string,
     option: :keep,
     option_detail: :keep,
     recommendation: :string,
@@ -134,9 +136,14 @@ defmodule Foreman.CLI do
           end
 
         cond do
-          request["action"] == "wait" or json? -> IO.puts(Jason.encode!(body))
-          request["action"] == "ask" and is_binary(body["id"]) -> IO.puts(body["id"])
-          true -> IO.puts(format(body))
+          request["action"] == "wait" or json? ->
+            IO.puts(Jason.encode!(body))
+
+          request["action"] == "ask" and is_binary(body["id"]) and is_nil(body["standing_answer"]) ->
+            IO.puts(body["id"])
+
+          true ->
+            IO.puts(format(body))
         end
 
         if request["action"] in ["ask", "wait"], do: 0, else: code
@@ -204,8 +211,13 @@ defmodule Foreman.CLI do
   defp format(%{"stage" => stage, "next_command" => command} = body),
     do: "#{body["error"] || "Command refused"}; current stage: #{stage}; next: #{command}"
 
+  defp format(%{"error" => "not_pending", "state" => state}),
+    do: "Card cannot be updated; current state: #{state}"
+
   defp format(%{"error" => "card_unclear", "missing" => missing}),
     do: "card_unclear: Missing " <> Enum.join(missing, ", ")
+
+  defp format(%{"standing_answer" => _} = body), do: Jason.encode!(body)
 
   defp format(%{"warning" => warning}), do: "warning: " <> warning
 
@@ -221,6 +233,15 @@ defmodule Foreman.CLI do
       "session" => opts[:session] || defaults[:session] || System.get_env("FOREMAN_SESSION"),
       "project" => opts[:project] || opts[:repo],
       "cwd" => defaults[:cwd] || File.cwd!()
+    }
+  end
+
+  defp ask_facts("chore", opts, _cwd) do
+    %{
+      "question" => opts[:question],
+      "text" => opts[:text],
+      "steps" => Keyword.get_values(opts, :step),
+      "key" => opts[:key]
     }
   end
 
@@ -352,6 +373,27 @@ defmodule Foreman.CLI do
           {:error,
            "session register requires --name <name> --pane <%id> --workdir <absolute-path> --harness claude|pi"}
         end
+
+      {[], ["ask", "update", id]} when kind == "ticket" ->
+        fields =
+          for {flag, field} <- [
+                question: "question",
+                text: "text",
+                option: "options",
+                option_detail: "option_details",
+                recommendation: "recommendation",
+                doc: "docs"
+              ],
+              Keyword.has_key?(opts, flag),
+              do: field
+
+        facts = ask_facts("decision", opts, defaults[:cwd] || File.cwd!()) |> Map.take(fields)
+
+        request =
+          request_identity(opts, defaults)
+          |> Map.merge(%{"action" => "ask_update", "id" => id, "facts" => facts})
+
+        {:ok, %{request: request, json: opts[:json] || false}}
 
       {[], ["ask", request_kind, id]} when kind == "ticket" ->
         request =
