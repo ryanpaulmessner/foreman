@@ -41,6 +41,7 @@ defmodule Foreman.TicketCLI do
       verb in ~w(show ls) and Enum.any?(~w(--overlay --stage --project --repo), &(&1 in args))
 
     verb in @verbs and not overlay_read? and
+      not (verb == "note" and "--all-coordinators" in args) and
       (verb not in ~w(show ls) or local_tickets?(opts[:cwd] || File.cwd!()))
   end
 

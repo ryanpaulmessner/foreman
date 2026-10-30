@@ -32,7 +32,7 @@ defmodule ForemanWeb.RequestCard do
       />
       <.merge_facts :if={@request.kind == "merge"} request={@request} />
       <.agent_text
-        :if={@request.kind in ["decision", "review_ui", "chore"]}
+        :if={@request.kind in ["decision", "review_ui", "chore", "batch"]}
         id={@id <> "-question"}
         text={@request.facts["question"]}
         repo={@request.repo_key}
@@ -40,7 +40,7 @@ defmodule ForemanWeb.RequestCard do
         class="fm-card-question"
       />
       <.doc_links id={@id <> "-docs"} request={@request} />
-      <p :if={@request.outcome["answer"]} class="whitespace-pre-wrap break-words" phx-no-format>{@request.outcome["answer"]}</p>
+      <p :if={@request.outcome["answer"]} class="whitespace-pre-wrap break-words" phx-no-format>{answer_text(@request)}</p>
       <p
         :if={@request.note not in [nil, "", @request.outcome["answer"]]}
         class="whitespace-pre-wrap break-words text-foreground-softer"
@@ -59,6 +59,16 @@ defmodule ForemanWeb.RequestCard do
     </article>
     """
   end
+
+  defp answer_text(%{kind: "batch", outcome: %{"answer" => []}}), do: "None selected"
+
+  defp answer_text(%{kind: "batch"} = request) do
+    request.facts["items"]
+    |> Enum.filter(&(&1["id"] in request.outcome["answer"]))
+    |> Enum.map_join(", ", & &1["label"])
+  end
+
+  defp answer_text(request), do: request.outcome["answer"]
 
   attr :request, :any, required: true
 

@@ -152,7 +152,7 @@ defmodule Foreman.Requests do
   end
 
   defp validate_update(%{kind: kind} = request, facts)
-       when kind in ["decision", "review_ui", "chore"] do
+       when kind in ["decision", "review_ui", "chore", "batch"] do
     {:ok, handler} = Kind.fetch(kind)
     handler.validate(facts, %{repo_key: request.repo_key})
   end
@@ -447,7 +447,7 @@ defmodule Foreman.Requests do
     state = Enum.find(Machine.__fsm__(:states), &(to_string(&1) == request.state))
 
     with {:ok, payload} <- answer_payload(request, event, payload),
-         :ok <- validate(event, payload),
+         :ok <- validate_payload(request, event, payload),
          {next, effects} when next != :error <- Machine.step(state, event, context(request)) do
       if next == state do
         {:ok, request}
@@ -492,6 +492,9 @@ defmodule Foreman.Requests do
   defp answer_payload(%{kind: "review_ui"} = request, :answer, payload),
     do: Foreman.Requests.ReviewUI.answer(request, payload)
 
+  defp answer_payload(%{kind: "batch"} = request, :answer, payload),
+    do: Foreman.Requests.Batch.answer(request, payload)
+
   defp answer_payload(_, _, payload), do: {:ok, payload}
 
   @doc false
@@ -501,6 +504,9 @@ defmodule Foreman.Requests do
       reason: request.facts["reason"],
       questions: request.facts["questions"]
     }
+
+  defp validate_payload(%{kind: "batch"}, :answer, payload), do: validate(:batch_answer, payload)
+  defp validate_payload(_, event, payload), do: validate(event, payload)
 
   defp validate(:wrong_question, payload) do
     if Decision.text?(payload["note"]), do: :ok, else: {:error, :reason_required}

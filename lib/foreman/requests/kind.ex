@@ -9,6 +9,7 @@ defmodule Foreman.Requests.Kind do
   def fetch("push"), do: {:ok, Foreman.Requests.Push}
   def fetch("review_ui"), do: {:ok, Foreman.Requests.ReviewUI}
   def fetch("chore"), do: {:ok, Foreman.Requests.Chore}
+  def fetch("batch"), do: {:ok, Foreman.Requests.Batch}
   def fetch("decision"), do: {:ok, Foreman.Requests.Decision}
   def fetch(_), do: {:error, :unsupported_kind}
 end

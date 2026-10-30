@@ -20,6 +20,7 @@ defmodule Foreman.CLI do
   }
   @switches [
     name: :string,
+    all_coordinators: :boolean,
     pane: :string,
     reason: :string,
     provider: :string,
@@ -31,6 +32,8 @@ defmodule Foreman.CLI do
     remote_branch: :string,
     question: :string,
     step: :keep,
+    item: :keep,
+    item_detail: :keep,
     key: :string,
     option: :keep,
     option_detail: :keep,
@@ -242,6 +245,21 @@ defmodule Foreman.CLI do
     }
   end
 
+  defp ask_facts("batch", opts, cwd) do
+    details = Map.new(Keyword.get_values(opts, :item_detail), &pair/1)
+
+    items =
+      Enum.map(Keyword.get_values(opts, :item), fn value ->
+        {id, label} = pair(value)
+        item = %{"id" => id, "label" => label}
+        if details[id], do: Map.put(item, "detail", details[id]), else: item
+      end)
+
+    ask_facts("decision", opts, cwd)
+    |> Map.take(~w(question text docs))
+    |> Map.put("items", items)
+  end
+
   defp ask_facts("chore", opts, _cwd) do
     %{
       "question" => opts[:question],
@@ -341,6 +359,22 @@ defmodule Foreman.CLI do
     end
   end
 
+  defp pair(value) do
+    [id, text] = String.split(value, "=", parts: 2)
+    {id, text}
+  end
+
+  defp valid_items?(opts) do
+    items = Keyword.get_values(opts, :item)
+    details = Keyword.get_values(opts, :item_detail)
+
+    Enum.all?(items ++ details, &String.contains?(&1, "=")) and
+      Enum.all?(details, fn detail ->
+        {id, _} = pair(detail)
+        Enum.any?(items, fn item -> elem(pair(item), 0) == id end)
+      end)
+  end
+
   defp card_body(opts) do
     if opts[:body_file] do
       with {:ok, %{size: size}} when size <= 20_000 <- File.stat(opts[:body_file]),
@@ -357,9 +391,10 @@ defmodule Foreman.CLI do
     {opts, args, invalid} = OptionParser.parse(args, strict: @switches)
 
     invalid =
-      if Enum.all?(Keyword.get_values(opts, :option_detail), &String.contains?(&1, "=")),
-        do: invalid,
-        else: [option_detail: :invalid]
+      if Enum.all?(Keyword.get_values(opts, :option_detail), &String.contains?(&1, "=")) and
+           valid_items?(opts),
+         do: invalid,
+         else: [option_detail: :invalid]
 
     {kind, args} =
       case args do
@@ -370,6 +405,27 @@ defmodule Foreman.CLI do
     session = opts[:session]
 
     case {invalid, args} do
+      {[], ["note", text]} when opts != [] ->
+        identity = request_identity(opts, defaults)
+
+        if opts[:all_coordinators] and identity["actor"] == "claude" and
+             Foreman.Requests.Decision.text?(identity["session"]) and
+             Foreman.Requests.Decision.text?(text) do
+          {:ok,
+           %{
+             request:
+               Map.merge(identity, %{
+                 "action" => "coordinator_note",
+                 "text" => text,
+                 "transient" => true
+               }),
+             json: opts[:json] || false
+           }}
+        else
+          {:error,
+           "Use FOREMAN_ACTOR=claude and FOREMAN_SESSION=<name> with note --all-coordinators <text>."}
+        end
+
       {[], ["session", "register"]} ->
         request =
           Map.new(Keyword.take(opts, [:name, :pane, :workdir, :harness]), fn {k, v} ->

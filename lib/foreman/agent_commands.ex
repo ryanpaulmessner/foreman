@@ -25,7 +25,7 @@ defmodule Foreman.AgentCommands do
                 nil ->
                   {status, body} = command(request)
 
-                  if request["action"] == "coordinator" and status != 200,
+                  if request["action"] in ["coordinator", "coordinator_note"] and status != 200,
                     do: Repo.rollback({status, body})
 
                   if status not in [404, 503] do
@@ -77,6 +77,28 @@ defmodule Foreman.AgentCommands do
   end
 
   defp command(%{"action" => "answer"}), do: {422, %{error: "invalid_answer"}}
+
+  defp command(%{"action" => "coordinator_note"} = request) do
+    case Foreman.CoordinatorNote.send(request["actor"], request["session"], request["text"]) do
+      {:ok, result} ->
+        {200, result}
+
+      {:error, :coordinator_only} ->
+        {422,
+         %{
+           error: "coordinator_only",
+           message: "Only a coordinator can send this note. Use FOREMAN_ACTOR=claude."
+         }}
+
+      {:error, _} ->
+        {422,
+         %{
+           error: "invalid_note",
+           message:
+             "Supply a session name and a note. The full message must be at most 2000 bytes."
+         }}
+    end
+  end
 
   defp command(%{"action" => "session_register"} = request) do
     case Foreman.SessionRegistry.register(request) do

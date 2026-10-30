@@ -118,7 +118,7 @@ defmodule Foreman.Request do
   def chore?(%{kind: "chore"}, _), do: true
   def chore?(_, _), do: false
 
-  def decision?(%{kind: kind}, _) when kind in ["decision", "review_ui"], do: true
+  def decision?(%{kind: kind}, _) when kind in ["decision", "review_ui", "batch"], do: true
   def decision?(_, _), do: false
   def action?(%{kind: kind}, _), do: kind in ["push", "open_pr", "merge"]
   def action?(_, _), do: false

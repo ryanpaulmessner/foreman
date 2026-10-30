@@ -91,6 +91,30 @@ defmodule Foreman.Week.ModelTest do
     assert item.plain_stage == "Waiting on you"
   end
 
+  test "pending batches count as waiting on you" do
+    t = ticket("a", %{stage: "building"})
+
+    [item] =
+      Model.build(
+        %{
+          tickets: [t],
+          requests: [
+            %{
+              id: "batch",
+              kind: "batch",
+              state: "pending",
+              key: t.key,
+              inserted_at: ~U[2026-10-20 12:00:00Z]
+            }
+          ]
+        },
+        ~U[2026-10-21 12:00:00Z]
+      )
+      |> items()
+
+    assert item.plain_stage == "Waiting on you"
+  end
+
   test "progress tracks work while waiting labels remain independent" do
     for {attrs, requests, expected} <- [
           {%{stage: "building"}, [], "Building"},
