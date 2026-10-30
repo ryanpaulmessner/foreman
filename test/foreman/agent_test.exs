@@ -11,6 +11,77 @@ defmodule Foreman.AgentTest do
     :ok
   end
 
+  test "coordinator records a commit from queued, dispatched or building" do
+    for stage <- [:queued, :dispatched, :building] do
+      id = "coordinator-#{stage}"
+      key = {"sample", id}
+      Overlay.backfill("sample", [%{bead_id: id, status: "open", issue_type: "task"}])
+      if stage != :queued, do: Overlay.apply_event(key, {:dispatch, %{window: "build"}})
+      if stage == :building, do: Overlay.apply_event(key, {:progress, %{body: "Built"}})
+
+      assert {200, %{stage: :committed}} =
+               Agent.event("sample", id, %{
+                 "event" => "commit",
+                 "actor" => "claude",
+                 "session" => "coord",
+                 "payload" => %{"sha" => String.duplicate("a", 40)}
+               })
+
+      event = List.last(Overlay.history(key))
+      assert event.source == "coordinator"
+      assert event.actor == "claude"
+      assert event.payload["session"] == "coord"
+    end
+  end
+
+  test "pi cannot skip review by claiming a coordinator source" do
+    for stage <- [:queued, :dispatched, :building] do
+      if stage == :dispatched,
+        do: Overlay.apply_event({"sample", "s-1"}, {:dispatch, %{window: "build"}})
+
+      if stage == :building,
+        do: Overlay.apply_event({"sample", "s-1"}, {:progress, %{body: "Built"}})
+
+      assert {409, %{stage: ^stage, next_command: command}} =
+               Agent.event("sample", "s-1", %{
+                 "event" => "commit",
+                 "actor" => "pi",
+                 "payload" => %{
+                   "sha" => String.duplicate("a", 40),
+                   "source" => "coordinator",
+                   "actor" => "claude"
+                 }
+               })
+
+      assert command =~ "foreman "
+      assert Overlay.get({"sample", "s-1"}).stage == stage
+    end
+  end
+
+  test "push stage refusal names the current stage and next command" do
+    assert {422,
+            %{error: :not_committed, stage: :queued, next_command: "foreman dispatch s-1" <> _}} =
+             Foreman.AgentCommands.execute(%{
+               "repo" => "sample",
+               "id" => "s-1",
+               "action" => "ask",
+               "request_kind" => "push",
+               "facts" => %{}
+             })
+  end
+
+  test "a coordinator push refusal points to its direct commit path" do
+    assert {422, %{stage: :queued, next_command: "foreman commit s-1 --sha <sha>"}} =
+             Foreman.AgentCommands.execute(%{
+               "repo" => "sample",
+               "id" => "s-1",
+               "action" => "ask",
+               "request_kind" => "push",
+               "actor" => "claude",
+               "facts" => %{}
+             })
+  end
+
   test "unknown ticket gets exactly one forced read before 404" do
     parent = self()
     Application.put_env(:foreman, :agent_sync, fn repo -> send(parent, {:sync, repo}) end)

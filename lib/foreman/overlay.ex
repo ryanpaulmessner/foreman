@@ -166,11 +166,19 @@ defmodule Foreman.Overlay do
                guard_payload = %{
                  window: payload["window"],
                  number: payload["number"],
-                 beads_epic_id: payload["beads_epic_id"]
+                 beads_epic_id: payload["beads_epic_id"],
+                 actor: Map.get(metadata, :actor, "user")
                }
 
                source = Map.get(row.machine.__fsm__(:sources), name, :claimed) |> to_string()
                actor = Map.get(metadata, :actor, "user")
+
+               source =
+                 if row.machine == Foreman.Stage and name == :commit and actor == "claude" and
+                      row.stage in [:queued, :dispatched, :building],
+                    do: "coordinator",
+                    else: source
+
                result = row.machine.step(row.stage, {name, guard_payload}, data)
 
                case result do
@@ -189,7 +197,13 @@ defmodule Foreman.Overlay do
                    )
 
                    notify(key)
-                   {:error, %{stage: row.stage, allowed: allowed(row, data)}}
+
+                   {:error,
+                    %{
+                      stage: row.stage,
+                      allowed: allowed(row, data),
+                      next_command: Foreman.StageGuidance.next(row.stage, elem(key, 1), actor)
+                    }}
 
                  {stage, effects} ->
                    validate_effects!(effects, payload)

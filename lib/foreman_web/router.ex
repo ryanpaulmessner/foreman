@@ -18,6 +18,8 @@ defmodule ForemanWeb.Router do
   scope "/", ForemanWeb do
     pipe_through :browser
 
+    get "/request-images/:id/:index", ReviewImageController, :show
+
     live_session :foreman, on_mount: ForemanWeb.RequestCount do
       live "/needs-you", NeedsYouLive, :index
       live "/answers", AnswersLive, :index

@@ -16,7 +16,9 @@ defmodule ForemanWeb.NeedsYouLiveTest do
         "facts" => %{
           "question" => "Which layout?",
           "options" => ["Wide", "Compact"],
-          "recommendation" => "Compact"
+          "recommendation" => "Compact",
+          "text" => "What: Layout\nPart of: Cards\nWhy now: Review",
+          "option_details" => %{"Wide" => "Use wide layout", "Compact" => "Use compact layout"}
         }
       })
 
@@ -93,7 +95,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "claude",
         "session" => "coordinator",
-        "facts" => %{"question" => "Proceed?"}
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Proceed?"})
       })
 
     {:ok, view, _} = live(conn, "/needs-you")
@@ -130,7 +132,8 @@ defmodule ForemanWeb.NeedsYouLiveTest do
         "facts" => %{
           "question" => "Which?",
           "options" => ["A"],
-          "option_details" => %{"A" => "Keep access enabled"}
+          "option_details" => %{"A" => "Keep access enabled"},
+          "text" => "What: Access\nPart of: Cards\nWhy now: Review"
         }
       })
 
@@ -235,7 +238,9 @@ defmodule ForemanWeb.NeedsYouLiveTest do
 
   test "same-ticket cards have one group heading", %{conn: conn, request: request} do
     {:ok, _} =
-      Requests.ask({"sample", "s-1"}, "decision", %{"facts" => %{"question" => "Another?"}})
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Another?"})
+      })
 
     {:ok, view, _} = live(conn, "/needs-you")
 
@@ -257,7 +262,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     {:ok, request} =
       Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "user",
-        "facts" => %{"question" => "Which?"}
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
       })
 
     {:ok, view, _} = live(conn, "/needs-you")

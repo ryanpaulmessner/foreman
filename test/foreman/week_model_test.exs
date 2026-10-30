@@ -197,7 +197,7 @@ defmodule Foreman.Week.ModelTest do
           stage <- ~w(dispatched building reported in_review committed),
           do: {%{stage: stage}, [], "Building"}
         ) ++
-        for kind <- ~w(push open_pr merge decision session_waiting),
+        for kind <- ~w(push open_pr merge decision review_ui session_waiting),
             do:
               {%{status: "parked"}, [%{kind: kind, state: "pending", id: "r"}], "Waiting on you"}
 

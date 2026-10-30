@@ -15,7 +15,7 @@ defmodule ForemanWeb.CardQuestionsTest do
       Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "pi",
         "session" => "build",
-        "facts" => %{"question" => "Which?"}
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
       })
 
     %{request: r}
@@ -140,7 +140,7 @@ defmodule ForemanWeb.CardQuestionsTest do
         Requests.ask({r.repo_key, r.bead_id}, "decision", %{
           "actor" => "pi",
           "session" => "build-#{n}",
-          "facts" => %{"question" => "Which #{n}?"}
+          "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which #{n}?"})
         })
 
       {:ok, _} = CardMessages.reply(request.id, "pi", nil, "Reply #{n}")

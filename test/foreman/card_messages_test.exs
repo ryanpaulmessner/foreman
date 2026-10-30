@@ -14,7 +14,7 @@ defmodule Foreman.CardMessagesTest do
       Requests.ask({"sample", "s-1"}, "decision", %{
         "actor" => "pi",
         "session" => "build",
-        "facts" => %{"question" => "Which?"}
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
       })
 
     %{request: request}

@@ -35,6 +35,10 @@ defmodule Foreman.CLI do
     recommendation: :string,
     text: :string,
     doc: :keep,
+    image: :keep,
+    artifact: :string,
+    look_at: :string,
+    scratchpad: :string,
     timeout: :integer,
     json: :boolean,
     actor: :string,
@@ -197,6 +201,12 @@ defmodule Foreman.CLI do
         " " <>
         String.trim_trailing(System.get_env("FOREMAN_URL", "http://127.0.0.1:4747"), "/") <> url
 
+  defp format(%{"stage" => stage, "next_command" => command} = body),
+    do: "#{body["error"] || "Command refused"}; current stage: #{stage}; next: #{command}"
+
+  defp format(%{"error" => "card_unclear", "missing" => missing}),
+    do: "card_unclear: Missing " <> Enum.join(missing, ", ")
+
   defp format(%{"warning" => warning}), do: "warning: " <> warning
 
   defp format(%{"stage" => stage, "allowed" => allowed}),
@@ -211,6 +221,18 @@ defmodule Foreman.CLI do
       "session" => opts[:session] || defaults[:session] || System.get_env("FOREMAN_SESSION"),
       "project" => opts[:project] || opts[:repo],
       "cwd" => defaults[:cwd] || File.cwd!()
+    }
+  end
+
+  defp ask_facts("review_ui", opts, cwd) do
+    %{
+      "question" => opts[:question],
+      "text" => opts[:text],
+      "artifact" => opts[:artifact],
+      "look_at" => opts[:look_at],
+      "scratchpad" => if(opts[:scratchpad], do: Path.expand(opts[:scratchpad], cwd)),
+      "images" =>
+        Foreman.ReviewImageInput.expand(Keyword.get_values(opts, :image), cwd, opts[:look_at])
     }
   end
 

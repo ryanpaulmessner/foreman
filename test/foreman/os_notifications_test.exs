@@ -9,7 +9,9 @@ defmodule Foreman.OsNotificationsTest do
 
   defp ask(question) do
     {:ok, request} =
-      Requests.ask({"sample", "s-1"}, "decision", %{"facts" => %{"question" => question}})
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => question})
+      })
 
     request
   end

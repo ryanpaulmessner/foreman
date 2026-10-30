@@ -32,7 +32,7 @@ defmodule ForemanWeb.RequestCard do
       />
       <.merge_facts :if={@request.kind == "merge"} request={@request} />
       <.agent_text
-        :if={@request.kind == "decision"}
+        :if={@request.kind in ["decision", "review_ui"]}
         id={@id <> "-question"}
         text={@request.facts["question"]}
         repo={@request.repo_key}

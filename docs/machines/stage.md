@@ -11,6 +11,7 @@ stateDiagram-v2
     working --> reported: report / record(report), emit(stage)
     reported --> in_review: review / emit(stage)
     in_review --> building: request_changes / append(finding), emit(stage)
+    fsm_set_7 --> committed: commit [coordinator?] / record(commit), emit(stage)
     in_review --> committed: commit / record(commit), emit(stage)
     committed --> committed: commit / record(commit), emit(stage)
     live --> abandoned: abandon / emit(stage)
@@ -29,6 +30,7 @@ stateDiagram-v2
     state "live: queued, dispatched, building, reported, in_review, committed, pr_open, merged" as live
     state "pre_pr: queued, dispatched, building, reported, in_review, committed" as pre_pr
     state "working: dispatched, building" as working
+    state "queued, dispatched, building" as fsm_set_7
     merged: enter / suggest(close_bead)
 ```
 
@@ -39,6 +41,7 @@ stateDiagram-v2
 | queued | report | invalid |  |
 | queued | review | invalid |  |
 | queued | request_changes | invalid |  |
+| queued | commit [coordinator?] | -> committed | record(commit), emit(stage) |
 | queued | commit | invalid |  |
 | queued | abandon | -> abandoned | emit(stage) |
 | queued | revive | invalid |  |
@@ -54,6 +57,7 @@ stateDiagram-v2
 | dispatched | report | -> reported | record(report), emit(stage) |
 | dispatched | review | invalid |  |
 | dispatched | request_changes | invalid |  |
+| dispatched | commit [coordinator?] | -> committed | record(commit), emit(stage) |
 | dispatched | commit | invalid |  |
 | dispatched | abandon | -> abandoned | emit(stage) |
 | dispatched | revive | invalid |  |
@@ -69,6 +73,7 @@ stateDiagram-v2
 | building | report | -> reported | record(report), emit(stage) |
 | building | review | invalid |  |
 | building | request_changes | invalid |  |
+| building | commit [coordinator?] | -> committed | record(commit), emit(stage) |
 | building | commit | invalid |  |
 | building | abandon | -> abandoned | emit(stage) |
 | building | revive | invalid |  |
