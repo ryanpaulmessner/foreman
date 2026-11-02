@@ -116,7 +116,7 @@ defmodule ForemanWeb.PullRequestsLive do
     result =
       with {n, ""} <- parsed,
            %{snapshot: snapshot} <- socket.assigns.stored,
-           do: Merge.prepare(snapshot, n)
+           do: Merge.prepare(snapshot, n, socket.assigns.project)
 
     case result do
       {:ok, facts} ->
@@ -262,12 +262,7 @@ defmodule ForemanWeb.PullRequestsLive do
     snapshot = (stored && stored.snapshot) || %{}
     human? = Foreman.MergePolicy.human?(repo)
 
-    # Human-merge repos stack on their configured base (ReportSystem: staging), not the
-    # forge default branch; board-merge repos keep the default branch.
-    stack_base =
-      if human?,
-        do: Foreman.MergePolicy.base(repo, snapshot["default_branch"]),
-        else: snapshot["default_branch"]
+    stack_base = Foreman.MergePolicy.base(repo, snapshot["default_branch"])
 
     prs = Foreman.Forge.Stack.order(snapshot["change_requests"] || [], stack_base)
     previous = Map.get(socket.assigns, :stored)
@@ -570,7 +565,9 @@ defmodule ForemanWeb.PullRequestsLive do
             </dd>
             <dt :if={@merge_facts["child"]} class="text-foreground-softer">Then</dt>
             <dd :if={@merge_facts["child"]}>
-              {if @capabilities.retarget, do: "Retarget", else: "Manual retarget"} #{@merge_facts[
+              {if @capabilities.retarget,
+                do: "Retarget",
+                else: "Manually change the base of"} #{@merge_facts[
                 "child"
               ]["number"]} · {@merge_facts["child"]["target_branch"]} → {@merge_facts[
                 "default_branch"

@@ -123,6 +123,43 @@ defmodule Foreman.Forge.Store do
     end)
   end
 
+  def record_push(key, %{"remote" => remote} = facts) do
+    Repo.transaction(fn ->
+      Repo.query!("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        "foreman:overlay:" <> key
+      ])
+
+      case get(key) do
+        %{remote: ^remote, snapshot: snapshot} ->
+          prs =
+            Enum.map(snapshot["change_requests"] || [], fn pr ->
+              if pr["state"] == "open" and pr["source_branch"] == facts["remote_branch"] and
+                   pr["head_sha"] == facts["expected_old_head"],
+                 do: Map.put(pr, "head_sha", facts["expected_sha"]),
+                 else: pr
+            end)
+
+          branches = snapshot["branches"] || %{}
+
+          branches =
+            if branches[facts["remote_branch"]] == facts["expected_old_head"],
+              do: Map.put(branches, facts["remote_branch"], facts["expected_sha"]),
+              else: branches
+
+          snapshot = snapshot |> Map.put("change_requests", prs) |> Map.put("branches", branches)
+
+          Repo.update_all(from(s in "forge_snapshots", where: s.repo_key == ^key),
+            set: [snapshot: snapshot]
+          )
+
+          Foreman.Events.broadcast(:forge_changed, key)
+
+        _ ->
+          :ok
+      end
+    end)
+  end
+
   def failed(key, remote, reason) do
     now = DateTime.utc_now()
 

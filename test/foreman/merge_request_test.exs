@@ -232,24 +232,46 @@ defmodule Foreman.MergeRequestTest do
     fake = start_supervised!({Foreman.Forge.Fake, live})
     Foreman.Merge.MergeJob.run(id, Foreman.Forge.Fake, server: fake)
 
-    if scenario == :partial do
-      Requests.reconcile_merges()
-      assert Requests.get(request.id).state == "executing"
-      Foreman.Merge.RetargetJob.run(id, Foreman.Forge.Fake, server: fake)
-    end
-
     Requests.reconcile_merges()
-    assert %{state: "failed", outcome: %{"reason" => ^reason}} = Requests.get(request.id)
 
-    if scenario == :partial,
-      do:
-        assert(
-          Requests.get(request.id).outcome["result"]["merge_sha"] ==
-            "merge-" <> facts["expected_sha"]
-        )
+    if scenario == :partial do
+      assert Requests.get(request.id).state == "done"
+      Foreman.Merge.RetargetJob.run(id, Foreman.Forge.Fake, server: fake)
+      assert %{state: "failed", error: ^reason} = Foreman.Merge.get(id)
+      Requests.reconcile_merges()
+      assert Requests.get(request.id).state == "done"
 
-    assert {200, %{"state" => "failed"}} =
-             Foreman.AgentCommands.execute(%{"action" => "wait", "id" => request.id})
+      assert Requests.get(request.id).outcome["result"]["merge_sha"] ==
+               "merge-" <> facts["expected_sha"]
+    else
+      assert %{state: "failed", outcome: %{"reason" => ^reason}} = Requests.get(request.id)
+
+      assert {200, %{"state" => "failed"}} =
+               Foreman.AgentCommands.execute(%{"action" => "wait", "id" => request.id})
+    end
+  end
+
+  test "late reconciliation reports the successful merge even if the approved follow-up failed",
+       %{facts: facts, snapshot: snapshot} do
+    child =
+      Map.merge(hd(snapshot["change_requests"]), %{
+        "number" => 6,
+        "source_branch" => "child",
+        "target_branch" => "stack"
+      })
+
+    snapshot = Map.put(snapshot, "change_requests", snapshot["change_requests"] ++ [child])
+    Foreman.Forge.Store.replace("sample", "owner/repo", snapshot)
+    {:ok, request} = Requests.ask({"sample", "s-1"}, "merge", %{"facts" => facts})
+    {:ok, confirmation} = Foreman.Merge.prepare(snapshot, 5)
+    {:ok, executing} = Requests.confirm_merge(request.id, confirmation)
+    id = executing.outcome["result"]["action_id"]
+    fake = start_supervised!({Foreman.Forge.Fake, Map.put(snapshot, "retarget_error", true)})
+    Foreman.Merge.MergeJob.run(id, Foreman.Forge.Fake, server: fake)
+    Foreman.Merge.RetargetJob.run(id, Foreman.Forge.Fake, server: fake)
+    assert %{state: "failed", error: "unavailable"} = Foreman.Merge.get(id)
+    Requests.reconcile_merges()
+    assert %{state: "done"} = Requests.get(request.id)
   end
 
   test "creation binds an existing PR and exact head to its forge", %{facts: facts} do

@@ -10,12 +10,12 @@ defmodule Foreman.Requests.OpenPr do
          :ok <- shape(facts),
          facts =
            facts
-           |> Map.take(~w(head_branch expected_sha base_branch title body))
+           |> Map.take(~w(head_branch expected_sha base_branch title body base_ok))
            |> Map.put("remote", repo["github"]),
          :ok <- capable(Foreman.Forge.adapter()),
-         :ok <- observed_guards(row.repo_key, facts),
          {:ok, snapshot} <- snapshot(row.repo_key, facts),
-         :ok <- human_base(repo, snapshot, facts) do
+         :ok <- base_rule(repo, snapshot, facts, {row.repo_key, row.bead_id}),
+         :ok <- observed_guards(row.repo_key, facts) do
       {:ok, facts}
     end
   end
@@ -63,36 +63,62 @@ defmodule Foreman.Requests.OpenPr do
          match?({:ok, _}, Foreman.Requests.LocalRefs.sha(facts["expected_sha"])) and
          Foreman.Requests.Decision.text?(facts["title"]) and
          byte_size(facts["title"]) <= 256 and is_binary(facts["body"]) and
-         byte_size(facts["body"]) <= 65_536, do: :ok, else: {:error, :invalid_facts}
+         byte_size(facts["body"]) <= 65_536 and facts["base_ok"] in [nil, false, true],
+       do: :ok,
+       else: {:error, :invalid_facts}
   end
 
-  @doc """
-  Human-merge repos open PRs only against the configured base (`merge_base`, else the forge
-  default branch) or, for a stack, against the head branch of another open PR.
-  """
-  def human_base(repo, snapshot, facts) do
-    base = Foreman.MergePolicy.base(repo, snapshot["default_branch"])
+  @doc "A stack parent must be a recorded ticket blocker with an open PR. Epic membership is not a stack edge."
+  def base_rule(repo, snapshot, facts, key) do
+    parents = stack_parents(key)
 
-    stack_parent? =
-      Enum.any?(
-        snapshot["change_requests"] || [],
-        &(&1["state"] == "open" and &1["source_branch"] == facts["base_branch"] and
-            &1["source_branch"] != facts["head_branch"])
-      )
+    branches =
+      for pr <- snapshot["change_requests"] || [],
+          pr["state"] == "open",
+          pr["source_branch"] != facts["head_branch"],
+          Enum.any?(
+            Foreman.Forge.Stack.links(pr, ticket_prefix(key)),
+            &(&1["bead_id"] in parents)
+          ),
+          do: pr["source_branch"]
 
-    cond do
-      not Foreman.MergePolicy.human?(repo) -> :ok
-      facts["base_branch"] == base or stack_parent? -> :ok
-      true -> {:error, :human_merge_base_branch}
+    expected = Enum.uniq([Foreman.MergePolicy.base(repo, snapshot["default_branch"]) | branches])
+
+    if facts["base_ok"] == true or facts["base_branch"] in expected do
+      :ok
+    else
+      {:error,
+       %{
+         error: "base_unexpected",
+         expected_bases: expected,
+         message:
+           "Use one of these base branches: #{Enum.join(expected, ", ")}. Use --base-ok to approve a different base."
+       }}
     end
   end
 
-  def guards(facts, adapter, opts, repo \\ nil) do
+  defp ticket_prefix({_, id}), do: id |> String.split("-", parts: 2) |> hd()
+  defp ticket_prefix(nil), do: ""
+
+  defp stack_parents(nil), do: []
+
+  defp stack_parents({key, id}) do
+    import Ecto.Query
+
+    raw =
+      Foreman.Repo.one(
+        from b in "beads", where: b.repo_key == ^key and b.bead_id == ^id, select: b.raw
+      ) || %{}
+
+    for edge <- raw["dependencies"] || [], edge["type"] == "blocks", do: edge["depends_on_id"]
+  end
+
+  def guards(facts, adapter, opts, repo \\ nil, key \\ nil) do
     with :ok <- capable(adapter),
-         {:ok, _} <- branch(adapter, facts, "base_branch", :base_missing, opts),
          {:ok, snapshot} <- adapter.list(facts["remote"], opts),
+         :ok <- if(repo, do: base_rule(repo, snapshot, facts, key), else: :ok),
+         {:ok, _} <- branch(adapter, facts, "base_branch", :base_missing, opts),
          :ok <- no_open_pr(snapshot, facts),
-         :ok <- if(repo, do: human_base(repo, snapshot, facts), else: :ok),
          :ok <- unchanged(facts, adapter, opts) do
       :ok
     end

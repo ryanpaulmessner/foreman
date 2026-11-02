@@ -429,13 +429,29 @@ Under `merge_policy = "human"` every change reaches a shared branch through a Gi
 that a person merges on GitHub. The board refuses `merge` requests at creation, and the
 merge and retarget jobs refuse before any forge write if the policy changed after
 confirmation; a pending merge request is superseded. Pushes to the PR base or the default
-branch are refused at creation and in the job, for one-off tickets too. `open_pr` must
-target the PR base (`merge_base`, else the forge default branch) or, for a stack, the head
-branch of another open PR. Forge sync observes the merge (merge commit, squash or rebase:
+branch are refused at creation and in the job, for one-off tickets too.
+Forge sync observes the merge (merge commit, squash or rebase:
 only the PR's `MERGED` state is read) and moves linked tickets to `merged`. Stacked
 children are never retargeted; the Pull requests page shows the manual step. Human merge
 requires `forge = "github"` and a `github` remote; otherwise the config is rejected and the
 last good config stays in force.
+
+For every merge policy, `open_pr` checks the base against `merge_base` (or the forge
+default branch when unset). A stack may use the head branch of an open PR linked to a
+recorded blocker of the ticket (`blocked_by` in file tickets). An unrelated PR is not a
+stack parent. A refusal returns `base_unexpected` with the expected bases. `--base-ok`
+permits another base and shows that override on the approval card. The job checks again.
+
+`ask push` also accepts tickets at `pr_open`. To update an open PR branch, supply
+`--expected-old-head <full-sha>`. The job requires a fast-forward and an exact remote-head
+lease. To replace history, also supply `--force-with-lease`; the approval card warns that
+commits can be removed. The job records the new head after a successful push.
+
+The merge approval card names the child PR and its target base. After the approved merge,
+the board automatically retargets that child to `merge_base`, or the forge default when unset.
+This changes the PR base, not the commit history. No second approval is required.
+The merge request completes from the recorded merge SHA even if the follow-up fails.
+If the old push head is missing from the worktree, fetch it before requesting another push.
 
 When a project's tickets and code live in different repos (tickets in a workspace repo, code
 in a separate nested repo with its own remote), set `code_path` to the code checkout. Tickets

@@ -4,10 +4,10 @@ defmodule Foreman.Merge do
   alias Foreman.Repo
   alias Foreman.Merge.{Action, Record, MergeJob, RetargetJob}
 
-  def prepare(snapshot, number) do
+  def prepare(snapshot, number, key \\ nil) do
     prs = snapshot["change_requests"] || []
     pr = Enum.find(prs, &(&1["number"] == number))
-    default = snapshot["default_branch"]
+    default = target_branch(key, snapshot)
 
     children =
       if pr,
@@ -85,6 +85,13 @@ defmodule Foreman.Merge do
   end
 
   def get(id), do: Repo.get(Record, id)
+
+  def target_branch(nil, snapshot), do: snapshot["default_branch"]
+
+  def target_branch(key, snapshot) do
+    repo = Enum.find(Foreman.RuntimeState.repos(), &(&1["key"] == key))
+    Foreman.MergePolicy.base(repo, snapshot["default_branch"])
+  end
 
   def attempt(remote, number, head_sha),
     do:
@@ -183,7 +190,7 @@ defmodule Foreman.Merge do
     head_matches = is_nil(pr) || pr["head_sha"] == row.head_sha
 
     with true <- head_matches || {:error, :head_moved},
-         {:ok, current} <- prepare(snapshot, row.number) do
+         {:ok, current} <- prepare(snapshot, row.number, row.repo_key) do
       cond do
         current["default_branch"] != row.facts["default_branch"] ->
           {:error, :target_changed}

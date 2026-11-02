@@ -59,6 +59,46 @@ defmodule Foreman.MergeJobTest do
     end)
   end
 
+  test "approved merge automatically queues the child retarget", %{
+    snapshot: snapshot,
+    fake: fake
+  } do
+    row = enqueue(snapshot)
+    assert :ok = MergeJob.run(row.id, Foreman.Forge.Fake, server: fake)
+    assert %{state: "retargeting"} = Merge.get(row.id)
+    assert Repo.exists?(from j in Oban.Job, where: j.worker == "Foreman.Merge.RetargetJob")
+    assert :ok = RetargetJob.run(row.id, Foreman.Forge.Fake, server: fake)
+    {:ok, actual} = Foreman.Forge.Fake.list("owner/repo", server: fake)
+    assert Enum.find(actual["change_requests"], &(&1["number"] == 6))["target_branch"] == "main"
+  end
+
+  test "a configured target is used for the merge and the approved follow-up", %{
+    snapshot: snapshot,
+    fake: fake
+  } do
+    config =
+      put_in(
+        Foreman.RuntimeState.config().config,
+        ["repos", Access.at(0), "merge_base"],
+        "staging"
+      )
+
+    Repo.update_all("board_config", set: [config: config])
+    snapshot = put_in(snapshot, ["change_requests", Access.at(0), "target_branch"], "staging")
+    Agent.update(fake, fn _ -> snapshot end)
+    {:ok, facts} = Merge.prepare(snapshot, 5, "sample")
+    assert facts["default_branch"] == "staging"
+    {:ok, row} = Merge.enqueue("sample", "owner/repo", facts)
+    :ok = MergeJob.run(row.id, Foreman.Forge.Fake, server: fake)
+    assert %{state: "retargeting"} = Merge.get(row.id)
+    :ok = RetargetJob.run(row.id, Foreman.Forge.Fake, server: fake)
+    assert %{state: "merged"} = Merge.get(row.id)
+    {:ok, actual} = Foreman.Forge.Fake.list("owner/repo", server: fake)
+
+    assert Enum.find(actual["change_requests"], &(&1["number"] == 6))["target_branch"] ==
+             "staging"
+  end
+
   test "preview refuses a queued merge and leaves forge reads available", %{
     snapshot: snapshot,
     fake: fake
@@ -116,6 +156,7 @@ defmodule Foreman.MergeJobTest do
     assert row.requested_by == "local_ui"
     assert :ok = MergeJob.run(row.id, Foreman.Forge.Fake, server: fake)
     assert %{state: "retargeting", merge_sha: "merge-confirmed"} = Merge.get(row.id)
+
     assert :ok = MergeJob.run(row.id, Foreman.Forge.Fake, server: fake)
     assert :ok = RetargetJob.run(row.id, Foreman.Forge.Fake, server: fake)
     assert :ok = RetargetJob.run(row.id, Foreman.Forge.Fake, server: fake)
