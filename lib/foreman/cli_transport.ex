@@ -22,7 +22,10 @@ defmodule Foreman.CLITransport do
     do:
       {:refused,
        Map.merge(
-         if(is_map(body), do: Map.take(body, ["stage", "next_command", "missing"]), else: %{}),
+         if(is_map(body),
+           do: Map.take(body, ["stage", "state", "next_command", "missing", "standing_answer"]),
+           else: %{}
+         ),
          %{"warning" => "foreman refused command: #{error(body)}", "error" => error(body)}
        )}
 

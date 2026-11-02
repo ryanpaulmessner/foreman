@@ -13,6 +13,7 @@ defmodule Foreman.Requests.Request do
              :state,
              :outcome,
              :note,
+             :edited_at,
              :inserted_at,
              :updated_at
            ]}
@@ -26,8 +27,11 @@ defmodule Foreman.Requests.Request do
     field :state, :string
     field :outcome, :map, default: %{}
     field :note, :string
+    field :edited_at, :utc_datetime_usec
     # The ticket's effective priority, filled for the Needs you list only.
     field :priority, :integer, virtual: true
+    field :standing_answer, :map, virtual: true
+    field :similar_question, :boolean, virtual: true, default: false
     timestamps(type: :utc_datetime_usec)
   end
 end

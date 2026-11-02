@@ -4,6 +4,78 @@ defmodule Foreman.Answers do
   alias Foreman.Repo
   alias Foreman.Answers.{Answer, Version}
 
+  alias Foreman.Answers.StandingAnswer
+  alias Foreman.Requests.Questions
+
+  def standing_match(repo, facts) do
+    key = standing_key(facts)
+    answers = Repo.all(from a in StandingAnswer, where: a.repo_key == ^repo, order_by: a.id)
+    exact = Enum.find(answers, &(&1.match_key == key))
+
+    close =
+      Enum.find(
+        answers,
+        &(option_set(%{"options" => &1.options}) == option_set(facts) and
+            Questions.close?(&1.question, facts["question"]))
+      )
+
+    cond do
+      exact -> {:exact, exact}
+      close -> {:close, close}
+      true -> :none
+    end
+  end
+
+  def remember(request) do
+    answer = %StandingAnswer{
+      repo_key: request.repo_key,
+      match_key: standing_key(request.facts),
+      question: request.facts["question"],
+      options: request.facts["options"] || [],
+      answer: request.outcome["answer"],
+      note: request.note
+    }
+
+    Repo.insert!(answer,
+      on_conflict: {:replace, [:question, :options, :answer, :note, :updated_at]},
+      conflict_target: [:repo_key, :match_key]
+    )
+  end
+
+  def standing(filters \\ %{}) do
+    query = from a in StandingAnswer, order_by: [desc: a.updated_at, asc: a.id]
+
+    query =
+      if filters["repo"] not in [nil, ""],
+        do: where(query, [a], a.repo_key == ^filters["repo"]),
+        else: query
+
+    Repo.all(query)
+  end
+
+  def remove_standing(id) do
+    with {:ok, id} <- Ecto.UUID.cast(id),
+         %StandingAnswer{} = answer <- Repo.get(StandingAnswer, id) do
+      Repo.transaction(fn ->
+        Foreman.SessionWaiting.lock(answer.repo_key)
+        Repo.delete_all(from a in StandingAnswer, where: a.id == ^id)
+      end)
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp option_set(facts),
+    do: (facts["options"] || []) |> Enum.map(&Questions.normalize/1) |> Enum.uniq() |> Enum.sort()
+
+  defp standing_key(facts),
+    do:
+      :crypto.hash(
+        :sha256,
+        Jason.encode!([Questions.normalize(facts["question"]), option_set(facts)])
+      )
+      |> Base.encode16(case: :lower)
+
   def create(attrs) do
     with {:ok, version} <-
            Version.changeset(%Version{}, attrs) |> Ecto.Changeset.apply_action(:insert) do

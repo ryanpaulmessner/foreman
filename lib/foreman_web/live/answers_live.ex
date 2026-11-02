@@ -51,10 +51,20 @@ defmodule ForemanWeb.AnswersLive do
     {:noreply, refresh(socket)}
   end
 
+  def handle_event("remove-standing", %{"id" => id}, socket) do
+    Answers.remove_standing(id)
+    {:noreply, refresh(socket)}
+  end
+
   defp refresh(socket) do
-    stream(socket, :answers, Answers.list(socket.assigns.filters),
+    socket
+    |> stream(:answers, Answers.list(socket.assigns.filters),
       reset: true,
       dom_id: &"answer-#{&1.id}"
+    )
+    |> stream(:standing, Answers.standing(socket.assigns.filters),
+      reset: true,
+      dom_id: &"standing-#{&1.id}"
     )
   end
 
@@ -83,6 +93,37 @@ defmodule ForemanWeb.AnswersLive do
           <.input field={@form[:ticket]} type="text" label="Ticket" phx-debounce="200" />
           <.input field={@form[:archived]} type="checkbox" label="Show archived" />
         </.form>
+        <section aria-labelledby="standing-heading" class="space-y-3">
+          <h2 id="standing-heading" class="text-lg font-semibold">Standing answers</h2>
+          <div id="standing-answers" phx-update="stream" class="space-y-3">
+            <p id="no-standing-answers" class="hidden only:block text-foreground-softer">
+              No standing answers
+            </p>
+            <article
+              :for={{id, answer} <- @streams.standing}
+              id={id}
+              class="space-y-3 rounded-xl border border-base p-4"
+            >
+              <h3 class="font-semibold break-words">{answer.question}</h3>
+              <p class="break-words">{answer.answer}</p>
+              <p :if={answer.note} class="whitespace-pre-wrap break-words text-foreground-softer">
+                {answer.note}
+              </p>
+              <div class="flex flex-wrap items-center gap-3 text-xs text-foreground-softer">
+                <span>{answer.repo_key}</span>
+                <TicketDetail.timestamp at={answer.updated_at} />
+                <Button.button
+                  id={"remove-standing-#{answer.id}"}
+                  size="xs"
+                  phx-click="remove-standing"
+                  phx-value-id={answer.id}
+                >
+                  Remove
+                </Button.button>
+              </div>
+            </article>
+          </div>
+        </section>
         <div id="answers" phx-update="stream" class="space-y-3">
           <p id="no-answers" class="hidden only:block py-8 text-foreground-softer">No answers</p>
           <article

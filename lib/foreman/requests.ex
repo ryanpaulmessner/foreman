@@ -19,7 +19,9 @@ defmodule Foreman.Requests do
            true <- Decision.text?(params["actor"] || "user"),
            true <- is_nil(params["session"]) or Decision.text?(params["session"]),
            {:ok, facts} <- handler.validate(params["facts"], row),
-           {:ok, id} <- Ecto.UUID.cast(params["request_id"] || Ecto.UUID.generate()) do
+           {:ok, standing} <- standing_answer(repo, kind, facts),
+           {:ok, id} <- Ecto.UUID.cast(params["request_id"] || Ecto.UUID.generate()),
+           nil <- pending_chore(repo, kind, facts) do
         {:pending, effects} = Machine.step(:new, :ask, %{kind: kind})
 
         request =
@@ -36,8 +38,9 @@ defmodule Foreman.Requests do
 
         audit(request, :new, :ask, %{}, effects)
         notify(request)
-        {:ok, request}
+        {:ok, %{request | standing_answer: standing}}
       else
+        %Request{} = existing -> {:ok, existing}
         nil -> {:error, :not_found}
         false -> {:error, :ticket_finished}
         :error -> {:error, :invalid_request_id}
@@ -45,6 +48,30 @@ defmodule Foreman.Requests do
       end
     end)
   end
+
+  defp pending_chore(_repo, "chore", %{"key" => key}) when is_binary(key) do
+    Repo.query!("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["foreman:chore:" <> key])
+
+    Repo.one(
+      from r in Request,
+        where:
+          r.kind == "chore" and r.state == "pending" and
+            fragment("?->>'key'", r.facts) == ^key,
+        limit: 1
+    )
+  end
+
+  defp pending_chore(_, _, _), do: nil
+
+  defp standing_answer(repo, "decision", facts) do
+    case Foreman.Answers.standing_match(repo, facts) do
+      {:exact, answer} -> {:error, %{error: "already_answered", standing_answer: answer}}
+      {:close, answer} -> {:ok, answer}
+      :none -> {:ok, nil}
+    end
+  end
+
+  defp standing_answer(_, _, _), do: {:ok, nil}
 
   # The singleton coordinator has no ticket overlay. Only session attention may
   # use this system identity; approvals still require an actual ticket.
@@ -60,6 +87,89 @@ defmodule Foreman.Requests do
       _ -> {:error, :forbidden}
     end
   end
+
+  def update(id, actor, session, changes) when is_map(changes) do
+    transaction(fn ->
+      case get(id) do
+        nil ->
+          {:error, :not_found}
+
+        request ->
+          lock(request.repo_key)
+          request = get(id)
+
+          cond do
+            request.actor != actor or request.session != session ->
+              {:error, :forbidden}
+
+            request.state != "pending" ->
+              {:error, %{error: "not_pending", state: request.state}}
+
+            true ->
+              with {:ok, facts} <- updated_facts(request, changes),
+                   {:pending, effects} <- Machine.step(:pending, :update, context(request)) do
+                updated =
+                  request
+                  |> Ecto.Changeset.change(facts: facts, edited_at: DateTime.utc_now())
+                  |> Repo.update!()
+
+                audit(updated, :pending, :update, changes, effects)
+                notify(updated)
+                {:ok, updated}
+              end
+          end
+      end
+    end)
+  end
+
+  def update(_, _, _, _), do: {:error, :invalid_facts}
+
+  defp updated_facts(request, changes) do
+    allowed =
+      if request.kind == "decision",
+        do: ~w(question text options option_details recommendation docs),
+        else: ~w(question text docs)
+
+    if Enum.all?(Map.keys(changes), &(&1 in allowed)) do
+      facts = Map.merge(request.facts, changes)
+
+      facts =
+        if Map.has_key?(changes, "options") do
+          facts
+          |> Map.put("option_details", Map.get(changes, "option_details", %{}))
+          |> Map.put("recommendation", Map.get(changes, "recommendation"))
+        else
+          facts
+        end
+
+      with {:ok, validated} <- validate_update(request, Map.delete(facts, "docs")),
+           {:ok, docs} <- update_docs(request, changes) do
+        {:ok, Map.put(validated, "docs", docs)}
+      end
+    else
+      {:error, :invalid_facts}
+    end
+  end
+
+  defp validate_update(%{kind: kind} = request, facts)
+       when kind in ["decision", "review_ui", "chore"] do
+    {:ok, handler} = Kind.fetch(kind)
+    handler.validate(facts, %{repo_key: request.repo_key})
+  end
+
+  defp validate_update(_, facts) do
+    if Enum.all?(
+         ["question", "text"],
+         &(not Map.has_key?(facts, &1) or Decision.text?(facts[&1]))
+       ),
+       do: {:ok, facts},
+       else: {:error, :invalid_facts}
+  end
+
+  defp update_docs(request, %{"docs" => docs}),
+    do: Foreman.CardText.docs(docs, request.repo_key)
+
+  defp update_docs(request, _), do: {:ok, Map.get(request.facts, "docs", [])}
 
   def withdrawable?(request), do: request.actor in ~w(pi claude codex agent coordinator)
 
@@ -154,6 +264,7 @@ defmodule Foreman.Requests do
     from(r in Request, where: r.state == "pending", order_by: [r.inserted_at, r.id])
     |> Repo.all()
     |> with_priority()
+    |> Foreman.Requests.Questions.flag()
     |> Enum.sort_by(&Foreman.Priority.rank(&1.priority))
   end
 
@@ -358,6 +469,9 @@ defmodule Foreman.Requests do
           )
           |> Repo.update!()
 
+        if request.kind == "decision" and event == :answer and payload["always"] == true,
+          do: Foreman.Answers.remember(request)
+
         audit(request, state, event, payload, effects)
 
         if {:enqueue, :job} in effects do
@@ -388,6 +502,10 @@ defmodule Foreman.Requests do
       reason: request.facts["reason"],
       questions: request.facts["questions"]
     }
+
+  defp validate(:wrong_question, payload) do
+    if Decision.text?(payload["note"]), do: :ok, else: {:error, :reason_required}
+  end
 
   defp validate(:withdraw, payload) do
     if Decision.text?(payload["reason"]), do: :ok, else: {:error, :reason_required}

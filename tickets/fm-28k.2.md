@@ -2,7 +2,7 @@
 id: fm-28k.2
 title: "/week crashes on every board event"
 type: bug
-status: in_progress
+status: closed
 priority: 2
 parent: fm-28k
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-30
-closed: null
-close_reason: null
+closed: 2026-10-30
+close_reason: "Merged in PR #1 (f141b5b), reviewed, tests green vs baseline"
 ---
 
 WeekLive.handle_info/2 (week_live.ex:12) only matches :refresh_week, so any other PubSub message crashes the LiveView (35 crashes in board.log).

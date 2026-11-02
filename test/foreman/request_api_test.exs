@@ -30,6 +30,112 @@ defmodule Foreman.RequestAPITest do
     :ok
   end
 
+  test "update CLI edits the existing card and returns a terminal refusal with state" do
+    {:ok, r} =
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "actor" => "pi",
+        "session" => "build",
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which date?"})
+      })
+
+    opts = [req_options: [plug: {Req.Test, __MODULE__}]]
+
+    args = [
+      "ask",
+      "update",
+      r.id,
+      "--question",
+      "Which Friday?",
+      "--actor",
+      "pi",
+      "--session",
+      "build",
+      "--json"
+    ]
+
+    body = capture_io(fn -> CLI.run(args, opts) end) |> Jason.decode!()
+    assert body["id"] == r.id
+    assert Requests.get(r.id).facts["question"] == "Which Friday?"
+    Requests.resolve(r.id, :wrong_question, %{"note" => "Friday is a holiday"})
+    wait = capture_io(fn -> CLI.run(["wait", r.id], opts) end) |> Jason.decode!()
+    assert wait["state"] == "wrong_question"
+    assert wait["note"] == "Friday is a holiday"
+    refused = capture_io(fn -> CLI.run(args, opts) end) |> Jason.decode!()
+    assert refused["error"] == "not_pending"
+    assert refused["state"] == "wrong_question"
+  end
+
+  test "standing answers survive the HTTP refusal wire format and plain CLI output" do
+    facts =
+      Foreman.DecisionFacts.valid(%{
+        "question" => "Should we bypass login for previews?",
+        "options" => ["Yes", "No"]
+      })
+
+    {:ok, r} = Requests.ask({"sample", "s-1"}, "decision", %{"facts" => facts})
+    Requests.resolve(r.id, :answer, %{"answer" => "No", "always" => true})
+    opts = [req_options: [plug: {Req.Test, __MODULE__}]]
+
+    args = [
+      "ask",
+      "decision",
+      "s-1",
+      "--project",
+      "sample",
+      "--question",
+      facts["question"],
+      "--text",
+      facts["text"],
+      "--option",
+      "Yes",
+      "--option-detail",
+      "Yes=Bypass",
+      "--option",
+      "No",
+      "--option-detail",
+      "No=Keep login"
+    ]
+
+    refused = capture_io(fn -> CLI.run(args, opts) end) |> Jason.decode!()
+    assert refused["error"] == "already_answered"
+    assert refused["standing_answer"]["answer"] == "No"
+    close_args = List.replace_at(args, 6, "Should we bypass login for all previews?")
+    accepted = capture_io(fn -> CLI.run(close_args, opts) end) |> Jason.decode!()
+    assert accepted["state"] == "pending"
+    assert accepted["standing_answer"]["answer"] == "No"
+    assert Requests.get(accepted["id"])
+  end
+
+  test "chore CLI joins one card and both IDs wait for Done" do
+    opts = [req_options: [plug: {Req.Test, __MODULE__}]]
+
+    args = [
+      "ask",
+      "chore",
+      "s-1",
+      "--project",
+      "sample",
+      "--question",
+      "Sign in",
+      "--step",
+      "Open preview",
+      "--step",
+      "Sign in",
+      "--key",
+      "signin:host"
+    ]
+
+    first = capture_io(fn -> CLI.run(args, opts) end) |> String.trim()
+    second = capture_io(fn -> CLI.run(args, opts) end) |> String.trim()
+    assert first == second
+    assert {:ok, _} = Requests.resolve(first, :complete, %{})
+
+    for id <- [first, second] do
+      outcome = capture_io(fn -> CLI.run(["wait", id], opts) end) |> Jason.decode!()
+      assert outcome["state"] == "done"
+    end
+  end
+
   test "ask returns id immediately; wait timeout returns current state, then answer or decline" do
     opts = [req_options: [plug: {Req.Test, __MODULE__}]]
 

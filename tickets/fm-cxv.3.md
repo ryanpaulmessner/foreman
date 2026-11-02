@@ -2,7 +2,7 @@
 id: fm-cxv.3
 title: "Coordinators can record their own commit and push"
 type: feature
-status: open
+status: closed
 priority: 2
 parent: fm-cxv
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-30
-closed: null
-close_reason: null
+closed: 2026-10-30
+close_reason: "Merged in PR #1 (f141b5b), reviewed, tests green vs baseline"
 ---
 
 Coordinator-built work stays at stage queued, so ask push is refused not_committed (82 refusals in agent logs).
