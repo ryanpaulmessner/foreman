@@ -33,3 +33,6 @@ Ryan 2026-11-02: the 'Waiting on you without a card' section on Needs you does n
 - [ ] Nudge reaches the owning coordinator or says why it cannot.
 - [ ] Dismiss hides the row until the item's state changes.
 - [ ] Screenshots at three widths, both themes, on the push card.
+
+## Notes
+- 2026-11-02 user: Sweep 2026-11-02 found the list logic is also wrong, not only the design: (1) 7 foreman items were shipped tickets left in_progress (now closed); (2) work-hlf shipped in PR #368; (3) work-p8x.31 shows 'push not requested' but its branch has open PR #463, so it belongs in the merge list; match open PRs by head branch, not only by ticket links; (4) work-8ec.22.1 is parked on purpose; parked tickets must not be listed. Mockup: https://claude.ai/artifact/2ZQ8pQ2v471ppUz4zE1uFm
