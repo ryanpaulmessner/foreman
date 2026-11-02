@@ -73,7 +73,7 @@ defmodule Foreman.Week.Model do
             Map.get(requests, ticket.key, [])
             |> Enum.filter(
               &(&1.state == "pending" and
-                  &1.kind in ~w(push open_pr merge decision review_ui chore session_waiting))
+                  &1.kind in ~w(push open_pr merge decision review_ui chore batch session_waiting))
             )
             |> Enum.sort_by(& &1.id)
 

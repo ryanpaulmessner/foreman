@@ -30,6 +30,54 @@ defmodule Foreman.RequestAPITest do
     :ok
   end
 
+  test "batch CLI posts one card and wait preserves checked ids through HTTP" do
+    opts = [req_options: [plug: {Req.Test, __MODULE__}]]
+
+    for answer <- [["timeout"], []] do
+      args = [
+        "ask",
+        "batch",
+        "s-1",
+        "--project",
+        "sample",
+        "--question",
+        "File tickets?",
+        "--text",
+        "What: Findings\nPart of: Sweep\nWhy now: Ready",
+        "--item",
+        "timeout=Fix timeout",
+        "--item",
+        "layout=Fix layout"
+      ]
+
+      id = capture_io(fn -> assert CLI.run(args, opts) == 0 end) |> String.trim()
+      assert {:ok, _} = Ecto.UUID.cast(id)
+      assert Requests.get(id).kind == "batch"
+      {:ok, _} = Requests.resolve(id, :answer, %{"answer" => answer})
+      wire = capture_io(fn -> CLI.run(["wait", id], opts) end) |> Jason.decode!()
+      assert wire["state"] == "answered"
+      assert wire["outcome"] == %{"answer" => answer}
+    end
+  end
+
+  test "broadcast CLI routes through HTTP instead of local ticket notes" do
+    opts = [req_options: [plug: {Req.Test, __MODULE__}]]
+
+    args = [
+      "note",
+      "--all-coordinators",
+      "Use MIX_TEST_PARTITION",
+      "--actor",
+      "claude",
+      "--session",
+      "source",
+      "--json"
+    ]
+
+    wire = capture_io(fn -> assert CLI.run(args, opts) == 0 end) |> Jason.decode!()
+    assert wire == %{"delivered" => [], "skipped" => []}
+  end
+
   test "update CLI edits the existing card and returns a terminal refusal with state" do
     {:ok, r} =
       Requests.ask({"sample", "s-1"}, "decision", %{
