@@ -427,7 +427,11 @@ defmodule ForemanWeb.NeedsYouLive do
               </li>
             </ul>
           </section>
-          <details id="recent-outcomes" class="max-w-3xl border-t border-base pt-4">
+          <details
+            id="recent-outcomes"
+            class="max-w-3xl border-t border-base pt-4"
+            phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+          >
             <summary class="cursor-pointer text-sm font-medium text-foreground-softer">
               Recent outcomes
             </summary>

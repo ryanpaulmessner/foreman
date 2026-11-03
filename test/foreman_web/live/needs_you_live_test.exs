@@ -677,6 +677,15 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     assert Foreman.Repo.aggregate(Oban.Job, :count) == 0
   end
 
+  test "Recent outcomes keeps its open state across page updates", %{conn: conn} do
+    {:ok, view, _} = live(conn, "/needs-you")
+    # The browser owns the details element's open attribute; server patches must not reset it.
+    assert has_element?(
+             view,
+             ~s(#recent-outcomes[phx-mounted*="ignore_attrs"][phx-mounted*="open"])
+           )
+  end
+
   test "one Note field supplies both actions and an option answer retains its note", %{
     conn: conn,
     request: request
