@@ -2,7 +2,7 @@
 id: fm-zgd.17.1
 title: "Question cards: shared fixes on today's cards"
 type: task
-status: open
+status: closed
 priority: 2
 parent: fm-zgd.17
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-03
+close_reason: "Merged in PR #7 (bf1f44a); screenshots approved on card 70722dfb; touched suites 195 tests 0 failures"
 ---
 
 Spec: `docs/specs/question-cards.md` (approved 2026-11-03, card 63a4319f). Design pack: `docs/specs/question-cards.design.md`. Mockup: https://claude.ai/artifact/KkSwALbmBHC1TZg1vJf3jW (option C). The spec's Non-goals, Ask-first boundaries and copy apply to every ticket. Desktop only: 1440 and 820, light and dark.
