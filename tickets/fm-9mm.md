@@ -34,6 +34,7 @@ An approved spec (`tight-spec` format) and design pack (`design-pack`) for **Ses
   - This map absorbs fm-knr (card source + jump), fm-zgd.10 (read-only half), fm-3c3.8 (epic coordinator launch) and fm-3c3.9 (pane-mode Continue). Re-scope or close them when the spec is ticketed.
 - **Skills every session uses:** `grilling`, `domain-modeling`. Design tickets also run `statechart`, `information-architecture`, `ux-laws`, `ux-critique`, `ui-patterns` (empty, loading, error, success states), and build variants from the real board CSS and markup (no generic look). Design artifacts are published as Artifacts and linked from the ticket.
 - Ticket text follows ASD-STE100 (simple technical English).
+- 2026-11-03 user: 2026-11-03: fm-9mm.7 closed - detail page is option B with A's round grouping; Continue stays on at a usage limit and the page needs a 'continue on another model' fallback (Ryan). Buttons size to their labels (Ryan saw label overflow in A's rail).
 
 ## Decisions so far
 

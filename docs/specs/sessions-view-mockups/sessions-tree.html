@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Sessions page options</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -9135,6 +9136,50 @@ body.mk-shot .mk-bar { display: none; }
 
 @media (max-width: 1100px) { .bb-session-headwrap { display: none; } }
 
+/* Variant D: all sessions grid (one card per session, grouped by coordinator) */
+.bb-session-board { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); grid-auto-flow: row dense; gap: 16px; align-items: start; }
+.bb-session-group { display: grid; gap: 6px; padding: 6px; border-radius: 14px; background: var(--background-sunken); }
+.bb-session-group[data-n="1"] { grid-column: span 1; grid-template-columns: minmax(0,1fr); }
+.bb-session-group[data-n="2"] { grid-column: span 2; grid-template-columns: repeat(2, minmax(0,1fr)); }
+.bb-session-group[data-n="3"] { grid-column: span 3; grid-template-columns: repeat(3, minmax(0,1fr)); }
+.bb-session-group[data-n="4"] { grid-column: span 4; grid-template-columns: repeat(4, minmax(0,1fr)); }
+.bb-session-group-head { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 2px 4px 0; }
+.bb-session-tile { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; height: 100%; padding: 10px 12px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border-base); box-shadow: var(--shadow-base); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.bb-session-tile[data-tone=working] { border-color: color-mix(in oklab, var(--info) 75%, var(--border-base)); }
+.bb-session-tile[data-tone=review] { border-color: color-mix(in oklab, var(--warning) 80%, var(--border-base)); }
+.bb-session-tile[data-tone=waiting] { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary), var(--shadow-base); }
+.bb-session-tile[data-tone=dead] { border-style: dashed; background: transparent; box-shadow: none; }
+.bb-session-tile[data-coord] { background: color-mix(in oklab, var(--surface) 92%, var(--foreground) 3%); }
+.bb-session-tile:has(.bb-session-rowlink:hover) { box-shadow: 0 0 0 1px currentColor, var(--shadow-base); }
+.bb-session-tile[data-tone=working]:has(.bb-session-rowlink:hover) { box-shadow: 0 0 0 1px var(--info), var(--shadow-base); }
+.bb-session-tile[data-tone=review]:has(.bb-session-rowlink:hover) { box-shadow: 0 0 0 1px var(--warning), var(--shadow-base); }
+.bb-session-tile[data-tone=waiting]:has(.bb-session-rowlink:hover) { box-shadow: 0 0 0 2px var(--primary), var(--shadow-base); }
+.bb-session-tile[data-tone=idle]:has(.bb-session-rowlink:hover), .bb-session-tile[data-tone=dead]:has(.bb-session-rowlink:hover) { box-shadow: 0 0 0 1px var(--foreground-softest); }
+@media (prefers-reduced-motion: no-preference) { .bb-session-tile:has(.bb-session-rowlink:hover) { transform: translateY(-1px); } }
+.bb-session-tile a:not(.bb-session-rowlink), .bb-session-tile button, .bb-session-tile .bb-session-iconbtn { position: relative; z-index: 1; }
+.bb-session-tile-top { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 32px; margin: -4px -6px -2px 0; }
+.bb-session-snap { margin: auto 0 0; height: calc(15px * 6 + 14px); padding: 7px 9px; overflow: hidden; white-space: pre; font-family: var(--font-mono); font-size: 11px; line-height: 15px; color: var(--foreground-soft); background: var(--background-sunken); border-radius: 6px; display: flex; flex-direction: column; justify-content: flex-end; }
+.bb-session-snap > span.bb-session-ln { display: block; overflow: hidden; text-overflow: clip; min-height: 15px; }
+.bb-session-snap.is-closed { align-items: center; justify-content: center; white-space: normal; font-family: inherit; font-size: 12px; color: var(--foreground-softer); background: transparent; border: 1px dashed var(--border-base); }
+.bb-session-board.is-stale-snap .bb-session-snap:not(.is-closed) { opacity: .45; }
+.bb-session-ansi-red { color: var(--danger); }
+.bb-session-ansi-green { color: var(--success); }
+.bb-session-ansi-yellow { color: var(--warning); }
+.bb-session-ansi-blue { color: var(--info); }
+.bb-session-ansi-magenta { color: color-mix(in oklab, var(--info), var(--danger)); }
+.bb-session-ansi-dim { color: var(--foreground-softer); }
+.bb-session-ansi-b { font-weight: 700; color: var(--foreground); }
+.bb-session-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; border: 1px solid var(--border-base); }
+.bb-session-dot[data-tone=working] { background: var(--info); border-color: var(--info); }
+.bb-session-dot[data-tone=review] { background: var(--warning); border-color: var(--warning); }
+.bb-session-dot[data-tone=waiting] { background: var(--primary); border-color: var(--primary); }
+.bb-session-dot[data-tone=idle] { background: var(--background-sunken); border-color: var(--foreground-softest); }
+.bb-session-skel-snap { display: block; height: 104px; border-radius: 6px; background: var(--background-sunken); margin-top: auto; }
+@media (max-width: 1300px) {
+  .bb-session-board { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .bb-session-group[data-n="3"], .bb-session-group[data-n="4"] { grid-column: span 2; grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+
 </style>
 <div id="mk-bar" class="mk-bar"></div>
 <div id="mk-page"></div>
@@ -9512,8 +9557,137 @@ body.mk-shot .mk-bar { display: none; }
     return `<div class="space-y-4" role="status" aria-live="polite"><p class="text-xs text-foreground-softer">${COPY.loading}</p><section class="bb-initiative-panel"><h2 class="bb-section-title">All sessions</h2>${row(0)}${row(1)}${row(2)}${row(1)}${row(2)}</section></div>`;
   }
 
+  // ---------- Variant D: all sessions grid ----------
+  // Terminal snapshots. EXAMPLE TEXT written for each session; the colour codes are the real ones read with
+  // `tmux capture-pane -e -p` from the coordinator panes on 2026-11-03 (Pi: truecolor 167;152;215 bullets and
+  // 126;136;142 grey; Claude Code: 256-colour 246 grey, 174/180 spinner, 220 auto mode, 153 paths, bold tool names).
+  // The input box and status bar at the bottom of a Claude pane are cut off; the card shows the lines above them.
+  const E = "\x1b[", X = E + "0m", Bo = E + "1m", Dm = E + "2m", F = E + "39m";
+  const PI = E + "38;2;167;152;215m", PG = E + "38;2;126;136;142m";
+  const CG = E + "38;5;246m", CO = E + "38;5;174m", CY = E + "38;5;180m", CW = E + "38;5;231m", CB = E + "38;5;153m";
+  const GR = E + "32m", RD = E + "31m", YL = E + "38;5;220m";
+  const pi = t => ` ${PI}- ${F}${t}`;
+  const tool = (name, arg) => `${CW}⏺${F} ${Bo}${name}${X}(${arg})`;
+  const SNAP = {
+    "coordinator": [`${CW}⏺${F} Four cards wait in Needs you:`, `  - ${Bo}#492${X} query-perf: land 5 cuts`, `  - ${Bo}Filter bar slice 6:${X} pick one`, `  - ${Bo}Push${X} for the ai-chat funnel build`, `  - ${Bo}Sign-in${X} for work-8ec.36 preview`, `  The earlier PR cards are done.`, `${CG}✻ Brewed for 9s · 3 shells running${F}`],
+    "kpi-countup": [pi("Read assets/js/hooks/count_up.js"), pi("The rAF loop stops when the tab"), `   is hidden and does not start again.`, ` Edit count_up.js  ${GR}+12${F} ${RD}-3${F}`, pi("Use the clock, not frame count"), ` Running mix test test/js_hooks…`, ` ${PG}Jev phase: build (conf=0.81)${F}`],
+    "support-board-coord": [`${CW}⏺${F} The field-help ticket list waits`, `  for your answer on card 21a404bf.`, `  requester-strip is building and`, `  field-help is in review.`, tool("Bash", "foreman wait 21a404bf"), `  ${CG}⎿  Waiting for an answer…${F}`, `${CG}✻ Waiting for 7m${F}`],
+    "field-help": [pi(`${Bo}Gate:${X} mix precommit passes,`), `   ${GR}412 tests, 0 failures${F}.`, pi(`${Bo}verify ui:${X} 3 widths, light and`), `   dark, no console errors.`, ` Report sent to support-board-coord.`, ` Waiting for review.`, ` ${PG}Jev phase: review (conf=0.88)${F}`],
+    "requester-strip": [pi("Read support_live/ticket.ex"), ` Edit ticket.ex  ${GR}+28${F} ${RD}-4${F}`, pi("The strip shows name, team and"), `   the time the request came in.`, ` Edit ticket_component.ex  ${GR}+11${F}`, ` Running mix test …/ticket_test.exs`, ` ${PG}Jev phase: build (conf=0.76)${F}`],
+    "query-perf": [`${CW}⏺${F} help-composer-queries: 4 → 1.`, tool("Bash", "cd fix-branches/query-perf-land"), `  ${CG}⎿  Allowed by auto mode${F}`, tool("Bash", "mix test --only query_count"), `  ${CG}⎿  Running… (7s · timeout 10m)${F}`, ``, `${CO}·${F} ${CY}Forming…${F} ${CG}(1m 2s · 3.5k tokens)${F}`],
+    "help-composer-queries": [pi("Dead render: 3 queries → 0."), pi("Connected render: one draft read."), ` Edit help_composer_live.ex ${GR}+9${F} ${RD}-21${F}`, ` Running mix test …/help_composer`, `   ${GR}18 tests, 0 failures${F}`, ` Running the query count check…`, ` ${PG}Jev phase: build (conf=0.79)${F}`],
+    "metric-defs-queries": [pi("One query for all definitions."), ` ${Bo}Bash${X}: psql report_system_dev -c …`, ``, ` ${YL}Allow this command?${F}`, ` ${Bo}❯ 1. Yes${X}`, `   2. Yes, and do not ask again`, `   3. No, and tell Pi what to do`],
+    "ai-chat": [`${CW}⏺${F} chat-why-alerts asked a question.`, `  The card is in Needs you.`, `${CW}⏺${F} Next: start the funnel snapshot`, `  build (work-p8x.33.2).`, ``, `  ${RD}Usage limit reached · resets 16:00${F}`, `  ${CG}/continue to go on after the reset${F}`],
+    "ai-insights": [`${CW}⏺${F} The C14 insight feed is merged.`, `  No builds run for this epic now.`, `  Next ticket: work-9wb.21, when`, `  you say go.`, ``, `${CG}✻ Brewed for 4s · done 9:31 AM${F}`, ``],
+    "filter-bar-production": [pi("Slice 5: the Production filter bar."), ` Edit filter_bar.ex  ${GR}+41${F} ${RD}-6${F}`, pi("Escape closes the open list only;"), `   a second Escape closes the popup.`, ` Running verify ui at 3 widths…`, `   1440 ${GR}ok${F} · 820 ${GR}ok${F} · 390 …`, ` ${PG}Jev phase: build (conf=0.73)${F}`],
+    "chief-research": [tool("Read", "sessions-tree-critique.md"), `  ${CG}⎿  Read 118 lines${F}`, tool("Bash", "tmux capture-pane -e -p …"), `  ${CG}⎿  12 lines${F}`, tool("Update", `${CB}sessions-tree.html${F}`), `  ${CG}⎿  Added 140 lines${F}`, `${CO}·${F} ${CY}Thinking…${F} ${CG}(2m 10s · 8.1k tokens)${F}`],
+    "demo-chat-insights": [`${GR}ryan@mac${F} ReportSystem % mix phx.server`, `[info] Running ReportSystemWeb.Endpoint`, `[info] GET /chat`, `[info] Sent 200 in 84ms`, `^C`, `${GR}ryan@mac${F} ReportSystem % `, ``],
+  };
+
+  // Own ANSI-to-HTML (fm-9mm.3): SGR codes only. Colours map to theme tokens so light and dark both work.
+  // 16-colour names map directly; 256 and truecolor go to the nearest hue; grey goes to dim. Backgrounds are dropped.
+  const BASIC = ["dim", "red", "green", "yellow", "blue", "magenta", "blue", null];
+  function rgbName(r, g, b) {
+    const mx = Math.max(r, g, b) / 255, mn = Math.min(r, g, b) / 255, l = (mx + mn) / 2, d = mx - mn;
+    const sat = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    if (sat < 0.18) return l > 0.8 ? null : "dim";
+    let h; const R = r / 255, G = g / 255, B = b / 255;
+    if (mx === R) h = 60 * (((G - B) / d) % 6); else if (mx === G) h = 60 * ((B - R) / d + 2); else h = 60 * ((R - G) / d + 4);
+    if (h < 0) h += 360;
+    return h < 18 || h >= 330 ? "red" : h < 70 ? "yellow" : h < 170 ? "green" : h < 265 ? "blue" : "magenta";
+  }
+  function x256(n) {
+    if (n < 16) return BASIC[n % 8];
+    if (n >= 232) return "dim";
+    n -= 16; const v = k => (k ? 55 + 40 * k : 0);
+    return rgbName(v(Math.floor(n / 36)), v(Math.floor(n / 6) % 6), v(n % 6));
+  }
+  function ansi(line) {
+    let out = "", st = { fg: null, b: false, dim: false }, last = 0, m;
+    const re = /\x1b\[([0-9;]*)m/g;
+    const put = t => {
+      if (!t) return;
+      const cls = [st.fg && "bb-session-ansi-" + st.fg, st.b && "bb-session-ansi-b", st.dim && "bb-session-ansi-dim"].filter(Boolean).join(" ");
+      out += cls ? `<span class="${cls}">${esc(t)}</span>` : esc(t);
+    };
+    while ((m = re.exec(line))) {
+      put(line.slice(last, m.index)); last = re.lastIndex;
+      const p = (m[1] || "0").split(";").map(Number);
+      for (let i = 0; i < p.length; i++) {
+        const c = p[i];
+        if (c === 0) st = { fg: null, b: false, dim: false };
+        else if (c === 1) st.b = true; else if (c === 2) st.dim = true; else if (c === 22) st.b = st.dim = false;
+        else if (c === 39) st.fg = null;
+        else if (c >= 30 && c <= 37) st.fg = BASIC[c - 30]; else if (c >= 90 && c <= 97) st.fg = BASIC[c - 90];
+        else if (c === 38 && p[i + 1] === 5) { st.fg = x256(p[i + 2]); i += 2; }
+        else if (c === 38 && p[i + 1] === 2) { st.fg = rgbName(p[i + 2], p[i + 3], p[i + 4]); i += 4; }
+        else if (c === 48) i += p[i + 1] === 5 ? 2 : 4;
+      }
+    }
+    put(line.slice(last));
+    return `<span class="bb-session-ln">${out || " "}</span>`;
+  }
+
+  const toneD = s => s.state === "waiting" ? "waiting" : s.state === "in_review" ? "review" : s.state === "working" ? "working" : s.state === "idle" ? "idle" : "dead";
+  function tileD(s) {
+    const dead = isDead(s) && s.state !== "waiting";
+    const isCoord = s.kind === "main" || s.kind === "epic";
+    const note = parentNote(s);
+    const lines = SNAP[s.id] || [];
+    const snap = isDead(s) || s.endedAge
+      ? `<div class="bb-session-snap is-closed">The terminal is closed</div>`
+      : `<div class="bb-session-snap" role="img" aria-label="Last 6 lines of the terminal for ${esc(s.id)}">${lines.slice(-6).map(ansi).join("")}</div>`;
+    return `<article class="bb-session-tile ${dead ? "bb-session-dead" : ""}" data-tone="${toneD(s)}" ${isCoord ? "data-coord" : ""}>
+      <div class="bb-session-tile-top">${nameLink(s, "bb-session-rowlink truncate min-w-0 " + (isCoord ? "font-semibold" : ""))}${isCoord ? `<span class="shrink-0" title="${KIND_TEXT[s.kind]}">${badge(s.kind)}</span>` : ""}<span class="ml-auto shrink-0">${focusBtn(s)}</span></div>
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-1">${stateBadge(s)}<span class="text-xs">${stateLine(s)}</span></div>
+      <div class="flex min-w-0 items-center gap-2">${ticketChip(s)}${s.title ? `<span class="truncate text-xs text-foreground-softer" title="${esc(s.title)}">${esc(s.title)}</span>` : ""}</div>
+      ${note ? `<div class="truncate">${note}</div>` : ""}
+      ${snap}
+    </article>`;
+  }
+  // Builds in a group: waiting on you first, then working, in review, idle, ended (serial position).
+  const RANK = { waiting: 0, working: 1, review: 2, idle: 3, dead: 4 };
+  const byRank = list => list.slice().sort((a, b) => RANK[toneD(a)] - RANK[toneD(b)]);
+  function groupsD(showEnded) {
+    const main = SESSIONS.find(s => s.kind === "main");
+    const g = [{ members: [main, ...byRank(SESSIONS.filter(s => s.parent === main.id && s.kind === "build" && visible(s, showEnded)))] }];
+    SESSIONS.filter(s => s.kind === "epic" && visible(s, showEnded))
+      .forEach(e => g.push({ members: [e, ...byRank(SESSIONS.filter(s => s.parent === e.id && visible(s, showEnded)))] }));
+    const un = unassigned(showEnded);
+    if (un.length) g.push({ unassigned: true, members: byRank(un) });
+    return g;
+  }
+  function filtersD() {
+    const c = counts();
+    const idle = SESSIONS.filter(s => s.state === "idle").length;
+    const all = groupsD(false).reduce((n, g) => n + g.members.length, 0);
+    const chip = (tone, label, n, on) => `<a href="#" ${on ? 'aria-current="true"' : ""}>${tone ? `<span class="bb-session-dot" data-tone="${tone}"></span>` : ""}${label} <span class="${on ? "" : "text-foreground-softer"}">${n}</span></a>`;
+    return `<nav class="bb-session-seg" aria-label="Filter sessions">${chip("", "All", all, true)}${chip("waiting", "Waiting on you", c.waiting)}${chip("working", "Working", c.working)}${chip("review", "In review", c.review)}${chip("idle", "Idle", idle)}</nav>`;
+  }
+  function variantD(state) {
+    const showEnded = state === "ended";
+    let body;
+    if (state === "empty") body = empty();
+    else if (state === "loading") body = skeletonD();
+    else {
+      const groups = groupsD(showEnded).map(g => {
+        const n = Math.min(g.members.length, 4);
+        const head = g.unassigned ? `<div class="bb-session-group-head"><span class="bb-label">Unassigned</span><span class="text-xs text-foreground-softer">${COPY.unassignedHelp}</span></div>` : "";
+        return `<section class="bb-session-group" data-n="${Math.max(n, g.unassigned ? 2 : 1)}" aria-label="${g.unassigned ? "Unassigned" : esc(g.members[0].id) + " and its builds"}">${head}${g.members.map(tileD).join("")}</section>`;
+      }).join("");
+      body = `<div class="bb-session-board ${state === "offline" ? "bb-session-stale" : ""} ${state === "tmux" ? "is-stale-snap" : ""}">${groups}</div>`;
+    }
+    const bar = state === "empty" || state === "loading" ? "" : `<div class="flex flex-wrap items-center gap-3">${filtersD()}<span class="ml-auto">${endedToggle(state)}</span></div>`;
+    return shell(`${header(state, "D")}${bar}${banner(state)}${body}`, 6);
+  }
+  function skeletonD() {
+    const tile = `<div class="bb-session-tile" aria-hidden="true"><span class="bb-session-skel" style="width:55%"></span><span class="bb-session-skel" style="width:35%"></span><span class="bb-session-skel" style="width:75%"></span><span class="bb-session-skel-snap"></span></div>`;
+    return `<div class="space-y-3" role="status" aria-live="polite"><p class="text-xs text-foreground-softer">${COPY.loading}</p>
+      <div class="bb-session-board"><div class="bb-session-group" data-n="2">${tile}${tile}</div><div class="bb-session-group" data-n="2">${tile}${tile}</div><div class="bb-session-group" data-n="3">${tile}${tile}${tile}</div></div></div>`;
+  }
+
   // ---------- Switcher ----------
-  const VARIANTS = { A: ["Stack cards", variantA], B: ["Grouped panels", variantB], C: ["Outline + Waiting strip", variantC] };
+  const VARIANTS = { A: ["Stack cards", variantA], B: ["Grouped panels", variantB], C: ["Outline + Waiting strip", variantC], D: ["All sessions grid", variantD] };
   const STATES = { live: "Success (live)", ended: "Show ended on", empty: "Empty", loading: "Loading", tmux: "Error: tmux not answering", offline: "Error: board connection lost" };
   const params = () => Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
   let cur = Object.assign({ v: "A", s: "live", t: "auto" }, params());
