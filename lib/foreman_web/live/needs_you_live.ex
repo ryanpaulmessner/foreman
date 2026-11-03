@@ -325,7 +325,15 @@ defmodule ForemanWeb.NeedsYouLive do
     |> assign(:pending_headings, headings)
     |> ForemanWeb.RequestCount.refresh()
     |> stream(:recent, Requests.recent(), reset: true)
-    |> stream(:waiting_without_card, Foreman.WaitingWithoutCard.list(), reset: true)
+    |> merge_list()
+  end
+
+  defp merge_list(socket) do
+    prs = Foreman.WaitingWithoutCard.list()
+
+    socket
+    |> assign(:merge_count, length(prs))
+    |> stream(:merge_list, prs, reset: true)
   end
 
   def render(assigns) do
@@ -371,40 +379,53 @@ defmodule ForemanWeb.NeedsYouLive do
             />
           </div>
           <section
+            :if={@merge_count > 0}
+            id="merge-list-section"
             class="max-w-3xl space-y-3 border-t border-base pt-5"
-            aria-labelledby="waiting-without-card-heading"
+            aria-labelledby="merge-list-heading"
           >
-            <h2 id="waiting-without-card-heading" class="text-base font-semibold">
-              Waiting on you without a card
+            <h2 id="merge-list-heading" class="flex items-center gap-2 text-base font-semibold">
+              Pull requests for you to merge
+              <Badge.badge>{@merge_count}</Badge.badge>
             </h2>
-            <div id="waiting-without-card" phx-update="stream" class="space-y-3">
-              <p
-                id="waiting-without-card-empty"
-                class="hidden only:block text-sm text-foreground-softer"
-              >
-                No items
-              </p>
-              <article
-                :for={{id, item} <- @streams.waiting_without_card}
+            <ul
+              id="merge-list"
+              phx-update="stream"
+              class="divide-y divide-base rounded-xl border border-base"
+            >
+              <li
+                :for={{id, pr} <- @streams.merge_list}
                 id={id}
-                class="space-y-2 rounded-lg border border-base p-4"
+                class="flex items-center gap-3 px-4 py-3 text-sm"
               >
-                <p class="text-xs text-foreground-softer">
-                  {item.repo_key}<span :if={item.bead_id}> · {item.bead_id}</span>
-                </p>
-                <h3 class="break-words font-medium">{item.title}</h3>
-                <p :if={item.detail} class="break-words text-sm text-foreground-softer">
-                  {item.detail}
-                </p>
-                <.link
-                  patch={if String.starts_with?(item.href, "/needs-you?"), do: item.href}
-                  href={unless String.starts_with?(item.href, "/needs-you?"), do: item.href}
-                  class="inline-block rounded text-sm underline underline-offset-4 transition hover:text-primary"
+                <div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+                  <span class="text-xs text-foreground-softer">{pr.repo_key}</span>
+                  <span class="font-mono text-xs text-foreground-softer">#{pr.number}</span>
+                  <span class="min-w-0 flex-1 basis-40 truncate font-medium" title={pr.title}>
+                    {pr.title}
+                  </span>
+                  <span class="flex flex-wrap items-center gap-1">
+                    <Badge.badge :for={bead_id <- pr.bead_ids} color="info" class="font-mono">
+                      {bead_id}
+                    </Badge.badge>
+                  </span>
+                  <span class="text-xs whitespace-nowrap text-foreground-softer">
+                    <ForemanWeb.TicketDetail.timestamp at={pr.opened_at} />
+                  </span>
+                </div>
+                <Button.button
+                  id={"merge-open-#{pr.repo_key}-#{pr.number}"}
+                  href={pr.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  variant="outline"
+                  size="sm"
+                  class="shrink-0"
                 >
-                  {item.action}
-                </.link>
-              </article>
-            </div>
+                  Open on GitHub <.icon name="hero-arrow-top-right-on-square" class="size-3.5" />
+                </Button.button>
+              </li>
+            </ul>
           </section>
           <details id="recent-outcomes" class="max-w-3xl border-t border-base pt-4">
             <summary class="cursor-pointer text-sm font-medium text-foreground-softer">

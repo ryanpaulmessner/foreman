@@ -46,6 +46,7 @@ defmodule Foreman.Role do
         Foreman.Config.Watcher,
         Foreman.SpoolWorker,
         Foreman.SessionMonitor,
+        Foreman.CloseOutNagMonitor,
         Foreman.Previews.Poller,
         Foreman.OsNotifications
       ],

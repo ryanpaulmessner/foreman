@@ -51,6 +51,7 @@ defmodule Foreman.CLI do
     project: :string,
     repo: :string,
     window: :string,
+    coordinator: :string,
     harness: :string,
     model: :string,
     workdir: :string,
@@ -541,6 +542,7 @@ defmodule Foreman.CLI do
             Map.new(
               Keyword.take(opts, [
                 :window,
+                :coordinator,
                 :harness,
                 :model,
                 :workdir,
@@ -557,6 +559,16 @@ defmodule Foreman.CLI do
             )
 
           payload = if opts[:spec], do: Map.put(payload, "spec_link", opts[:spec]), else: payload
+
+          # The dispatching coordinator owns close-out. pi-window runs in its pane, so
+          # without --coordinator the board resolves the registered session in TMUX_PANE.
+          pane = defaults[:tmux_pane] || System.get_env("TMUX_PANE")
+
+          payload =
+            if verb == "dispatch" and is_nil(opts[:coordinator]) and is_binary(pane) and
+                 pane != "",
+               do: Map.put(payload, "coordinator_pane", pane),
+               else: payload
 
           payload =
             if opts[:design], do: Map.put(payload, "design_link", opts[:design]), else: payload
