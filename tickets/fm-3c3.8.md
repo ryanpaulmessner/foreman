@@ -2,7 +2,7 @@
 id: fm-3c3.8
 title: "Launch an epic coordinator for a ticketed epic"
 type: feature
-status: open
+status: closed
 priority: 2
 parent: fm-3c3
 blocked_by: ["fm-3c3.7"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-19
-closed: null
-close_reason: null
+closed: 2026-11-03
+close_reason: "Superseded by fm-9mm.18 (one-click Launch coordinator on epics, Sessions spec Decisions 28-31)."
 ---
 
 Ticketed epics that are not in flight (fe-lwp, fe-813, cdo-*) have no way to restart from the board. Reverses the launcher spec's non-goal "launching sessions for tickets inside a ticketed epic" (user decision 2026-10-18).

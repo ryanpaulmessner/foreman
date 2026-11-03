@@ -2,7 +2,7 @@
 id: fm-9mm.6
 title: "Sessions tree page: layout, grouping and states"
 type: decision
-status: in_progress
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.4","fm-9mm.5"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: ["wayfinder:prototype"]
 created: 2026-11-01
-closed: null
-close_reason: null
+closed: 2026-11-03
+close_reason: "Decided: C tree + Waiting strip, Tree · Grid switch (cards 4c559f93, 8a7f4f44). Built in fm-9mm.17 and fm-9mm.19."
 ---
 
 ## Question

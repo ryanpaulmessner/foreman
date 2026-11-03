@@ -2,7 +2,7 @@
 id: fm-9mm.8
 title: "Launch an epic coordinator from the board: where, what it asks, what it starts"
 type: decision
-status: open
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.1","fm-9mm.5"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: ["wayfinder:grilling"]
 created: 2026-11-01
-closed: null
-close_reason: null
+closed: 2026-11-03
+close_reason: "Decided: one-click launch with defaults on epic row and page (card e11bb1cd). Built in fm-9mm.18."
 ---
 
 ## Question

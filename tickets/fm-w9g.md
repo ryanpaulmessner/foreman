@@ -2,7 +2,7 @@
 id: fm-w9g
 title: "Record the dispatching coordinator on every build, and give old stuck items an owner"
 type: task
-status: open
+status: closed
 priority: 2
 parent: null
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-03
+close_reason: "Folded into fm-9mm.11 (launch scripts record identity, incl. --coordinator and the 14 ownerless items)."
 ---
 
 Follow-up from fm-fdw (PR #6).
