@@ -21,3 +21,4 @@ Absorbs fm-3c3.8. Decide where Launch epic coordinator lives (epic page, Session
 
 ## Notes
 - 2026-11-03 user: 2026-11-03 coordinator calls: Launch lives on the epic row and the epic page (fm-3c3.8); Sessions page shows dead epic coordinators with Resume / Start fresh from the detail-page controls, no separate launcher. Window = epic id in the project's tmux session on -L foreman, parent = main coordinator, builds in pane mode. Live coordinator for the epic -> Focus instead of Launch (one live session per name). Form vs one click asked on card e11bb1cd.
+- 2026-11-03 claude: 2026-11-03: Ryan picked 'One click, defaults' (card e11bb1cd): Launch starts at once with Claude, the main coordinator's model, the repo's main checkout, a fresh conversation. No form. Other settings: start by hand.
