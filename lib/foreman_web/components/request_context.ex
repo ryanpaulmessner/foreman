@@ -16,13 +16,8 @@ defmodule ForemanWeb.RequestContext do
         form: to_form(%{"reason" => ""}, as: :withdraw)
       )
 
-    assigns =
-      assign(
-        assigns,
-        :command_source,
-        assigns.source ||
-          if(assigns.request.session, do: %{target: assigns.request.session, server: :default})
-      )
+    # An unknown source gets no tmux command (Decision 21).
+    assigns = assign(assigns, :command_source, assigns.source)
 
     ~H"""
     <section
@@ -48,7 +43,7 @@ defmodule ForemanWeb.RequestContext do
         <%= if @source do %>
           Source: {@source.name} · {@source.harness} · {@request.repo_key} · {@request.bead_id}
         <% else %>
-          Source unknown<span :if={@request.session}> · {@request.session}</span> · {@request.repo_key} · {@request.bead_id}
+          The board does not know which session asked this.
         <% end %>
       </p>
       <button

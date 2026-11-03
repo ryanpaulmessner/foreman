@@ -9,6 +9,7 @@ defmodule Foreman.Requests.Request do
              :kind,
              :actor,
              :session,
+             :agent_session_id,
              :facts,
              :state,
              :outcome,
@@ -23,6 +24,8 @@ defmodule Foreman.Requests.Request do
     field :kind, :string
     field :actor, :string
     field :session, :string
+    # The asking session, resolved when the ask is accepted (never at render).
+    field :agent_session_id, :binary_id
     field :facts, :map
     field :state, :string
     field :outcome, :map, default: %{}

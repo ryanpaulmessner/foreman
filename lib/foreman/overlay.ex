@@ -354,6 +354,10 @@ defmodule Foreman.Overlay do
       set: [ended_at: now]
     )
 
+    agent =
+      if is_binary(payload["session"]) and payload["session"] != "",
+        do: Foreman.AgentSessions.record_dispatch({repo, id}, payload)
+
     Repo.insert_all("sessions", [
       %{
         repo_key: repo,
@@ -361,7 +365,8 @@ defmodule Foreman.Overlay do
         window: payload["window"],
         details: payload,
         started_at: now,
-        last_seen_at: now
+        last_seen_at: now,
+        agent_session_id: agent && Ecto.UUID.dump!(agent.id)
       }
     ])
   end

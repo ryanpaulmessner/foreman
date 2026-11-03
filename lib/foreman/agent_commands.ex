@@ -194,9 +194,14 @@ defmodule Foreman.AgentCommands do
       end
 
     case result do
-      {:ok, %Foreman.Requests.Request{} = ask} -> {200, %{id: ask.id, state: ask.state}}
-      {:ok, session} -> {200, %{state: session.state}}
-      {:error, reason} -> {422, %{error: reason}}
+      {:ok, %Foreman.Requests.Request{} = ask} ->
+        {200, %{id: ask.id, state: ask.state} |> session_warning(ask, request)}
+
+      {:ok, session} ->
+        {200, %{state: session.state}}
+
+      {:error, reason} ->
+        {422, %{error: reason}}
     end
   end
 
@@ -218,7 +223,7 @@ defmodule Foreman.AgentCommands do
               {200, %{state: session.state}}
 
             {:ok, ask} ->
-              body = %{id: ask.id, state: ask.state}
+              body = %{id: ask.id, state: ask.state} |> session_warning(ask, request)
 
               {200,
                if(ask.standing_answer,
@@ -313,4 +318,16 @@ defmodule Foreman.AgentCommands do
       {:error, reason} -> {422, %{error: reason}}
     end
   end
+
+  # Accepted, but no session row matched (Decision 5). Not `warning`: that key means
+  # the ask was not accepted.
+  defp session_warning(body, %{agent_session_id: nil}, request),
+    do:
+      Map.put(
+        body,
+        :session_warning,
+        Foreman.AgentSessions.unknown_warning(request["session"], request["tmux_pane"])
+      )
+
+  defp session_warning(body, _ask, _request), do: body
 end

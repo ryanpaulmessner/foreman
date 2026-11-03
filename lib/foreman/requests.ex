@@ -24,6 +24,13 @@ defmodule Foreman.Requests do
            nil <- pending_chore(repo, kind, facts) do
         {:pending, effects} = Machine.step(:new, :ask, %{kind: kind})
 
+        # The asking session is fixed now, never at render (Decision 5).
+        agent_session_id =
+          case Foreman.AgentSessions.resolve_asker(params) do
+            {:ok, session} -> session.id
+            {:unknown, _} -> nil
+          end
+
         request =
           Repo.insert!(%Request{
             id: id,
@@ -32,6 +39,7 @@ defmodule Foreman.Requests do
             kind: kind,
             actor: params["actor"] || "user",
             session: params["session"],
+            agent_session_id: agent_session_id,
             facts: facts,
             state: "pending"
           })
