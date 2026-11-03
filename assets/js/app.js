@@ -27,6 +27,7 @@ import topbar from "../vendor/topbar"
 import {InitiativeFilters, rememberedFilters, rememberedFiltersOpen} from "./initiative_filters"
 import {BrowserNotifications} from "./browser_notifications"
 import {Mermaid} from "./mermaid"
+import {CopyField} from "./copy_field"
 import {Hooks as fluxonHooks, DOM} from "../../deps/fluxon/priv/static/fluxon.esm.js"
 
 const setTheme = theme => {
@@ -41,7 +42,7 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: () => ({_csrf_token: csrfToken, initiative_filters: rememberedFilters(), initiative_filters_open: rememberedFiltersOpen()}),
-  hooks: {...colocatedHooks, ...fluxonHooks, InitiativeFilters, BrowserNotifications, Mermaid},
+  hooks: {...colocatedHooks, ...fluxonHooks, InitiativeFilters, BrowserNotifications, Mermaid, CopyField},
   dom: {onBeforeElUpdated: (from, to) => DOM.onBeforeElUpdated(from, to)},
 })
 

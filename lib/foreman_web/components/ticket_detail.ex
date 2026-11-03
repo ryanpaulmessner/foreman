@@ -479,7 +479,7 @@ defmodule ForemanWeb.TicketDetail do
                 <dd><.timestamp at={session.ended_at} /></dd>
                 <%= for {key, value} <- Enum.sort(session.details) do %>
                   <dt class="text-foreground-softer">{key}</dt>
-                  <dd class="break-all">{value_text(value)}</dd>
+                  <dd class="min-w-0"><ForemanWeb.LongText.path text={value_text(value)} /></dd>
                 <% end %>
               </dl>
             </article>

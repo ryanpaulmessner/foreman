@@ -182,14 +182,16 @@ defmodule ForemanWeb.Layouts do
   def flash_group(assigns) do
     ~H"""
     <div id="flash-group" aria-live="polite" class="fixed right-5 bottom-5 z-50 space-y-2">
-      <div
+      <ForemanWeb.StatusLine.status_line
         :for={kind <- [:info, :error]}
         :if={Phoenix.Flash.get(@flash, kind)}
-        class="bb-panel"
+        id={"flash-#{kind}"}
+        kind={kind}
+        class="bb-toast"
         phx-click={JS.push("lv:clear-flash", value: %{key: kind})}
       >
         {Phoenix.Flash.get(@flash, kind)}
-      </div>
+      </ForemanWeb.StatusLine.status_line>
     </div>
     """
   end

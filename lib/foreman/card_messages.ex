@@ -19,9 +19,24 @@ defmodule Foreman.CardMessages do
     end
   end
 
+  @author_separator " · "
+
+  @doc """
+  The name a card shows for a message author: "Ryan", the replying session,
+  or "Agent" for a reply without a session. Never the actor word.
+  """
+  def author_name("ryan"), do: "Ryan"
+
+  def author_name(author) do
+    case String.split(author, @author_separator, parts: 2) do
+      [_actor, session] -> session
+      [_actor] -> "Agent"
+    end
+  end
+
   def reply(id, actor, session, body) do
     if text?(actor, 200) and (is_nil(session) or text?(session, 500)) and text?(body, 20_000) do
-      author = Enum.join(Enum.reject([actor, session], &is_nil/1), " · ")
+      author = Enum.join(Enum.reject([actor, session], &is_nil/1), @author_separator)
 
       pending(id, :card_reply, fn request, [record: :message] -> insert(request, author, body) end)
     else

@@ -239,7 +239,14 @@ defmodule ForemanWeb.RequestCard do
         class="contents"
       >
         <dt class="mt-2 text-foreground-softer sm:mt-0">{label}</dt>
-        <dd class="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]" phx-no-format>{@request.facts[key]}</dd>
+        <dd
+          :if={key == "title"}
+          class="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]"
+          phx-no-format
+        >{@request.facts[key]}</dd>
+        <dd :if={key != "title"} class="min-w-0 font-mono">
+          <ForemanWeb.LongText.path text={@request.facts[key]} />
+        </dd>
       </div>
       <dt class="mt-2 text-foreground-softer sm:mt-0">Body</dt>
       <dd class="min-w-0">
@@ -263,11 +270,13 @@ defmodule ForemanWeb.RequestCard do
     </p>
     <dl class="grid min-w-0 grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
       <dt class="text-foreground-softer">Repository</dt>
-      <dd class="break-all font-mono">{@request.facts["remote"]}</dd>
+      <dd class="min-w-0 font-mono"><ForemanWeb.LongText.path text={@request.facts["remote"]} /></dd>
       <dt class="text-foreground-softer">Pull request</dt>
       <dd class="font-mono">#{@request.facts["number"]}</dd>
       <dt class="text-foreground-softer">Head</dt>
-      <dd class="break-all font-mono">{@request.facts["expected_sha"]}</dd>
+      <dd class="min-w-0 font-mono">
+        <ForemanWeb.LongText.path text={@request.facts["expected_sha"]} />
+      </dd>
     </dl>
     """
   end
@@ -286,7 +295,12 @@ defmodule ForemanWeb.RequestCard do
     </p>
     <dl class="grid min-w-0 grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
       <dt class="text-foreground-softer">Destination</dt>
-      <dd class="min-w-0 break-all font-mono">{destination(@request.facts)}</dd>
+      <dd class="min-w-0 font-mono">
+        <ForemanWeb.LongText.path
+          id={@prefix <> "push-destination-" <> @request.id}
+          text={destination(@request.facts)}
+        />
+      </dd>
       <div
         :for={
           {label, key} <- [
@@ -299,7 +313,12 @@ defmodule ForemanWeb.RequestCard do
         class="contents"
       >
         <dt class="mt-2 text-foreground-softer sm:mt-0">{label}</dt>
-        <dd class="min-w-0 break-all font-mono">{@request.facts[key]}</dd>
+        <dd class="min-w-0 font-mono">
+          <ForemanWeb.LongText.path
+            id={@prefix <> "push-" <> key <> "-" <> @request.id}
+            text={@request.facts[key]}
+          />
+        </dd>
       </div>
     </dl>
     """

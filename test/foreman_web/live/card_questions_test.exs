@@ -51,10 +51,21 @@ defmodule ForemanWeb.CardQuestionsTest do
     view |> form("#card-question-form-#{r.id}", card_question: %{text: "Why?"}) |> render_submit()
     assert has_element?(view, "#card-question-unavailable-#{r.id}", "window is closed")
     assert has_element?(view, "#card-question-text-#{r.id}", "Why?")
-    assert has_element?(view, "#card-question-copy-#{r.id}", "[card question #{r.id}] Why?")
-    assert has_element?(view, "#card-question-retry-#{r.id}")
+
+    assert has_element?(
+             view,
+             ~s(#card-question-copy-#{r.id} input[value="[card question #{r.id}] Why?"])
+           )
+
+    assert has_element?(view, "#card-question-unavailable-#{r.id}.bb-status-error")
+    assert has_element?(view, "#card-question-retry-#{r.id}", "Try again")
     assert has_element?(view, "#go-session-#{r.id}")
-    assert has_element?(view, "#card-conversation-#{r.id} code", "tmux select-window")
+
+    assert has_element?(
+             view,
+             ~s(#card-question-command-#{r.id} input[value^="tmux select-window"])
+           )
+
     assert CardMessages.list(r.id) == []
   end
 
@@ -76,8 +87,7 @@ defmodule ForemanWeb.CardQuestionsTest do
 
       assert has_element?(
                view,
-               "##{prefix}card-question-copy-#{r.id}",
-               "[card question #{r.id}] Why this option?"
+               ~s(##{prefix}card-question-copy-#{r.id} input[value="[card question #{r.id}] Why this option?"])
              )
 
       assert has_element?(view, "##{prefix}card-question-unavailable-#{r.id}", "empty prompt")
@@ -201,9 +211,20 @@ defmodule ForemanWeb.CardQuestionsTest do
   test "unknown source shows a fallback instead of a send button", %{conn: conn, request: r} do
     {:ok, view, _} = live(conn, "/needs-you")
     assert has_element?(view, "#card-question-#{r.id}", "Ask about this")
-    assert has_element?(view, "#card-question-unavailable-#{r.id}", "Source unknown")
+
+    assert has_element?(
+             view,
+             "#card-question-unavailable-#{r.id}.bb-status-info",
+             "Source unknown"
+           )
+
+    refute has_element?(view, "#card-question-retry-#{r.id}")
     refute has_element?(view, "#card-question-send-#{r.id}")
-    assert has_element?(view, "#card-question-copy-#{r.id}", "[card question #{r.id}]")
+
+    assert has_element?(
+             view,
+             ~s(#card-question-copy-#{r.id} input[value^="[card question #{r.id}]"][readonly])
+           )
   end
 
   test "replies update the card and drawer without reload and survive withdrawal", %{
@@ -221,6 +242,13 @@ defmodule ForemanWeb.CardQuestionsTest do
 
     for prefix <- ["", "drawer-"] do
       assert has_element?(view, "##{prefix}card-message-#{message.id} strong", "Because")
+
+      assert view
+             |> element("##{prefix}card-message-#{message.id} [data-card-message-author]")
+             |> render()
+             |> LazyHTML.from_fragment()
+             |> LazyHTML.text()
+             |> String.trim() == "build"
     end
 
     view |> form("#withdraw-#{r.id}", withdraw: %{reason: "No longer needed"}) |> render_submit()
