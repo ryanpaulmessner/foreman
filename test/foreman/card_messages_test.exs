@@ -269,4 +269,11 @@ defmodule Foreman.CardMessagesTest do
 
     assert Requests.get(r.id).state == "pending"
   end
+
+  test "author names show Ryan or the session, never the actor word" do
+    assert CardMessages.author_name("ryan") == "Ryan"
+    assert CardMessages.author_name("pi · build") == "build"
+    assert CardMessages.author_name("claude · a · b") == "a · b"
+    assert CardMessages.author_name("pi") == "Agent"
+  end
 end

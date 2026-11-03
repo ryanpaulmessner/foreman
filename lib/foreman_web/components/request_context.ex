@@ -48,7 +48,7 @@ defmodule ForemanWeb.RequestContext do
         <%= if @source do %>
           Source: {@source.name} · {@source.harness} · {@request.repo_key} · {@request.bead_id}
         <% else %>
-          Source unknown<span :if={@request.session}> · {@request.session}</span> · {@request.repo_key} · {@request.bead_id} · {@request.actor}
+          Source unknown<span :if={@request.session}> · {@request.session}</span> · {@request.repo_key} · {@request.bead_id}
         <% end %>
       </p>
       <button
@@ -62,46 +62,36 @@ defmodule ForemanWeb.RequestContext do
       >
         Go to session
       </button>
-      <p
+      <ForemanWeb.StatusLine.status_line
         :if={@source && Map.get(@source, :ended_at)}
         id={@prefix <> "session-ended-" <> @request.id}
-        class="text-sm"
+        kind={:info}
       >
         This session has ended.
-      </p>
-      <p
+      </ForemanWeb.StatusLine.status_line>
+      <ForemanWeb.StatusLine.status_line
         :if={@focus == :window_gone}
         id={@prefix <> "session-closed-" <> @request.id}
-        role="status"
-        class="text-sm"
+        kind={:info}
       >
         The session window is closed.
-      </p>
+      </ForemanWeb.StatusLine.status_line>
       <div
         :if={
           @command_source && @focus != :window_gone &&
             (!@source || @focus in [:unattached, :tmux_unavailable])
         }
         id={@prefix <> "session-command-" <> @request.id}
-        class="space-y-2 text-sm"
-        role="status"
+        class="space-y-2"
       >
-        <p>
+        <ForemanWeb.StatusLine.status_line kind={:info}>
           {if @focus == :unattached, do: "No terminal is attached.", else: "Cannot focus the session."} Copy this command to your terminal.
-        </p>
-        <code class="block select-all break-all rounded bg-sunken p-2">
-          {Foreman.RequestSource.command(@command_source)}
-        </code>
-        <button
+        </ForemanWeb.StatusLine.status_line>
+        <ForemanWeb.CopyField.copy_field
           id={@prefix <> "copy-session-" <> @request.id}
-          type="button"
-          phx-hook=".CopySession"
-          phx-update="ignore"
-          data-command={Foreman.RequestSource.command(@command_source)}
-          class="rounded border border-base px-3 py-2 hover:bg-sunken"
-        >
-          Copy command
-        </button>
+          value={Foreman.RequestSource.command(@command_source)}
+          label="Command to focus the session"
+        />
       </div>
       <details :if={Foreman.Requests.withdrawable?(@request)} class="text-sm">
         <summary class="w-fit cursor-pointer py-2 text-foreground-softer">Withdraw</summary>
@@ -125,15 +115,6 @@ defmodule ForemanWeb.RequestContext do
         </.form>
       </details>
     </section>
-    <script :type={Phoenix.LiveView.ColocatedHook} name=".CopySession">
-      export default {
-        mounted() {
-          this.el.addEventListener("click", () => {
-            navigator.clipboard.writeText(this.el.dataset.command).catch(() => {})
-          })
-        }
-      }
-    </script>
     """
   end
 end

@@ -446,13 +446,22 @@ defmodule ForemanWeb.NeedsYouLive do
             </div>
           </details>
         </div>
+        <button
+          :if={@panel != :closed}
+          id="card-panel-scrim"
+          type="button"
+          tabindex="-1"
+          aria-label={if(@panel == :ticket, do: "Close ticket", else: "Close document")}
+          phx-click="close-panel"
+          class="bb-scrim lg:hidden"
+        />
         <aside
           :if={@panel != :closed}
           id="card-panel"
           aria-label={if(@panel == :ticket, do: "Ticket", else: "Document")}
           phx-window-keydown="close-panel"
           phx-key="Escape"
-          class="fixed inset-0 z-40 space-y-6 overflow-y-auto bg-base p-5 lg:sticky lg:inset-auto lg:top-6 lg:z-auto lg:max-h-[calc(100vh-3rem)] lg:rounded-xl lg:border lg:border-base lg:p-6 lg:shadow-sm"
+          class="bb-sheet space-y-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:rounded-xl lg:border lg:border-base lg:bg-base lg:p-6 lg:shadow-sm"
         >
           <%= if @panel == :ticket do %>
             <ForemanWeb.TicketDetail.content
@@ -465,9 +474,11 @@ defmodule ForemanWeb.NeedsYouLive do
           <% else %>
             <header class="flex items-center gap-3 text-xs text-foreground-softer">
               <span>{@panel_doc.repo}</span>
-              <span class="min-w-0 flex-1 break-all font-mono" title={@panel_doc.path}>
-                {@panel_doc.path}
-              </span>
+              <ForemanWeb.LongText.path
+                text={@panel_doc.path}
+                title={@panel_doc.path}
+                class="min-w-0 flex-1 font-mono"
+              />
               <a
                 :if={@panel == :document}
                 id="panel-open-viewer"
@@ -941,13 +952,8 @@ defmodule ForemanWeb.NeedsYouLive do
           </Button.button>
         </.form>
       </div>
-      <div
-        :if={@card != :ready}
-        id={@prefix <> "notice-" <> @request.id}
-        role="status"
-        class="mt-3 space-y-2 text-sm text-foreground-softer"
-      >
-        <p>
+      <div :if={@card != :ready} class="mt-3 space-y-2">
+        <ForemanWeb.StatusLine.status_line id={@prefix <> "notice-" <> @request.id} kind={:info}>
           {%{
             unattached: "No terminal is attached to this session's tmux server. Attach with:",
             window_gone: "Session window is gone.",
@@ -955,14 +961,13 @@ defmodule ForemanWeb.NeedsYouLive do
             prompt_busy: "The session is not at its prompt. Open the session to reply.",
             tmux_unavailable: "tmux is unavailable."
           }[@card]}
-        </p>
-        <code
+        </ForemanWeb.StatusLine.status_line>
+        <ForemanWeb.CopyField.copy_field
           :if={@card == :unattached and @request.facts["attach"]}
           id={@prefix <> "attach-" <> @request.id}
-          class="block select-all break-all rounded-md bg-sunken px-2 py-1 font-mono text-xs"
-        >
-          {@request.facts["attach"]}
-        </code>
+          value={@request.facts["attach"]}
+          label="Attach command"
+        />
       </div>
     </article>
     """
@@ -992,7 +997,7 @@ defmodule ForemanWeb.NeedsYouLive do
           request={@request}
           link={if(@prefix == "", do: :patch, else: :navigate)}
         />
-        <span>{@request.actor}<span :if={@request.session}> · {@request.session}</span></span>
+        <span :if={@request.session}>{@request.session}</span>
         <span class="ml-auto"><ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} /></span>
       </div>
       <ForemanWeb.RequestCard.push_facts
@@ -1076,7 +1081,7 @@ defmodule ForemanWeb.NeedsYouLive do
           request={@request}
           link={if(@prefix == "", do: :patch, else: :navigate)}
         />
-        <span>{@request.actor}<span :if={@request.session}> · {@request.session}</span></span>
+        <span :if={@request.session}>{@request.session}</span>
         <span class="ml-auto"><ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} /></span>
       </div>
       <ForemanWeb.RequestCard.agent_text
@@ -1150,13 +1155,15 @@ defmodule ForemanWeb.NeedsYouLive do
           rows="2"
           class="mt-2 block w-full rounded-lg border border-base bg-sunken px-3 py-2 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
         />
-        <.input
-          :if={@request.kind == "decision"}
-          field={@form[:always]}
-          id={@prefix <> "always-" <> @request.id}
-          type="checkbox"
-          label="Always"
-        />
+        <div :if={@request.kind == "decision"} class="bb-check">
+          <.input
+            field={@form[:always]}
+            id={@prefix <> "always-" <> @request.id}
+            type="checkbox"
+            label="Always use this answer"
+            class="size-4 shrink-0 accent-current"
+          />
+        </div>
         <div id={@prefix <> "decision-actions-" <> @request.id} class="flex gap-3">
           <Button.button
             type="submit"

@@ -72,7 +72,7 @@ defmodule ForemanWeb.CardConversation do
           class="space-y-2 border-b border-base pb-3 last:border-0"
         >
           <div class="flex items-center justify-between gap-3 text-xs text-foreground-softer">
-            <span>{if message.author == "ryan", do: "Ryan", else: message.author}</span>
+            <span data-card-message-author>{Foreman.CardMessages.author_name(message.author)}</span>
             <ForemanWeb.TicketDetail.timestamp at={message.inserted_at} />
           </div>
           <ForemanWeb.RequestCard.agent_text
@@ -115,20 +115,13 @@ defmodule ForemanWeb.CardConversation do
         <% else %>
           <h3 class="text-sm font-medium">Ask about this</h3>
         <% end %>
-        <%= if is_nil(@source) or @card != :ready do %>
-          <button
-            id={@prefix <> "card-question-retry-" <> @request.id}
-            type="button"
-            phx-click="retry"
-            phx-target={@myself}
-            class="mt-2 rounded-md border border-base px-3 py-2 text-sm transition hover:bg-sunken"
-          >
-            Try again
-          </button>
-          <p
+        <div :if={is_nil(@source) or @card != :ready} class="mt-2 space-y-2">
+          <ForemanWeb.StatusLine.status_line
             id={@prefix <> "card-question-unavailable-" <> @request.id}
-            role="status"
-            class="mt-2 text-sm text-foreground-softer"
+            kind={if(@source, do: :error, else: :info)}
+            retry="retry"
+            retry_id={@prefix <> "card-question-retry-" <> @request.id}
+            retry_target={@myself}
           >
             {cond do
               is_nil(@source) ->
@@ -143,20 +136,21 @@ defmodule ForemanWeb.CardConversation do
               true ->
                 "Cannot send to the session. The question was not sent."
             end}
-          </p>
-          <code
+          </ForemanWeb.StatusLine.status_line>
+          <ForemanWeb.CopyField.copy_field
             id={@prefix <> "card-question-copy-" <> @request.id}
-            class="mt-2 block select-all break-all rounded bg-sunken p-2 text-xs"
-          >
-            {"[card question #{@request.id}] #{@form[:text].value}"}
-          </code>
-          <div :if={@source} class="mt-2 text-sm">
+            value={"[card question #{@request.id}] #{@form[:text].value}"}
+            label="Question to copy"
+          />
+          <div :if={@source} class="space-y-2 text-sm">
             <p>Copy this command to your terminal.</p>
-            <code class="block select-all break-all rounded bg-sunken p-2 text-xs">
-              {Foreman.RequestSource.command(@source)}
-            </code>
+            <ForemanWeb.CopyField.copy_field
+              id={@prefix <> "card-question-command-" <> @request.id}
+              value={Foreman.RequestSource.command(@source)}
+              label="Command to focus the session"
+            />
           </div>
-        <% end %>
+        </div>
       </div>
     </section>
     """

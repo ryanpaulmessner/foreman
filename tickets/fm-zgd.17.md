@@ -41,3 +41,10 @@ The same audit, section (b): Layouts.app and bb-nav, board tokens, one shared st
 - [ ] Ryan picks an option on a board card after the critique.
 - [ ] Every finding above is fixed or listed with a reason it is out.
 - [ ] verify ui screenshots of Needs you and Answers at 1440 and 820, light and dark, before and after, on the push card.
+
+## Notes
+- 2026-11-03 user: 2026-11-03 options A compact card / B context on the side / C triage list built and critiqued: docs/specs/question-cards-mockups/ (question-cards-critique.md), published https://claude.ai/artifact/KkSwALbmBHC1TZg1vJf3jW. Layout card 3baa2f59 (recommend C). Coordinator calls, not asked: keep parsing What/Why now/Part of/From from card text (the board already lints these labels; a CLI field change needs a CLI rebuild); in C the next card opens after an answer. Still to ask after the layout pick: merge Wrong question into Decline with a reason?; add the 'Your answers' tab to Answers?
+- 2026-11-03 user: 2026-11-03: Ryan picked 'Live or ended' for the Asked by row (card 86cedfd3): the row shows '● live' or 'ended N min ago · answer goes to <coordinator>' with the Focus icon off when ended. No state badge.
+- 2026-11-03 user: 2026-11-03: Ryan picked C: triage list (card 3baa2f59). Pending cards are rows; one open at a time in A's layout; success line then the next card opens; request drawer uses the same rows; Answers gets tabs Saved answers / Your answers / Always rules (the Your answers tab is part of C, so no separate card).
+- 2026-11-03 user: 2026-11-03 coordinator call: context source (critique open question 2) = the board parses What / Why now / Part of / From from the card text. The ask lint already requires those lines, so the parse is reliable; no new CLI fields. After answering in C the next card opens by itself (part of C's pick). Negative actions asked on card ae840da9.
+- 2026-11-03 claude: 2026-11-03: Ryan picked 'Keep three, Decline first' (card ae840da9): Decline is a button next to Answer; Wrong question and Withdraw are small text actions at the right end of the footer, each with its reason box.

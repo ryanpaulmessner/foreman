@@ -2,7 +2,7 @@
 id: fm-9mm.8
 title: "Launch an epic coordinator from the board: where, what it asks, what it starts"
 type: decision
-status: open
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.1","fm-9mm.5"]
@@ -11,10 +11,14 @@ supersedes: []
 discovered_from: null
 labels: ["wayfinder:grilling"]
 created: 2026-11-01
-closed: null
-close_reason: null
+closed: 2026-11-03
+close_reason: "Decided: one-click launch with defaults on epic row and page (card e11bb1cd). Built in fm-9mm.18."
 ---
 
 ## Question
 
 Absorbs fm-3c3.8. Decide where Launch epic coordinator lives (epic page, Sessions page, both), what it asks before launch (epic, harness, model, workdir, fresh or resume), what it starts (window name equal to the session name, registration, parent = main coordinator), and what happens if one already runs for that epic. Uses the identity model and the statechart.
+
+## Notes
+- 2026-11-03 user: 2026-11-03 coordinator calls: Launch lives on the epic row and the epic page (fm-3c3.8); Sessions page shows dead epic coordinators with Resume / Start fresh from the detail-page controls, no separate launcher. Window = epic id in the project's tmux session on -L foreman, parent = main coordinator, builds in pane mode. Live coordinator for the epic -> Focus instead of Launch (one live session per name). Form vs one click asked on card e11bb1cd.
+- 2026-11-03 claude: 2026-11-03: Ryan picked 'One click, defaults' (card e11bb1cd): Launch starts at once with Claude, the main coordinator's model, the repo's main checkout, a fresh conversation. No form. Other settings: start by hand.

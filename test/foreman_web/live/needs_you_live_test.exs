@@ -52,7 +52,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     refute has_element?(view, "#context-#{request.id} h2")
     assert has_element?(view, "#context-#{request.id}", "One-off")
     assert has_element?(view, "#source-#{request.id}", "Source unknown")
-    assert has_element?(view, "#copy-session-#{request.id}[data-command]")
+    assert has_element?(view, ~s(#copy-session-#{request.id} input[value^="tmux "][readonly]))
     assert has_element?(view, "#withdraw-#{request.id}")
 
     view
@@ -104,8 +104,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
 
     assert has_element?(
              view,
-             "#session-command-#{request.id} code",
-             "tmux select-window -t '%99999998'"
+             ~s(#session-command-#{request.id} input[value^="tmux select-window -t '%99999998'"])
            )
   end
 
@@ -152,11 +151,10 @@ defmodule ForemanWeb.NeedsYouLiveTest do
 
       assert has_element?(
                view,
-               "##{prefix}session-command-#{request.id} code",
-               "tmux select-window -t '%99999999'"
+               ~s(##{prefix}session-command-#{request.id} input[value^="tmux select-window -t '%99999999'"])
              )
 
-      assert has_element?(view, "##{prefix}copy-session-#{request.id}[data-command]")
+      assert has_element?(view, "##{prefix}copy-session-#{request.id}[phx-hook=CopyField]")
     end
   end
 
@@ -435,7 +433,13 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       refute has_element?(view, "#notice-#{request.id}")
       view |> element("#open-#{request.id}") |> render_click()
       assert has_element?(view, "#notice-#{request.id}", "No terminal is attached")
-      assert has_element?(view, "#attach-#{request.id}", "attach -t")
+      assert has_element?(view, "#notice-#{request.id}.bb-status-info")
+
+      assert has_element?(
+               view,
+               ~s(#attach-#{request.id}[phx-hook=CopyField] input[value*="attach -t"])
+             )
+
       refute has_element?(view, "#session-command-#{request.id}")
       assert Requests.get(request.id).state == "pending"
 

@@ -14,6 +14,30 @@ html[data-theme=light] { color-scheme: light; }
 html[data-theme=dark] { color-scheme: dark; }
 body { margin: 0; background: var(--background-base); }
 .bb-panel { border: 1px solid var(--border-base); border-radius: 10px; background: var(--surface); padding: 16px; box-shadow: var(--shadow-base); }
+.bb-status { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--border-base); border-radius: 10px; padding: 9px 12px; font-size: 13px; line-height: 1.5; background: var(--background-base); color: var(--foreground); }
+.bb-status-success { background: var(--success-soft); border-color: color-mix(in oklab, var(--success) 55%, transparent); }
+.bb-status-error { background: var(--danger-soft); border-color: color-mix(in oklab, var(--danger) 55%, transparent); }
+.bb-status-info { background: var(--background-sunken); }
+.bb-status-icon { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+.bb-status-success .bb-status-icon { color: var(--success); }
+.bb-status-error .bb-status-icon { color: var(--danger); }
+.bb-status-info .bb-status-icon { color: var(--foreground-softer); }
+.bb-status-body { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.bb-status-action { flex: none; margin-left: auto; }
+.bb-toast { width: min(24rem, calc(100vw - 40px)); box-shadow: var(--shadow-base); cursor: pointer; }
+.bb-copy { display: flex; gap: 6px; min-width: 0; align-items: center; }
+.bb-copy-value { min-width: 0; flex: 1; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-base); background: var(--background-sunken); color: var(--foreground); font-size: 12px; text-overflow: ellipsis; }
+.bb-copy-value:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
+.bb-copy-idle, .bb-copy-done { display: inline-flex; align-items: center; gap: 4px; }
+.bb-copy-done, .bb-copy[data-copied] .bb-copy-idle { display: none; }
+.bb-copy[data-copied] .bb-copy-done { display: inline-flex; color: var(--success); }
+.bb-check .label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--foreground-soft); cursor: pointer; }
+.bb-path { overflow-wrap: anywhere; word-break: normal; }
+.bb-path-part { display: inline-block; max-width: 100%; }
+.bb-scrim { position: fixed; inset: 0; z-index: 40; background: color-mix(in oklab, black 35%, transparent); }
+@media (width < 64rem) {
+  .bb-sheet { position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(460px, calc(100% - 96px)); overflow-y: auto; padding: 18px 20px; background: var(--background-base); border-left: 1px solid var(--border-base); box-shadow: var(--shadow-base); }
+}
 .bb-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--foreground-softer); }
 .bb-nav { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-radius: 8px; font-weight: 500; transition: background .15s; }
 .bb-nav:hover, .bb-theme:hover { background: var(--background-accent); }

@@ -133,14 +133,9 @@ defmodule ForemanWeb.RequestDrawer do
           Open full page
         </.link>
       </header>
-      <p
-        :if={@error}
-        id="drawer-error"
-        role="alert"
-        class="rounded-lg border border-base bg-sunken p-3 text-sm"
-      >
+      <ForemanWeb.StatusLine.status_line :if={@error} id="drawer-error" kind={:error}>
         {@error}
-      </p>
+      </ForemanWeb.StatusLine.status_line>
       <div id="drawer-requests" phx-update="stream" class="space-y-5">
         <div
           id="drawer-empty"
