@@ -41,3 +41,6 @@ The same audit, section (b): Layouts.app and bb-nav, board tokens, one shared st
 - [ ] Ryan picks an option on a board card after the critique.
 - [ ] Every finding above is fixed or listed with a reason it is out.
 - [ ] verify ui screenshots of Needs you and Answers at 1440 and 820, light and dark, before and after, on the push card.
+
+## Notes
+- 2026-11-03 user: 2026-11-03 options A compact card / B context on the side / C triage list built and critiqued: docs/specs/question-cards-mockups/ (question-cards-critique.md), published https://claude.ai/artifact/KkSwALbmBHC1TZg1vJf3jW. Layout card 3baa2f59 (recommend C). Coordinator calls, not asked: keep parsing What/Why now/Part of/From from card text (the board already lints these labels; a CLI field change needs a CLI rebuild); in C the next card opens after an answer. Still to ask after the layout pick: merge Wrong question into Decline with a reason?; add the 'Your answers' tab to Answers?
