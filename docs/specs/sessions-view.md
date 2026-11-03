@@ -142,7 +142,7 @@ Tickets follow this order. Each step ships on its own and leaves the board worki
     - Unknown: `The board does not know which session asked this.` and a link "Find the session" to `/sessions`. No tmux command at load.
     - Role: `main coordinator`, `epic coordinator`, `coordinator`, or `build under <coordinator>`. The name links to `/sessions/:id`.
     - This step ships the row component and its data; fm-zgd.17 places it in its new card layout. If fm-zgd.17 has not landed, the row replaces the "Source" line and "Go to session" button on today's card (agent call).
-22. **Every source link goes to `/sessions/:id`** (user, charting). The card name link, the request drawer, the ticket panel Sessions tab (rows become: state badge, name link, role, last seen; the field dump moves to Details, audit A8; empty: `No sessions for this ticket.`) and the epic page session line. The Initiatives coordinator strip shows the shared badge, the name link and the Focus icon; its Relaunch and Start fresh move to the detail page (agent call, audit A6; see Open for Ryan).
+22. **Every source link goes to `/sessions/:id`** (user, charting). The card name link, the request drawer, the ticket panel Sessions tab (rows become: state badge, name link, role, last seen; the field dump moves to Details, audit A8; empty: `No sessions for this ticket.`) and the epic page session line. The Initiatives coordinator strip shows the shared badge, the name link and the Focus icon; its Relaunch and Start fresh move to the detail page (user, card 06a13e91; audit A6).
 
 ### Tree (step 3)
 
@@ -251,7 +251,6 @@ Seams, highest first; these are the board's existing seams:
 - Adding any dependency (the ANSI converter is board code).
 - Building the Claude "another model" control before Ryan answers the check card (Decision 19).
 - Any text the board types into a pane other than Continue, Send message, notes and the relaunch note.
-- Removing the Initiatives coordinator controls if Ryan says no to that item below.
 
 ## Left to the builder
 
@@ -265,7 +264,9 @@ Seams, highest first; these are the board's existing seams:
 
 ## Open for Ryan
 
-1. **Initiatives coordinator controls.** Decision 22 moves Relaunch and Start fresh from the Initiatives strip to the main coordinator's detail page and leaves the badge, name link and Focus icon. Recommended: yes; the audit (A6) found all three buttons on with equal weight when the coordinator had ended. Asked on card 06a13e91.
+None.
+
+Decided by Ryan before approval: **Initiatives coordinator controls: move them** (card 06a13e91). Decision 22 holds: the Initiatives strip keeps the badge, name link and Focus icon; Relaunch and Start fresh move to the main coordinator's detail page.
 
 Settled by the coordinator before approval (agent calls):
 
