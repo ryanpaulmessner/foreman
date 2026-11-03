@@ -1,7 +1,7 @@
 defmodule Foreman.Forge.GitHub do
   @moduledoc "Bounded GraphQL reads and head-guarded REST merge commits. Never deletes branches."
   @behaviour Foreman.Forge
-  @fields "number title body headRefName baseRefName headRefOid isDraft mergeable mergeStateStatus url state commits(last:1) { nodes { commit { statusCheckRollup { state } } } }"
+  @fields "number title body createdAt headRefName baseRefName headRefOid isDraft mergeable mergeStateStatus url state commits(last:1) { nodes { commit { statusCheckRollup { state } } } }"
 
   @impl true
   def list(remote, opts \\ []) do
@@ -172,7 +172,8 @@ defmodule Foreman.Forge.GitHub do
       "mergeable" => String.downcase(pr["mergeable"]),
       "merge_state" => pr["mergeStateStatus"],
       "url" => pr["url"],
-      "state" => String.downcase(pr["state"])
+      "state" => String.downcase(pr["state"]),
+      "created_at" => if(is_binary(pr["createdAt"]), do: pr["createdAt"])
     }
   end
 

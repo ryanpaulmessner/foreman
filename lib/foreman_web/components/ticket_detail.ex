@@ -522,9 +522,16 @@ defmodule ForemanWeb.TicketDetail do
     <article id={@id} data-outcome={@event.outcome} class="border-b border-base py-3 text-xs">
       <div class="flex flex-wrap items-center gap-2">
         <span class="font-mono font-medium">{@event.event}</span>
-        <span>{@event.from_stage || "—"} → {@event.to_stage}</span>
+        <span :if={@event.to_stage}>{@event.from_stage || "—"} → {@event.to_stage}</span>
         <Badge.badge :if={@event.outcome == "invalid"} color="danger" data-history-outcome="refused">
           Refused
+        </Badge.badge>
+        <Badge.badge
+          :if={@event.outcome in ["skipped", "ownerless"]}
+          color="warning"
+          data-history-outcome="not-delivered"
+        >
+          Not delivered
         </Badge.badge>
       </div>
       <div class="mt-1 text-foreground-softer">
@@ -609,6 +616,9 @@ defmodule ForemanWeb.TicketDetail do
     [
       {"title", "Title"},
       {"window", "Session"},
+      {"coordinator", "Coordinator"},
+      {"owner", "Coordinator"},
+      {"reason", "Reason"},
       {"branch", "Branch"},
       {"brief", "Brief"},
       {"brief_path", "Brief"},

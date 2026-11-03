@@ -29,6 +29,8 @@ defmodule Foreman.Agent do
               |> Map.put("session", params["session"]),
             else: payload
 
+        payload = if event == :dispatch, do: put_dispatching_coordinator(payload), else: payload
+
         with :ok <- validate_target(repo, event, payload) do
           unless event == :create, do: ensure_entity({repo, id})
           result = Overlay.apply_event({repo, id}, {event, payload}, %{actor: actor})
@@ -37,6 +39,30 @@ defmodule Foreman.Agent do
         end
     end
   end
+
+  defp put_dispatching_coordinator(%{"coordinator" => name} = payload)
+       when is_binary(name) and name != "",
+       do: payload
+
+  defp put_dispatching_coordinator(%{"coordinator_pane" => pane} = payload)
+       when is_binary(pane) do
+    name =
+      Repo.one(
+        from s in "sessions",
+          where:
+            s.repo_key == "__foreman__" and s.bead_id == "registered" and s.window == ^pane and
+              is_nil(s.ended_at),
+          order_by: [desc: s.last_seen_at],
+          limit: 1,
+          select: fragment("?->>'session'", s.details)
+      )
+
+    if name && name != payload["session"],
+      do: Map.put(payload, "coordinator", name),
+      else: payload
+  end
+
+  defp put_dispatching_coordinator(payload), do: payload
 
   defp validate_target(repo, :ticket, payload) do
     target = payload["beads_epic_id"]
