@@ -2,7 +2,7 @@
 id: fm-fdw
 title: "Waiting without a card: split by who acts, a working button per row, design pass"
 type: feature
-status: in_progress
+status: closed
 priority: 2
 parent: null
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: ["ux"]
 created: 2026-11-02
-closed: null
-close_reason: null
+closed: 2026-11-03
+close_reason: "PR #6 merged (b8508fb), deployed 2026-11-03: merge list on Needs you, coordinator close-out notes (close_out_nags), list fixes, Recent outcomes stays open. Tests 986/26 env-only failures vs base 27."
 ---
 
 Ryan 2026-11-02: the 'Waiting on you without a card' section on Needs you does not work and has no design.
