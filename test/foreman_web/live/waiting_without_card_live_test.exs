@@ -1,11 +1,9 @@
 defmodule ForemanWeb.WaitingWithoutCardLiveTest do
   use ForemanWeb.ConnCase, async: false
   import Phoenix.LiveViewTest
-  alias Foreman.{Overlay, Repo, Requests}
+  alias Foreman.{CloseOutNags, Overlay, Repo, Requests}
 
-  test "reports, human-merge PRs and shared decision blockers show their next steps", %{
-    conn: conn
-  } do
+  setup do
     Repo.insert_all("board_config", [
       %{
         id: 1,
@@ -31,93 +29,87 @@ defmodule ForemanWeb.WaitingWithoutCardLiveTest do
         issue_type: "task",
         status: "open",
         dependencies: [%{depends_on_id: "s-3", type: "blocks"}]
-      }
+      },
+      %{id: "s-5", title: "Branch work", issue_type: "task", status: "open"}
     ]
 
     Foreman.Beads.Projection.replace("sample", Enum.map_join(tickets, "\n", &Jason.encode!/1))
     Overlay.apply_event({"sample", "s-1"}, {:dispatch, %{window: "build"}})
     Overlay.apply_event({"sample", "s-1"}, {:report, %{path: "/tmp/report.md"}})
-
-    Foreman.Forge.Store.replace("sample", "owner/repo", %{
-      "change_requests" => [
-        %{
-          "number" => 12,
-          "state" => "open",
-          "title" => "s-2 Release",
-          "body" => "s-2",
-          "url" => "https://github.com/owner/repo/pull/12"
-        }
-      ]
-    })
-
-    {:ok, view, _} = live(conn, "/needs-you")
-
-    assert has_element?(
-             view,
-             "#waiting-without-card a[href='/needs-you?ticket=sample%3As-1']",
-             "Review the report"
-           )
-
-    assert has_element?(
-             view,
-             "#waiting-without-card a[href='https://github.com/owner/repo/pull/12']",
-             "Review and merge on GitHub"
-           )
-
-    assert has_element?(
-             view,
-             "#waiting-without-card a[href='/needs-you?ticket=sample%3As-3']",
-             "Answer the decision"
-           )
-
-    assert has_element?(view, "#waiting-without-card p", "Blocks s-4")
-
-    view
-    |> element("#waiting-without-card a[href='/needs-you?ticket=sample%3As-3']")
-    |> render_click()
-
-    assert_patch(view, "/needs-you?ticket=sample%3As-3")
-    assert has_element?(view, "#card-panel", "Choose a date")
+    Overlay.apply_event({"sample", "s-5"}, {:dispatch, %{window: "b5", branch: "feat/five"}})
+    :ok
   end
 
-  test "waiting section links work and refreshes when a card covers it", %{conn: conn} do
-    Repo.insert_all("board_config", [
-      %{
-        id: 1,
-        config: %{"repos" => [%{"key" => "sample", "enabled" => true, "forge" => "github"}]},
-        source: "test",
-        discovered: [],
-        loaded_at: DateTime.utc_now()
-      }
-    ])
+  defp forge(prs),
+    do: Foreman.Forge.Store.replace("sample", "owner/repo", %{"change_requests" => prs})
 
-    Foreman.Beads.Projection.replace(
-      "sample",
-      Jason.encode!(%{id: "s-1", title: "Change", issue_type: "task", status: "open"})
-    )
+  defp pr(number, title, branch, opts \\ []) do
+    %{
+      "number" => number,
+      "state" => "open",
+      "title" => title,
+      "body" => Keyword.get(opts, :body, ""),
+      "source_branch" => branch,
+      "url" => "https://github.com/owner/repo/pull/#{number}",
+      "created_at" => DateTime.to_iso8601(DateTime.add(DateTime.utc_now(), -2 * 3600))
+    }
+  end
 
-    Overlay.apply_event({"sample", "s-1"}, {:commit, %{sha: "abc"}}, %{actor: "claude"})
+  test "Needs you lists only PRs to merge, each with an Open on GitHub button", %{conn: conn} do
+    forge([pr(12, "s-2 Release", "release", body: "s-2"), pr(463, "Five", "feat/five")])
     {:ok, view, _} = live(conn, "/needs-you")
 
-    assert has_element?(
-             view,
-             "#waiting-without-card a[href='/needs-you?ticket=sample%3As-1']",
-             "Request a push"
-           )
+    assert has_element?(view, "#merge-list-heading", "Pull requests for you to merge")
+    assert has_element?(view, "#merge-list-heading", "2")
+
+    button =
+      "#merge-list a#merge-open-sample-12[href='https://github.com/owner/repo/pull/12'][target='_blank'][rel~='noopener']"
+
+    assert has_element?(view, button, "Open on GitHub")
+    assert has_element?(view, "#merge-list a#merge-open-sample-463", "Open on GitHub")
+    assert has_element?(view, "#merge-list li", "s-5")
+    assert has_element?(view, "#merge-list li", "#463")
+    assert has_element?(view, "#merge-list li time[title]", "2 h ago")
+
+    # Every link in a row is its action; stuck agent work and decisions are not listed.
+    rows = view |> render() |> LazyHTML.from_fragment() |> LazyHTML.query("#merge-list a")
+    assert Enum.count(rows) == 2
+    refute render(view) =~ "Review the report"
+    refute render(view) =~ "Choose a date"
+    refute has_element?(view, "#waiting-without-card")
+  end
+
+  test "the section is hidden when empty and refreshes when a card covers a PR", %{conn: conn} do
+    {:ok, view, _} = live(conn, "/needs-you")
+    refute has_element?(view, "#merge-list-section")
+
+    forge([pr(12, "s-2 Release", "release", body: "s-2")])
+    send(view.pid, :reconcile)
+    assert has_element?(view, "#merge-list a", "Open on GitHub")
 
     {:ok, r} =
-      Requests.ask({"sample", "s-1"}, "decision", %{
-        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Push now?"})
+      Requests.ask({"sample", "s-2"}, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Merge now?"})
       })
 
     send(view.pid, :reconcile)
-    refute has_element?(view, "#waiting-without-card a")
-    assert has_element?(view, "#waiting-without-card-empty", "No items")
-    Requests.resolve(r.id, :wrong_question, %{"note" => "Use a push card"})
+    refute has_element?(view, "#merge-list-section")
+    Requests.resolve(r.id, :wrong_question, %{"note" => "Merge on GitHub"})
     send(view.pid, :reconcile)
-    assert has_element?(view, "#waiting-without-card a", "Request a push")
-    Overlay.apply_event({"sample", "s-1"}, :abandon)
-    send(view.pid, :reconcile)
-    refute has_element?(view, "#waiting-without-card a")
+    assert has_element?(view, "#merge-list-heading", "1")
+  end
+
+  test "stuck agent work is not on Needs you; its notes show on the ticket history", %{conn: conn} do
+    CloseOutNags.run(
+      now: DateTime.add(DateTime.utc_now(), 31 * 60, :second),
+      deliver: fn _, _ -> flunk("no owner was recorded") end
+    )
+
+    {:ok, view, _} = live(conn, "/needs-you?ticket=sample%3As-1&tab=history")
+    refute has_element?(view, "#merge-list-section")
+    assert has_element?(view, "#ticket-history article", "note_to_coordinator")
+    assert has_element?(view, "#ticket-history [data-history-outcome='not-delivered']")
+    assert has_element?(view, "#ticket-history article", "no coordinator recorded on dispatch")
+    assert has_element?(view, "#ticket-history article", "foreman review s-1")
   end
 end

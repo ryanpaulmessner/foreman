@@ -2,7 +2,7 @@
 id: fm-9xi
 title: "Needs you cards explain themselves: what, part of, from, why now"
 type: feature
-status: open
+status: closed
 priority: 2
 parent: null
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-21
-closed: null
-close_reason: null
+closed: 2026-11-02
+close_reason: "Shipped: 86be83d on main (feat/board-clarity merged). Closed 2026-11-02 in the stale-item sweep (fm-fdw)."
 kind: internal
 ---
 

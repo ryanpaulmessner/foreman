@@ -2,7 +2,7 @@
 id: fm-49x.2
 title: "PR history and Shipped / On staging from git containment"
 type: feature
-status: in_progress
+status: closed
 priority: 2
 parent: fm-49x
 blocked_by: ["fm-49x.1"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-21
-closed: null
-close_reason: null
+closed: 2026-11-02
+close_reason: "Shipped: c437c81 on main (feat/week-pr-stages merged). Closed 2026-11-02 in the stale-item sweep (fm-fdw)."
 ---
 
 ## What to build

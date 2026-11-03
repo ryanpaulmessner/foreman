@@ -2,7 +2,7 @@
 id: fm-49x.1
 title: "This week page: worked tickets by kind and plain stage"
 type: feature
-status: open
+status: closed
 priority: 2
 parent: fm-49x
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-21
-closed: null
-close_reason: null
+closed: 2026-11-02
+close_reason: "Shipped: 4e18d73 and f8cd2a3 on main (feat/this-week-page merged). Closed 2026-11-02 in the stale-item sweep (fm-fdw)."
 ---
 
 ## What to build

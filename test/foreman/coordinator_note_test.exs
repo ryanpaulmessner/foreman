@@ -225,4 +225,50 @@ defmodule Foreman.CoordinatorNoteTest do
     refute_receive {:typed, _, _}
     refute_receive {:enter, _}
   end
+
+  test "a board note reaches only the named coordinator, or says why it cannot" do
+    for {name, pane} <- [{"owner", "%1"}, {"other", "%2"}, {"gone", "%3"}] do
+      {:ok, _} =
+        Foreman.SessionRegistry.register(%{
+          "name" => name,
+          "pane" => pane,
+          "workdir" => "/tmp",
+          "harness" => "claude"
+        })
+    end
+
+    Repo.update_all(from(s in "sessions", where: s.window == "%3"),
+      set: [ended_at: DateTime.utc_now()]
+    )
+
+    parent = self()
+
+    runner = fn "tmux", args, _ ->
+      case Enum.drop(args, 3) do
+        ["list-panes" | _] ->
+          {"%1\t@1\tsession\towner\t1\n%2\t@2\tsession\tother\t1\n", 0}
+
+        ["capture-pane", "-p", "-J", "-t", _] ->
+          {"───\n❯\n───", 0}
+
+        ["send-keys", "-t", pane, "-l", "--", text] ->
+          send(parent, {:typed, pane, text}) && {"", 0}
+
+        ["send-keys", "-t", _, "Enter"] ->
+          {"", 0}
+      end
+    end
+
+    assert :ok =
+             Foreman.CoordinatorNote.send_to("owner", "Review s-1", runner: runner, key_delay: 0)
+
+    assert_receive {:typed, "%1", "[foreman note from board] Review s-1"}
+    refute_receive {:typed, _, _}
+
+    assert {:error, :session_ended} =
+             Foreman.CoordinatorNote.send_to("gone", "x", runner: runner, key_delay: 0)
+
+    assert {:error, :not_registered} =
+             Foreman.CoordinatorNote.send_to("nobody", "x", runner: runner, key_delay: 0)
+  end
 end

@@ -91,7 +91,7 @@ defmodule Foreman.Drilldown do
               order_by: [l.epic_repo_key, l.epic_bead_id],
               select: %{repo: l.epic_repo_key, id: l.epic_bead_id}
           ),
-        history: Overlay.history(key),
+        history: ticket_history(key),
         allowed: Overlay.allowed_events(key),
         sessions:
           Repo.all(
@@ -126,6 +126,36 @@ defmodule Foreman.Drilldown do
       }
     end
   end
+
+  defp ticket_history(key) do
+    notes =
+      for note <- Foreman.CloseOutNags.history(key) do
+        %{
+          id: "note-#{note.id}",
+          event: "note_to_coordinator",
+          source: "board",
+          actor: "board",
+          from_stage: nil,
+          to_stage: nil,
+          outcome: note.result,
+          payload: %{"owner" => note.owner, "reason" => note.reason, "body" => note.text},
+          effects: [],
+          inserted_at: note.inserted_at
+        }
+      end
+
+    (Overlay.history(key) ++ notes)
+    |> Enum.with_index()
+    |> Enum.sort_by(fn {event, index} -> {sort_time(event.inserted_at), index} end)
+    |> Enum.map(&elem(&1, 0))
+  end
+
+  defp sort_time(%DateTime{} = time), do: DateTime.to_unix(time, :microsecond)
+
+  defp sort_time(%NaiveDateTime{} = time),
+    do: time |> DateTime.from_naive!("Etc/UTC") |> DateTime.to_unix(:microsecond)
+
+  defp sort_time(_), do: 0
 
   defp find_epic(epics, key) do
     Enum.find_value(epics, fn epic ->

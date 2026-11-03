@@ -2,7 +2,7 @@
 id: fm-5fq
 title: "Answers: a board page that keeps coordinator answers to Ryan's questions"
 type: feature
-status: open
+status: closed
 priority: 2
 parent: null
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-10-21
-closed: null
-close_reason: null
+closed: 2026-11-02
+close_reason: "Shipped: b176ca1 on main (feat/answers-page merged); Answers page is live. Closed 2026-11-02 in the stale-item sweep (fm-fdw)."
 kind: internal
 ---
 

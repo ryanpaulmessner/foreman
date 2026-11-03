@@ -21,6 +21,25 @@ defmodule Foreman.ForgeGitHubTest do
     assert Enum.find(snapshot["change_requests"], &(&1["number"] == 3))["state"] == "merged"
   end
 
+  test "PRs carry the time they were opened, when GitHub sends it" do
+    response =
+      update_in(fixture("form-engine.json"), ["data", "repository", "pullRequests", "nodes"], fn
+        [first | rest] -> [Map.put(first, "createdAt", "2026-11-01T10:00:00Z") | rest]
+      end)
+
+    Req.Test.stub(__MODULE__, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert Jason.decode!(body)["query"] =~ "createdAt"
+      Req.Test.json(conn, response)
+    end)
+
+    assert {:ok, %{"change_requests" => [first | rest]}} =
+             GitHub.list("owner/repo", token: "test", plug: {Req.Test, __MODULE__})
+
+    assert first["created_at"] == "2026-11-01T10:00:00Z"
+    assert Enum.all?(rest, &is_nil(&1["created_at"]))
+  end
+
   test "incomplete pagination, missing tracked PRs and GraphQL errors never publish partial data" do
     for response <- [
           put_in(
