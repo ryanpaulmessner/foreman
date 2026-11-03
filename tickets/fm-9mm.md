@@ -36,6 +36,7 @@ An approved spec (`tight-spec` format) and design pack (`design-pack`) for **Ses
 - Ticket text follows ASD-STE100 (simple technical English).
 - 2026-11-03 user: 2026-11-03: fm-9mm.7 closed - detail page is option B with A's round grouping; Continue stays on at a usage limit and the page needs a 'continue on another model' fallback (Ryan). Buttons size to their labels (Ryan saw label overflow in A's rail).
 - 2026-11-03 claude: 2026-11-03: Ryan: move Relaunch and Start fresh off the Initiatives strip to the main coordinator's detail page (card 06a13e91). Question cards spec approved (card 63a4319f).
+- 2026-11-03 claude: 2026-11-03: Ryan approved the Sessions spec (card cfb2bce5): docs/specs/sessions-view.md + docs/specs/sessions-view.design.md. Next: /to-tickets.
 
 ## Decisions so far
 
