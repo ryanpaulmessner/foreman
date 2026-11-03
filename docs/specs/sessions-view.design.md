@@ -1,8 +1,8 @@
 # Design pack: Sessions (live tree and session detail)
 
-Spec: not written yet (wayfinder map fm-9mm) · Drawn at: foreman 83066bb · Legend: green = added, amber = changed, red = removed
+Spec: `docs/specs/sessions-view.md` · Drawn at: foreman 83066bb (Data, State); Flows and UI at b342fa8 (no `lib/` change since 83066bb) · Legend: green = added, amber = changed, red = removed
 
-This pack grows ticket by ticket. The Data part comes from "Session identity: how every ask, build and coordinator records its own name and parent" (fm-9mm.1). The State, Flows and UI parts come from later tickets on the map.
+Parts and their sources: Data from "Session identity" (fm-9mm.1); State from the lifecycle statechart (fm-9mm.5); Flows from the controls and launch decisions (fm-9mm.7, fm-9mm.8); UI from the audit (fm-9mm.4), the tree (fm-9mm.6) and the detail page (fm-9mm.7).
 
 ## Data
 
@@ -141,7 +141,7 @@ How an ask finds its session: the CLI always sends `FOREMAN_SESSION` **and** `$T
 
 ## State
 
-Ticket: "Session lifecycle statechart: states, events and the three user-facing labels" (fm-9mm.5). The Proposed chart below is a **hand draft, not model-checked yet**. It is the input for `/statechart`, which Ryan runs.
+Ticket: "Session lifecycle statechart: states, events and the three user-facing labels" (fm-9mm.5). The Proposed tables below were model-checked with `/statechart` on 2026-11-02 (see Check). The full event table is spec Decision 7; this part keeps the states, labels, controls and rules, and the charts.
 
 ### Now
 
@@ -152,9 +152,9 @@ Three machines touch a session today. None of them covers a Pi build: a build ha
 - `Foreman.Stage` (the ticket, not the session). from: `docs/machines/stage.md`. `dispatched, building` = the build works; `reported, in_review` = the coordinator reviews it; `committed` and later = the build is finished.
 - The card's own focus result (`WaitingCard`: `ready, unattached, window_gone, prompt_changed, prompt_busy, tmux_unavailable`) is where today's error boxes come from. from: `docs/machines/waiting_card.md`.
 
-### Proposed (draft for /statechart)
+### Proposed
 
-One machine for every `agent_sessions` row, with `kind` as a guard. "Live" means the pane exists.
+One new declared `Foreman.Fsm` machine for every `agent_sessions` row, with `kind` as a guard. "Live" means the pane exists. `Foreman.SessionMachine` stays for the launch and park bookkeeping on `planning_sessions` and fires the matching event here (spec Decision 7).
 
 | State | Parent | Meaning | Comes from |
 | --- | --- | --- | --- |
@@ -189,6 +189,8 @@ Controls by state:
 | Stop | every live state | confirm names the session; the worktree is kept |
 | Resume | `parked`, `ended` | Claude: conversation id exists. Pi: conversation id, worktree and session file exist (fm-9mm.2) |
 | Relaunch build on this ticket | `ended` build without Resume | resumes the parent coordinator first if it is dead, then sends it the note (R8) |
+| Resume on `<model>` | `waiting.usage_limit`, Pi build with a fallback pair | added at spec time (fm-9mm.7 note); stop, save capture, resume with `--model`. Claude half waits on a builder check |
+| Start fresh | dead coordinator without Resume | new row, same name and parent; live builds move to it |
 
 Rules for `/statechart` to check:
 
@@ -201,6 +203,8 @@ Rules for `/statechart` to check:
 - R7 At most one live session has a given name.
 - R8 *(Ryan, 2026-11-02)* When a coordinator ends, its live builds keep running and stay under it in the tree with a "parent ended" note. Relaunch build on a dead build first resumes its coordinator, then sends it the note.
 - R9 *(Ryan, 2026-11-02)* When a session ends with a pending card, the card stays open and says the session ended. If the session can resume, answering resumes it first and then delivers the answer. If it cannot, the answer goes to its parent coordinator as a note with the question, and the card closes.
+- R10 Every dead build has Resume, Relaunch build, or is closed out (ticket stage committed or later). Checked in the model; not written in the first draft of this list.
+- R11 *(agent call at spec time, not model-checked)* Park and Stop close only the session's own pane, never its window. Today `SessionTmux.park/2` runs `kill-window` (session_tmux.ex:412-431), which would kill pane-mode builds in an epic coordinator's window and break R8. The model has no panes, so it cannot see this; the tmux integration test in the spec's Verification plan covers it.
 
 ### Check (statechart, 2026-11-02)
 
@@ -290,10 +294,347 @@ stateDiagram-v2
 ```
 
 
+
+### Proposed: coordinator session (hand-drawn from spec Decision 7)
+
+Drawn by hand from the spec's state table, at the label level. The coordinator half of `Sessions.tla` checked these paths (R1, R3 to R8); this drawing adds Start fresh and pane-only Park and Stop (R11), which the model did not have. Green = new compared with `Foreman.SessionMachine` today.
+
+```mermaid
+---
+title: "Coordinator session (proposed)"
+---
+stateDiagram-v2
+  classDef added fill:#e7f6ec,stroke:#2f9e55,color:#1d6b38
+  classDef changed fill:#fff4dc,stroke:#c98a00,color:#7a5300
+  [*] --> starting: launch or register
+  starting --> working: output changes
+  working --> idle: no output for 2 minutes
+  idle --> working: output changes
+  working --> waiting: asks, permission prompt or usage limit
+  idle --> waiting: asks, permission prompt or usage limit
+  waiting --> working: answered, prompt cleared or output after Continue
+  working --> parked: Park or idle timeout, not main
+  idle --> parked: Park or idle timeout, not main
+  working --> ended: Stop, or the pane closes
+  idle --> ended: Stop, or the pane closes
+  waiting --> ended: Stop, or the pane closes
+  parked --> starting: Resume, same conversation
+  ended --> starting: Resume, same conversation
+  ended --> fresh: Start fresh, no conversation id
+  fresh: new row, same name, builds move to it
+  class idle added
+  class waiting changed
+  class fresh added
+  class parked changed
+```
+
+Changes against today's `Foreman.SessionMachine` (session_machine.ex:26-91): `idle` is new (today `running` covers working and idle); `waiting` now has three reasons and a card from `foreman ask` enters it; Park is now a user control as well as the idle timeout, and closes the pane, not the window (R11); a window closed by hand ends the session here, where SessionMachine parks it; Start fresh makes a new row (D1: the id is the conversation id).
+
+### Proposed: pane reader (hand-drawn, not model-checked)
+
+The read-only output on the detail page (1 s) and the grid (3 s or 30 s) is a stateful job, so it sits on a declared machine (house rule). One instance per open page.
+
+```mermaid
+---
+title: "Pane reader (proposed, one per open page)"
+---
+stateDiagram-v2
+  classDef added fill:#e7f6ec,stroke:#2f9e55,color:#1d6b38
+  [*] --> off
+  off --> polling: page shows a live pane, or grid cards are on screen
+  polling --> polling: tick, send only when the hash changes
+  polling --> paused: tab hidden, or output tab not shown
+  paused --> polling: tab shown again
+  polling --> tmux_error: capture fails
+  tmux_error --> polling: retry succeeds, or Try again now
+  polling --> off: pane gone, or page closed
+  paused --> off: page closed
+  tmux_error --> off: page closed
+  class off added
+  class polling added
+  class paused added
+  class tmux_error added
+```
+
+Guards: the detail page reads one pane at 1 s; the grid reads only visible cards, 3 s for working and waiting, 30 s for idle, never dead ones, in one tmux call per tick. Events come from the page hook (visible ids, `visibilitychange`) and from the tick result.
+
 ## Flows
 
-Pending: drawn when the controls and launch tickets close (fm-9mm.7, fm-9mm.8).
+### Now
+
+from: `needs_you_live.ex:138-148` (`resolve/1` for `go-session`), `request_source.ex:8-60` (`for_request/2`, `focus/2`), `request_context.ex:47-105` (source line, button, copy box); launch from `planning_session.ex:4-30`, `sessions.ex:170-241`, `session_tmux.ex:369-391` and `:480-500`.
+
+Go to session today. The card learns the link is broken only after the click.
+
+```mermaid
+sequenceDiagram
+  actor Ryan
+  participant Card as Needs you card
+  participant LV as NeedsYouLive
+  participant RS as RequestSource
+  participant DB as Postgres
+  participant T as tmux
+  Ryan->>Card: click Go to session
+  Card->>LV: go-session event
+  LV->>RS: for_request(request)
+  RS->>DB: sessions where details.session equals request.session
+  alt no row and no live tmux name
+    RS-->>LV: nil
+    LV-->>Card: source unknown, raw tmux command to copy
+  else row found
+    RS->>T: list-panes -a, then select the pane
+    alt window closed or no client
+      T-->>RS: error
+      RS-->>LV: WaitingCard window_gone or unattached
+      LV-->>Card: The session window is closed, or copy box
+    else
+      T-->>Ryan: terminal shows the pane
+    end
+  end
+```
+
+Launch today: only idea and draft epics and unplanned tickets are launchable (`sessions.ex:170-175`); no `--model` flag is passed (`session_tmux.ex:480-500`); the window is named by the ticket id on `-L foreman`; no row records a parent.
+
+### Proposed
+
+Every state event named in the spec appears below. Machine events are written as "AgentSession: event". New tables: `agent_sessions` is written in flows 1 and 3 and read in all; `session_captures` is written in flow 4 and read in flow 2.
+
+**1. A build asks a question (identity, D2).**
+
+```mermaid
+sequenceDiagram
+  participant B as Pi build pane
+  participant CLI as foreman ask
+  participant API as Board agent API
+  participant Ctx as Sessions context
+  participant DB as Postgres
+  B->>CLI: foreman ask, with FOREMAN_SESSION and TMUX_PANE
+  CLI->>API: ask request with name and pane
+  API->>Ctx: resolve source
+  Ctx->>DB: live agent_sessions by name
+  alt no name match
+    Ctx->>DB: live agent_sessions by pane id
+  end
+  alt match
+    Ctx->>DB: insert approval_request with agent_session_id
+    Ctx->>DB: AgentSession: asked, state waiting.question
+  else no match
+    Ctx->>DB: insert approval_request, agent_session_id null
+    API-->>CLI: accepted with warning
+    CLI-->>B: The board does not know this session
+  end
+```
+
+**2. Open a session from a card (live or dead).**
+
+```mermaid
+sequenceDiagram
+  actor Ryan
+  participant Card as Card source row
+  participant D as SessionLive detail
+  participant Ctx as Sessions context
+  participant R as Pane reader
+  participant T as tmux
+  participant DB as Postgres
+  Note over Card: row already says live or ended, before the click
+  Ryan->>Card: click the session name
+  Card->>D: navigate to /sessions/id
+  D->>Ctx: get session, timeline, open cards
+  Ctx->>DB: agent_sessions, events, requests by agent_session_id
+  D->>D: state function gives label, second line, controls
+  alt pane is live
+    D->>R: viewer_on
+    loop every 1 s while shown
+      R->>T: capture-pane -p -e -J -S -200 on this pane
+      R-->>D: push only when the hash changes
+    end
+  else pane is gone
+    D->>DB: last session_captures row
+    D-->>Ryan: dead view, saved output, Resume or Relaunch build
+  end
+```
+
+**3. One-click launch of an epic coordinator.**
+
+```mermaid
+sequenceDiagram
+  actor Ryan
+  participant E as Epic row or epic page
+  participant Ctx as Sessions context
+  participant DB as Postgres
+  participant T as tmux -L foreman
+  Ryan->>E: Launch coordinator
+  E->>Ctx: launch epic
+  Ctx->>DB: live agent_sessions with name equal to the epic id
+  alt a live coordinator exists
+    Ctx->>T: focus its pane
+    Ctx-->>E: button reads Focus
+  else none live
+    Ctx->>DB: main coordinator row, for parent and model
+    Ctx->>DB: insert planning_sessions and agent_sessions in one transaction
+    Ctx->>DB: AgentSession: launch, state starting
+    Ctx->>T: new-window named by the epic id, claude with session-id and the main model
+    T-->>Ctx: window id and pane id
+    Ctx->>DB: save pane_id
+    Ctx-->>E: button reads Focus, name links to the session page
+  end
+  Note over T: epic coordinator dispatches builds in pane mode, each registers with parent set to it
+```
+
+**4. Stop, then Resume or Relaunch build (R5, R8, R11).**
+
+```mermaid
+sequenceDiagram
+  actor Ryan
+  participant D as Detail page
+  participant Ctx as Sessions context
+  participant T as tmux
+  participant DB as Postgres
+  participant C as Parent coordinator
+  Ryan->>D: Stop, then Stop session in the in-page confirm
+  D->>Ctx: stop
+  Ctx->>T: capture-pane on this pane
+  Ctx->>DB: session_captures, reason stop
+  Ctx->>T: kill-pane on this pane only
+  Ctx->>DB: AgentSession: stop, state ended
+  Note over T: worktree and branch stay, other panes in the window keep running
+  alt resumable
+    Ryan->>D: Resume
+    Ctx->>T: open pane, pi session-id or claude resume
+    Ctx->>DB: AgentSession: resume, state starting, new pane_id
+  else build not resumable
+    Ryan->>D: Relaunch build on this ticket
+    opt parent is dead
+      Ctx->>T: resume the parent conversation
+      Ctx->>DB: AgentSession: resume on the parent
+    end
+    Ctx->>C: note, relaunch the build for the ticket on the branch
+    Note over DB: the dead row stays ended, the new build registers its own row
+  end
+  alt Ctx call fails
+    Ctx-->>D: Could not stop the session, reason, nothing changed
+  end
+```
+
+**5. Usage limit: Continue, or resume on another model (Pi build).**
+
+```mermaid
+sequenceDiagram
+  actor Ryan
+  participant C as Coordinator
+  participant Ctx as Sessions context
+  participant D as Detail page
+  participant T as tmux
+  participant DB as Postgres
+  C->>Ctx: pi-wait exits LIMITED, session_waiting for the build row
+  Ctx->>DB: AgentSession: usage_limit, request with provider and reset time
+  D-->>Ryan: Waiting on you, resets at a time, Continue and Resume on a model
+  alt Continue
+    Ryan->>D: Continue
+    Ctx->>T: send-keys continue and Enter to the build pane only
+    Note over Ctx: AgentSession: continue, state stays until output changes
+    T-->>Ctx: output changes
+    Ctx->>DB: AgentSession: output_changed, state working, clear request
+  else Resume on another model
+    Ryan->>D: Resume on the fallback model
+    Ctx->>T: capture, then stop the Pi process
+    Ctx->>DB: session_captures, reason stop
+    Ctx->>T: pi with the same session-id and the new model, in its worktree
+    Ctx->>DB: AgentSession: resume_on_model, state starting, model changed
+  end
+```
+
+**6. Answer a card whose session ended (R9).**
+
+```mermaid
+sequenceDiagram
+  actor Ryan
+  participant N as Needs you
+  participant Ctx as Sessions context
+  participant DB as Postgres
+  participant T as tmux
+  participant C as Parent coordinator
+  Ryan->>N: answer the card
+  N->>Ctx: deliver the answer
+  Ctx->>DB: agent_sessions row for the card
+  alt session is live
+    Ctx->>T: deliver to the pane, as today
+  else dead and resumable
+    Ctx->>T: resume the session
+    Ctx->>DB: AgentSession: resume
+    Ctx->>T: deliver the answer
+  else dead and not resumable
+    Ctx->>C: note with the question and the answer
+    Ctx->>DB: close the card
+  end
+  Ctx->>DB: AgentSession: last_card_closed when no card is open
+```
+
+**7. The tree and grid stay current.**
+
+```mermaid
+sequenceDiagram
+  participant M as SessionMonitor, every 3 s
+  participant T as tmux
+  participant Ctx as Sessions context
+  participant DB as Postgres
+  participant P as Sessions page
+  M->>T: one list-panes call for live panes and activity
+  M->>Ctx: reconcile
+  Ctx->>DB: AgentSession: output_changed, quiet, pane_gone, exited
+  Ctx-->>P: sessions_changed broadcast
+  P->>P: state function, re-render strip and tree
+  opt Grid view
+    P->>Ctx: visible card ids from the page hook
+    Ctx->>T: one tmux call with capture-pane for each visible live pane
+    Ctx-->>P: changed cards only
+  end
+  alt tmux does not answer
+    Ctx-->>P: tmux error, last read time
+  end
+```
 
 ## UI
 
-Input: "UX audit of the current board" (fm-9mm.4), `docs/specs/sessions-view-audit/ux-audit.md`. Pending: "Sessions tree page" (fm-9mm.6), "Session detail page" (fm-9mm.7).
+### Now
+
+from: the audit `docs/specs/sessions-view-audit/ux-audit.md` (fm-9mm.4), live board at 1440 and 820, with file:line for each finding. In short:
+
+- Go to session is a button that fails after the click (`request_context.ex:54-105`); the session shows three times on a card (`request_context.ex:47-53`, `needs_you_live.ex:970`); "Source unknown" shows a raw tmux command at load; "This session has ended." has no time and no next step (`request_context.ex:65-71`).
+- Five copy-command patterns, none says Copied (A5).
+- Initiatives coordinator strip: raw state atom, Focus on after the session ended, three equal buttons (`initiatives_live.ex:362-410`).
+- Ticket panel Sessions tab is a field dump (`ticket_detail.ex:464-485`).
+- Three state-colour maps (`initiatives_live.ex:313`, `epic_live.ex:335`, `ticket_detail.ex:251`).
+- No page for sessions and no "not connected" signal (`layouts.ex:180-195`).
+
+### Mockups (built from the board's compiled CSS and markup, critiqued)
+
+| Mockup | What it shows | Pick |
+|---|---|---|
+| Sessions tree, `sessions-view-mockups/sessions-tree.html`, published https://claude.ai/artifact/4UCbQNQ3NG55L29M7cJ8WD | options A stack cards, B grouped panels, C outline with a Waiting strip, D all-sessions grid; states live, ended, empty, loading, tmux down, offline; 1440 and 820; light and dark | **C** (Tree, ships first) and **D** (Grid, behind a Tree · Grid switch, ships last). fm-9mm.6 |
+| Session detail, `sessions-view-mockups/session-detail.html`, published https://claude.ai/artifact/3tu2g2ucMsvuV3UdcpcWMG | options A workbench, B next step first, C console, and the card source row before and after; 9 states | **B with A's round grouping**. fm-9mm.7 |
+| Card source row, `sd-card-source-row-1440.png`, `-820.png` | one "Asked by" row replacing the Source line and Go to session | live or ended, no state badge (fm-zgd.17 card 86cedfd3) |
+
+Critiques: `sessions-view-mockups/sessions-tree-critique.md`, `sessions-view-mockups/session-detail-critique.md` (ux-critique, ux-laws, ui-patterns, one fix pass each). Screenshots per option and state sit beside them.
+
+### Changed screens and their states
+
+The exact copy for every state is in the spec (Decisions 17, 21, 31 and "Copy for each screen"). The spec's copy wins over the mockups: lines that described how the board works were cut (house rule), and clock times became the shared relative format.
+
+| Screen | Empty | Loading | Partial | Error | Success |
+|---|---|---|---|---|---|
+| Sessions, Tree | `No sessions are running` + Start main coordinator; Show ended on: `No sessions ended in the last 7 days.` | `Connecting…`, `Loading sessions…`, 5-row skeleton | strip capped at 2 rows + `Show all <N>`; collapsed coordinators; R8 rows | tmux down banner + Try again now, Focus off; connection lost banner + Reload page, tree faded | strip + `All sessions <N> · <N> working · <N> in review`, `Live · updated <time>` |
+| Sessions, Grid | as Tree | 3 groups of skeleton cards | dead cards show `The terminal is closed` | tmux down: lines faded under the banner; offline: grid faded | cards with border = state and last 6 lines |
+| Session detail | `No events yet.` / `No output yet.` / `No output was saved for this session.` | output skeleton + `Reading the terminal…` | off controls in one `Not available now:` line | tmux down panel, label faded, controls off with reason; connection lost; unknown id `The board has no session with this id.` | next-step panel with one filled button, result line after each control |
+| Card source row | unknown: `The board does not know which session asked this.` + Find the session | (server render) | ended: `○ ended <time> · answer goes to <coordinator>` or `· your answer resumes it` | | `Asked by <name> · <role> · ● live` + Focus icon |
+| Epic row and epic page | no session: Launch coordinator | `Launching…` | parked or ended: Resume + name link | today's launch error messages | live: Focus + name link |
+| Ticket panel Sessions tab | `No sessions for this ticket.` | | | | rows: badge, name link, role, last seen |
+| Initiatives coordinator strip | `Not started` | | | | badge, name link, Focus icon (see spec Open for Ryan 1) |
+
+### Critique findings left open
+
+- Tree: duplication of waiting sessions in strip and tree is deliberate; both come from one state function (spec Decision 25).
+- Detail: the tmux-down label can look current (finding 1): spec fades it and adds `not checked since <time>`. Timeline icons at 10 px (finding 4) and the black open-card dot (finding 5): left to the builder within the board tokens.
+- Detail: Continue before the reset (finding 2): decided, Continue stays on and the page shows the reset time; fallback model control added (spec Decision 19).
+- Grid: 820 density, too many coloured borders, ended cards full size, one level of depth, cut lines, Claude pane chrome, lost diff backgrounds. Border, ended chips and the strip below 1100 px are in the spec's Open for Ryan 3; pane chrome is spec Decision 34; the rest stay as known limits of the Grid.
+- Nav: Sessions second with no count (audit B1), kept in all options.
