@@ -183,7 +183,7 @@ defmodule Foreman.CoordinatorIntegrationTest do
     File.write!("tmp/coordinator-transcript.txt", transcript)
   end
 
-  test "board focus and relaunch preserve identity; usage-limit wait reaches Needs you and Continue",
+  test "board focus and context relaunch preserve identity; usage-limit wait reaches Needs you and Continue",
        c do
     launch(c, "")
     id = Sessions.coordinator().session_id
@@ -225,10 +225,12 @@ defmodule Foreman.CoordinatorIntegrationTest do
 
     Sessions.reconcile()
     send(view.pid, :reconcile)
-    view |> element("#coordinator-relaunch") |> render_click()
+    refute has_element?(view, "#coordinator-relaunch")
+    assert {:ok, _} = Sessions.launch_coordinator(:resume)
 
     assert eventually(fn ->
-             match?({:ok, %{state: :running}}, SessionTmux.observe(Sessions.coordinator()))
+             match?({:ok, %{state: :running}}, SessionTmux.observe(Sessions.coordinator())) and
+               match?(["--resume", ^id, "--settings", _, "/orient"], argv(c))
            end)
 
     assert ["--resume", ^id, "--settings", _, "/orient"] = argv(c)

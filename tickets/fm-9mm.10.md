@@ -2,7 +2,7 @@
 id: fm-9mm.10
 title: "Session lifecycle machine and the shared state function"
 type: task
-status: open
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.9"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-04
+close_reason: "Merged in PR #10 (7bf6f11); deployed 2026-11-04 (migration 20261104152616; live states after 3 min: working 7, idle 12, parked 2, ended 102)"
 ---
 
 Spec: `docs/specs/sessions-view.md` (approved 2026-11-03, card cfb2bce5). Design pack: `docs/specs/sessions-view.design.md`. The spec's Non-goals, Ask-first boundaries and copy tables apply to every ticket.

@@ -11,6 +11,12 @@ defmodule ForemanWeb.SessionStateTest do
   defp facts(attrs), do: Map.merge(%{kind: "build", open_cards: 0, state_at: @five_ago}, attrs)
   defp view(attrs), do: SessionState.view(facts(attrs), @now)
 
+  test "an ISO reset time uses relative time and preserves its hover timestamp" do
+    result = view(%{state: "waiting.usage_limit", reset_at: "2026-11-04T14:00:00Z"})
+    assert result.second == "Usage limit · resets in 2 h"
+    assert result.at == ~U[2026-11-04 14:00:00Z]
+  end
+
   @waiting %{label: "Waiting on you", color: "primary", variant: "solid", icon: "hero-inbox"}
 
   # {case, facts, label row, second line, time named by the second line}

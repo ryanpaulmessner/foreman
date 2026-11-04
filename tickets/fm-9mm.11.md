@@ -2,7 +2,7 @@
 id: fm-9mm.11
 title: "Launch scripts record session identity (pi-window, coord, relay)"
 type: task
-status: open
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.9"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-04
+close_reason: "Skills PR #1 (sk-rby, baec776) and foreman PR #11 (603b295) merged; skills main pulled; relay patch applied by Ryan (chore 998d01ff); fm-w9g owner note for filter-design pending"
 ---
 
 Spec: `docs/specs/sessions-view.md` (approved 2026-11-03, card cfb2bce5). Design pack: `docs/specs/sessions-view.design.md`. The spec's Non-goals, Ask-first boundaries and copy tables apply to every ticket.
@@ -33,3 +33,6 @@ Spec Decision 3 writers that live outside this repo (skills repo dispatch script
 - [ ] A `coord` launch creates a registered row whose name equals its window name.
 - [ ] `close_out_nags` has no ownerless row for builds dispatched after this change.
 - [ ] Skill docs updated; skills repo changes go through its own push card.
+
+## Notes
+- 2026-11-04 user: fm-w9g: card 0e60a01f answered 2026-11-04 by Ryan: 'have the filter-design coordinator handle them'. 3 items still ownerless (work-n7p.8, work-n7p.11, work-n7p.16; push close-out) go to filter-design (pane %395) as one note; no owner-lookup change. Not yet sent: the pane had unsent text from Ryan at 16:16 UTC.

@@ -36,6 +36,7 @@ An approved spec, with its design pack, for an **initiative plan** on the board:
 ## Decisions so far
 
 - [How do coordinators pick their next ticket today, and where would a board nudge land?](tickets/fm-3fm.1.md): by hand (orient recommends, dispatch waits for a yes) and blind to board priority; build a new start-nudge machine on the close-out nag pattern; fm-c2w.27's skill and ready parts fold in here. Research: branch research/plan-nudge, docs/research/plan-nudge.md.
+- [How do initiative rank, stack order, ticket priority and Jump to front combine into one 'next up' per initiative?](tickets/fm-3fm.2.md): initiative = top-level epic, one ranked list across repos; next up = pending jump, then your drag order (beats P0-P4), then priority and age; a jump moves the ticket to the top of its stack only.
 
 ## Not yet specified
 

@@ -57,6 +57,11 @@ defmodule ForemanWeb.EpicLive do
       epic_priority: epic && Map.get(Foreman.Priority.for_keys([epic.key]), epic.key),
       epic_tracker_key: epic && epic.key,
       planning_session: Foreman.Sessions.get(socket.assigns.epic_key),
+      agent_session:
+        socket.assigns.epic_key
+        |> Foreman.AgentSessions.for_ticket()
+        |> Enum.find(&(&1.kind in ["main_coordinator", "epic_coordinator"]))
+        |> then(fn row -> if row, do: ForemanWeb.SessionLink.view(row) end),
       launchable: Foreman.Sessions.launchable?(epic),
       repos: Foreman.RuntimeState.repos()
     )
@@ -177,7 +182,14 @@ defmodule ForemanWeb.EpicLive do
         <section :if={@epic.design_link} id="epic-design" class="fm-markdown min-w-0">
           {Phoenix.HTML.raw(@design_html)}
         </section>
-        <ForemanWeb.PlanningSession.status id="epic" session={@planning_session} />
+        <ForemanWeb.SessionLink.row :if={@agent_session} id="epic-session" session={@agent_session} />
+        <ForemanWeb.StatusLine.status_line
+          :if={@planning_session && @planning_session.error}
+          id="epic-planning-error"
+          kind={:error}
+        >
+          {@planning_session.error}
+        </ForemanWeb.StatusLine.status_line>
         <section>
           <h2 class="bb-label mb-3">Epic stage history</h2>
           <div id="epic-history" phx-update="stream" class="flex flex-wrap gap-4">

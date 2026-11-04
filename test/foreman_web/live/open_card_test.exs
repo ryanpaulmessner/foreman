@@ -330,10 +330,14 @@ defmodule ForemanWeb.OpenCardTest do
     assert has_element?(view, "#card-focus-#{ended_card.id}[disabled]")
     refute has_element?(view, "#card-focus-#{unknown.id}")
 
-    # Hidden until fm-9mm.12 and fm-9mm.15: the session link and the answer's receiver.
-    refute has_element?(view, "#card-source-#{live_card.id} a")
+    assert has_element?(view, "#card-source-#{live_card.id} a[href='/sessions/#{live_row.id}']")
     refute render(view) =~ "answer goes to"
-    refute render(view) =~ "Find the session"
+
+    assert has_element?(
+             view,
+             "#card-source-#{unknown.id} a[href='/sessions']",
+             "Find the session"
+           )
   end
 
   test "session waiting notices use the info line and the Decision 20 copy", %{conn: conn} do

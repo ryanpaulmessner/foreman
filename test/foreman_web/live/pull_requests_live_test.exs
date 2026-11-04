@@ -119,12 +119,17 @@ defmodule ForemanWeb.PullRequestsLiveTest do
     assert has_element?(view, "#ticket-notes-tab[aria-selected=true]")
     Foreman.Overlay.apply_event({"sample", "fe-813.2"}, :abandon)
     Foreman.Overlay.apply_event({"sample", "fe-813.2"}, :revive)
-    Foreman.Overlay.apply_event({"sample", "fe-813.2"}, {:dispatch, %{window: "pr-tab-worker"}})
+
+    Foreman.Overlay.apply_event(
+      {"sample", "fe-813.2"},
+      {:dispatch, %{window: "%98", session: "pr_worker", harness: "pi"}}
+    )
+
     send(view.pid, {:notification, :foreman_events, "sample/fe-813.2"})
-    assert has_element?(view, "#ticket-sessions-panel[hidden]", "pr-tab-worker")
+    assert has_element?(view, "#ticket-sessions-panel[hidden]", "pr_worker")
     view |> element("#ticket-sessions-tab") |> render_click()
     assert_patch(view, "/pull-requests?project=sample&tab=sessions&ticket=sample%3Afe-813.2")
-    assert has_element?(view, "#ticket-sessions-panel:not([hidden])", "pr-tab-worker")
+    assert has_element?(view, "#ticket-sessions-panel:not([hidden])", "pr_worker")
     render_patch(view, "/pull-requests?project=sample&ticket=sample:fe-813.2&tab=unknown")
     assert has_element?(view, "#ticket-overview-tab[aria-selected=true]")
     render_click(view, "close-ticket", %{"key" => "sample:fe-813.2"})

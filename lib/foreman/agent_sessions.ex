@@ -25,6 +25,15 @@ defmodule Foreman.AgentSessions do
 
   def get(_), do: nil
 
+  @doc "All identities for a ticket, newest first, including ended sessions."
+  def for_ticket({project, ticket}) do
+    Repo.all(
+      from s in AgentSession,
+        where: s.project == ^project and s.ticket == ^ticket,
+        order_by: [desc: s.started_at, desc: s.id]
+    )
+  end
+
   def live_by_name(name) when is_binary(name),
     do: Repo.one(from s in AgentSession, where: s.name == ^name and is_nil(s.ended_at))
 

@@ -78,55 +78,18 @@ defmodule ForemanWeb.PlanningSession do
   attr :session, :any, required: true
 
   def status(assigns) do
+    row = assigns.session && Foreman.AgentSessions.get(assigns.session.agent_session_id)
+    assigns = assign(assigns, :identity, if(row, do: ForemanWeb.SessionLink.view(row)))
+
     ~H"""
-    <section
-      :if={@session}
-      id={@id <> "-planning-session"}
-      class="min-w-0 space-y-2 rounded-lg border border-base p-3 text-xs"
+    <ForemanWeb.SessionLink.row :if={@identity} id={@id <> "-planning-session"} session={@identity} />
+    <ForemanWeb.StatusLine.status_line
+      :if={@session && @session.error}
+      id={@id <> "-planning-error"}
+      kind={:error}
     >
-      <div class="flex flex-wrap items-center gap-2">
-        <span class="font-medium">Planning session</span>
-        <span id={@id <> "-planning-state"} class="text-foreground-softer">{@session.state}</span>
-        <ForemanWeb.TicketDetail.timestamp at={@session.launched_at} />
-      </div>
-      <p :if={@session.error} role="status">{@session.error}</p>
-      <div class="flex min-w-0 items-center gap-2">
-        <div class="min-w-0 flex-1 [&_.fieldset]:mb-0">
-          <.input
-            id={@id <> "-attach"}
-            type="text"
-            name="attach"
-            readonly
-            value={Foreman.SessionTmux.attach_command(@session)}
-            aria-label="Attach command"
-            class="w-full min-w-0 rounded border border-base bg-sunken px-2 py-2 font-mono text-xs"
-          />
-        </div>
-        <button
-          id={@id <> "-copy-attach"}
-          type="button"
-          phx-hook=".CopyAttach"
-          data-command={Foreman.SessionTmux.attach_command(@session)}
-          class="shrink-0 rounded border border-base px-2 py-2 hover:bg-sunken"
-          aria-label="Copy attach command"
-        >
-          Copy
-        </button>
-      </div>
-    </section>
-    <script :type={Phoenix.LiveView.ColocatedHook} name=".CopyAttach">
-      export default {
-        mounted() {
-          this.el.addEventListener("click", () => {
-            navigator.clipboard.writeText(this.el.dataset.command).catch(() => {
-              const input = this.el.parentElement.querySelector("input")
-              input.focus()
-              input.select()
-            })
-          })
-        }
-      }
-    </script>
+      {@session.error}
+    </ForemanWeb.StatusLine.status_line>
     """
   end
 end

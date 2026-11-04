@@ -16,7 +16,7 @@ defmodule Foreman.RequestSource do
   The card's source row view (question cards spec, Decision 14), the one place a
   card reads who asked it: `state` (`:live`, `:ended` or `:unknown`), the session
   `name`, its `role` in the Sessions words, `ended_at`, and `focus` (the Focus
-  terminal icon is on). `link` (the session page, fm-9mm.12), `receiver` (where an
+  terminal icon is on), and `link` to the session page. `receiver` (where an
   answer goes, fm-9mm.15) and `resumes` stay empty until that work ships.
   """
   def view(request) do
@@ -41,7 +41,7 @@ defmodule Foreman.RequestSource do
           role: role(row),
           ended_at: row.ended_at,
           focus: is_nil(row.ended_at),
-          link: nil,
+          link: "/sessions/#{row.id}",
           receiver: nil,
           resumes: false,
           source: source(row)
