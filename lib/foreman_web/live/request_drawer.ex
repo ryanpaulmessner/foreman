@@ -1,61 +1,32 @@
 defmodule ForemanWeb.RequestDrawer do
-  @moduledoc "Shared shell drawer, using the inbox's cards and resolution handler."
+  @moduledoc "Shared shell drawer: pending rows that open a card on Needs you."
   use ForemanWeb, :html
   import Phoenix.LiveView
-  alias Fluxon.Components.Sheet
-  alias ForemanWeb.CardItems
-
-  @cards [
-    stream: :drawer_requests,
-    ui: :drawer_card_ui,
-    footers: :drawer_card_footers,
-    headings: :drawer_headings,
-    prefix: "drawer-"
-  ]
+  alias Fluxon.Components.{Badge, Sheet}
 
   def mount(socket) do
     socket
-    |> assign(
-      drawer_state: Foreman.RequestDrawer.__fsm__(:initial),
-      drawer_ids: MapSet.new(),
-      drawer_versions: %{},
-      drawer_headings: MapSet.new(),
-      drawer_error: nil
-    )
-    |> CardItems.assigns(@cards)
-    |> stream_configure(:drawer_requests, dom_id: &("drawer-request-" <> &1.id))
+    |> assign(drawer_state: Foreman.RequestDrawer.__fsm__(:initial))
+    |> stream_configure(:drawer_requests, dom_id: &("drawer-row-" <> &1.id))
     |> stream(:drawer_requests, [])
     |> attach_hook(:request_drawer, :handle_event, &handle_event/3)
   end
 
   def refresh(socket, pending) do
     if socket.assigns.drawer_state == :open do
-      ids = MapSet.new(pending, & &1.id)
-      previous = socket.assigns.drawer_ids
-      messages = Foreman.CardMessages.versions(MapSet.to_list(ids))
-      versions = Map.new(pending, &{&1.id, {messages[&1.id], &1.edited_at, &1.similar_question}})
-
-      socket =
-        Enum.reduce(MapSet.difference(previous, ids), socket, fn id, socket ->
-          stream_delete_by_dom_id(socket, :drawer_requests, "drawer-request-" <> id)
+      rows =
+        pending
+        |> ForemanWeb.NeedsYouLive.grouped()
+        |> Enum.map(fn %{request: request} ->
+          %{
+            id: request.id,
+            request: request,
+            source: Foreman.RequestSource.view(request),
+            question: question(request)
+          }
         end)
 
-      items = CardItems.with_state(socket, @cards, ForemanWeb.NeedsYouLive.grouped(pending))
-      headings = items |> Enum.filter(& &1.heading) |> MapSet.new(& &1.id)
-
-      items
-      |> Enum.with_index()
-      |> Enum.reduce(socket, fn {item, index}, socket ->
-        if MapSet.member?(previous, item.id) and
-             MapSet.member?(socket.assigns.drawer_headings, item.id) == item.heading and
-             socket.assigns.drawer_versions[item.id] == versions[item.id],
-           do: socket,
-           else: stream_insert(socket, :drawer_requests, item, at: index)
-      end)
-      |> CardItems.prune(@cards, ids)
-      |> assign(:drawer_ids, ids)
-      |> assign(:drawer_versions, versions)
-      |> assign(:drawer_headings, headings)
+      stream(socket, :drawer_requests, rows, reset: true)
     else
       socket
     end
@@ -68,44 +39,36 @@ defmodule ForemanWeb.RequestDrawer do
   defp handle_event("close-request-drawer", _, socket),
     do: {:halt, transition(socket, :close)}
 
-  defp handle_event("drawer-resolve-text", params, socket),
-    do: {:halt, CardItems.text(socket, @cards, params)}
-
-  defp handle_event("drawer-resolve", params, socket) do
-    outcome = ForemanWeb.NeedsYouLive.resolve(params)
+  defp handle_event("drawer-open-card", %{"id" => id}, socket) do
+    socket = transition(socket, :close)
 
     socket =
-      case outcome do
-        {:navigate, path} ->
-          push_navigate(socket, to: path)
-
-        {:ok, _} ->
-          socket
-          |> assign(:drawer_error, nil)
-          |> CardItems.sent(@cards, params, outcome)
-
-        {:card, id, card} ->
-          socket
-          |> assign(:drawer_error, nil)
-          |> CardItems.notice(@cards, id, card)
-
-        {:error, _} ->
-          assign(socket, :drawer_error, "Request not updated")
+      if socket.view == ForemanWeb.NeedsYouLive do
+        ForemanWeb.NeedsYouLive.open_from_drawer(socket, id)
+      else
+        push_navigate(socket, to: "/needs-you?" <> URI.encode_query(%{"card" => id}))
       end
 
-    {:halt, ForemanWeb.RequestCount.refresh(socket)}
+    {:halt, socket}
   end
 
   defp handle_event(_, _, socket), do: {:cont, socket}
 
   defp transition(socket, event) do
     {state, []} = Foreman.RequestDrawer.step(socket.assigns.drawer_state, event, %{})
-    assign(socket, drawer_state: state, drawer_error: nil)
+    assign(socket, :drawer_state, state)
   end
+
+  defp question(%{kind: "session_waiting"} = request) do
+    get_in(request.facts, ["questions", Access.at(0), "question"]) ||
+      request.facts["question"] || Foreman.RequestHeader.title(request)
+  end
+
+  defp question(request), do: request.facts["question"] || Foreman.RequestHeader.title(request)
 
   attr :state, :atom, required: true
   attr :streams, :map, required: true
-  attr :error, :string, default: nil
+  attr :count, :integer, required: true
 
   def drawer(assigns) do
     ~H"""
@@ -116,7 +79,7 @@ defmodule ForemanWeb.RequestDrawer do
       class="w-[min(640px,100vw)] space-y-5 [scrollbar-gutter:stable]"
       on_close={JS.push("close-request-drawer")}
     >
-      <header class="space-y-2 pr-8">
+      <header class="flex flex-wrap items-center gap-3 pr-8">
         <h2
           id="request-drawer-title"
           tabindex="-1"
@@ -130,31 +93,51 @@ defmodule ForemanWeb.RequestDrawer do
         >
           Needs you
         </h2>
+        <Badge.badge id="drawer-count">{@count}</Badge.badge>
         <.link
           id="drawer-full-page"
           navigate="/needs-you"
-          class="text-sm text-foreground-softer underline"
+          phx-click="close-request-drawer"
+          class="ml-auto text-sm text-foreground-softer underline"
         >
           Open full page
         </.link>
       </header>
-      <ForemanWeb.StatusLine.status_line :if={@error} id="drawer-error" kind={:error}>
-        {@error}
-      </ForemanWeb.StatusLine.status_line>
-      <div id="drawer-requests" phx-update="stream" class="space-y-5">
+      <div id="drawer-requests" phx-update="stream" class="bb-drawer-list">
         <div
           id="drawer-empty"
           class="hidden only:block rounded-xl border border-dashed border-base p-8 text-center text-foreground-softer"
         >
           No pending requests
         </div>
-        <ForemanWeb.NeedsYouLive.request_card
-          :for={{id, item} <- @streams.drawer_requests}
-          id={id}
-          item={item}
-          prefix="drawer-"
-          event="drawer-resolve"
-        />
+        <div :for={{id, item} <- @streams.drawer_requests} id={id} class="bb-drawer-row">
+          <div class="bb-drawer-meta">
+            <Badge.badge>{ForemanWeb.OpenCard.kind_label(item.request.kind)}</Badge.badge>
+            <span class="bb-drawer-source" id={"drawer-card-source-" <> item.id}>
+              <span class={["bb-dot", item.source.state != :live && "bb-dot-grey"]} aria-hidden="true">
+              </span>
+              <.link :if={item.source.link} navigate={item.source.link} class="bb-drawer-source-link">
+                {item.source.name}
+              </.link>
+              <span :if={!item.source.link}>{item.source.name || "source unknown"}</span>
+              <span :if={item.source.state == :ended}>· ended</span>
+            </span>
+            <span class="bb-drawer-age">
+              <ForemanWeb.TicketDetail.timestamp at={item.request.inserted_at} />
+            </span>
+          </div>
+          <p id={"drawer-question-" <> item.id} class="bb-drawer-question">{item.question}</p>
+          <button
+            id={"drawer-open-" <> item.id}
+            type="button"
+            class="bb-drawer-open"
+            aria-labelledby={"drawer-open-label-#{item.id} drawer-question-#{item.id}"}
+            phx-click="drawer-open-card"
+            phx-value-id={item.id}
+          >
+            <span id={"drawer-open-label-" <> item.id}>Open</span>
+          </button>
+        </div>
       </div>
     </Sheet.sheet>
     """

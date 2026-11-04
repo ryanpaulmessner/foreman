@@ -80,11 +80,16 @@ defmodule ForemanWeb.SessionLinksTest do
       if row do
         assert has_element?(view, "#{selector} a[href='/sessions/#{row.id}']", row.name)
 
-        if row.ended_at,
+        if row.ended_at && prefix == "",
           do:
             assert(has_element?(view, "#{selector} button[disabled][title='The pane is closed']"))
       else
-        assert has_element?(view, "#{selector} a[href='/sessions']", "Find the session")
+        if prefix == "" do
+          assert has_element?(view, "#{selector} a[href='/sessions']", "Find the session")
+        else
+          assert has_element?(view, selector, "source unknown")
+          refute has_element?(view, "#{selector} a")
+        end
       end
 
       refute has_element?(view, "#{selector} input")

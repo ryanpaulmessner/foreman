@@ -57,7 +57,9 @@ defmodule ForemanWeb.CardSharedFixesTest do
     {:ok, view, _} = live(conn, "/needs-you")
     render_click(view, "open-request-drawer")
 
-    for prefix <- ["", "drawer-"] do
+    for entry <- [:page, :drawer] do
+      if entry == :drawer, do: open_from_drawer(view, request.id)
+      prefix = ""
       html = view |> element("##{prefix}push-worktree-#{request.id}") |> render()
       assert html =~ "bb-path"
       assert html =~ ~r{<span class="bb-path-part">dev/</span><wbr/?>}
@@ -94,7 +96,9 @@ defmodule ForemanWeb.CardSharedFixesTest do
     render_click(view, "open-request-drawer")
 
     for prefix <- ["", "drawer-"], request <- requests do
-      card = text(view, "##{prefix}request-#{request.id}")
+      if prefix == "", do: render_patch(view, "/needs-you?card=#{request.id}")
+      selector = if prefix == "", do: "#request-#{request.id}", else: "#drawer-row-#{request.id}"
+      card = text(view, selector)
       refute card =~ ~r/\b(user|claude|pi)\b/i, "#{prefix}#{request.actor}: #{card}"
     end
   end

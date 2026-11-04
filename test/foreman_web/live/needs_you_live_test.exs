@@ -180,7 +180,9 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
     render_click(view, "open-request-drawer")
 
-    for prefix <- ["", "drawer-"] do
+    for entry <- [:page, :drawer] do
+      if entry == :drawer, do: open_from_drawer(view, request.id)
+      prefix = ""
       source = "##{prefix}card-source-#{request.id}"
       assert has_element?(view, "#{source} .bb-src-name", "relay-build")
       assert has_element?(view, source, "build")
@@ -232,20 +234,13 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     {:ok, view, _} = live(conn, "/needs-you")
     render_click(view, "open-request-drawer")
 
-    for prefix <- ["", "drawer-"] do
-      card = "##{prefix}card-open-#{request.id}"
+    refute has_element?(view, "#request-drawer [data-ticket-heading]")
 
-      # Needs you has no per-ticket heading (Decision 6); the drawer keeps it until fm-zgd.17.4.
-      if prefix == "",
-        do: refute(has_element?(view, "#request-#{request.id} [data-ticket-heading]")),
-        else:
-          assert(
-            has_element?(
-              view,
-              "#drawer-request-#{request.id} [data-ticket-heading]",
-              "Fix mobile login"
-            )
-          )
+    for entry <- [:page, :drawer] do
+      if entry == :drawer, do: open_from_drawer(view, request.id)
+      prefix = ""
+      card = "#card-open-#{request.id}"
+      refute has_element?(view, "#request-#{request.id} [data-ticket-heading]")
 
       assert has_element?(view, "#{card} .bb-qhead-title", "Fix mobile login")
       refute has_element?(view, "##{prefix}context-#{request.id}")
@@ -267,7 +262,9 @@ defmodule ForemanWeb.NeedsYouLiveTest do
           tmux_unavailable: "Could not focus the terminal. tmux does not answer.",
           no_client: "Could not focus the terminal. No terminal is attached."
         ],
-        prefix <- ["", "drawer-"] do
+        entry <- [:page, :drawer] do
+      if entry == :drawer, do: open_from_drawer(view, request.id)
+      prefix = ""
       stub(Foreman.RequestSource, :focus, fn _ -> {:error, error} end)
       view |> element("##{prefix}card-focus-#{request.id}") |> render_click()
       line = "##{prefix}card-focus-info-#{request.id}"
@@ -364,8 +361,9 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     assert has_element?(view, "#request-#{request.id}", "14:00")
     refute has_element?(view, "#submit-approve-#{request.id}")
     render_click(view, "open-request-drawer")
-    assert has_element?(view, "#drawer-continue-#{request.id}")
-    assert has_element?(view, "#drawer-open-#{request.id}")
+    refute has_element?(view, "#drawer-continue-#{request.id}")
+    open_from_drawer(view, request.id)
+    assert has_element?(view, "#continue-#{request.id}")
 
     {:ok, input} =
       Requests.ask({"sample", "s-1"}, "session_waiting", %{
@@ -440,9 +438,15 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       {:ok, view, _} = live(conn, "/needs-you")
       render_click(view, "open-request-drawer")
 
-      for request <- requests, prefix <- ["", "drawer-"] do
-        # One card is open at a time on the page (Decision 3).
-        if prefix == "", do: render_patch(view, "/needs-you?card=#{request.id}")
+      for request <- requests, entry <- [:page, :drawer] do
+        if entry == :page do
+          render_patch(view, "/needs-you?card=#{request.id}")
+          assert_patch(view, "/needs-you?card=#{request.id}")
+        else
+          open_from_drawer(view, request.id)
+        end
+
+        prefix = ""
         card = "##{prefix}request-#{request.id}"
         assert has_element?(view, "#{card} ##{prefix}open-#{request.id}", "Open session")
         assert has_element?(view, "#{card} h2", "Planning session")
@@ -461,7 +465,10 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       assert has_element?(view, "#answer-#{question.id}-0", "Postgres")
       assert has_element?(view, "#answer-#{question.id}-1", "SQLite")
       assert has_element?(view, "#other-text-#{question.id}")
-      assert has_element?(view, "#drawer-answer-#{question.id}-0")
+      assert_patch(view, "/needs-you?card=#{permission.id}")
+      assert_patch(view, "/needs-you?card=#{question.id}")
+      open_from_drawer(view, question.id)
+      assert has_element?(view, "#answer-#{question.id}-0")
 
       refute has_element?(view, "#continue-#{question.id}")
       render_patch(view, "/needs-you?card=#{limit.id}")
@@ -513,8 +520,10 @@ defmodule ForemanWeb.NeedsYouLiveTest do
 
       render_click(view, "open-request-drawer")
       view |> element("#drawer-open-#{request.id}") |> render_click()
-      assert has_element?(view, "#drawer-notice-#{request.id}", "No terminal is attached")
-      refute has_element?(view, "#drawer-copy-session-#{request.id}")
+      assert_patch(view, "/needs-you?card=#{request.id}")
+      view |> element("#open-#{request.id}") |> render_click()
+      assert has_element?(view, "#notice-#{request.id}", "No terminal is attached")
+      refute has_element?(view, "#copy-session-#{request.id}")
 
       old = System.get_env("PREVIEW")
       System.put_env("PREVIEW", "1")
@@ -523,7 +532,9 @@ defmodule ForemanWeb.NeedsYouLiveTest do
         if old, do: System.put_env("PREVIEW", old), else: System.delete_env("PREVIEW")
       end)
 
-      for prefix <- ["", "drawer-"] do
+      for entry <- [:page, :drawer] do
+        if entry == :drawer, do: open_from_drawer(view, request.id)
+        prefix = ""
         view |> element("##{prefix}card-focus-#{request.id}") |> render_click()
 
         assert has_element?(
@@ -605,7 +616,9 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
       render_click(view, "open-request-drawer")
 
-      for prefix <- ["", "drawer-"] do
+      for entry <- [:page, :drawer] do
+        if entry == :drawer, do: open_from_drawer(view, request.id)
+        prefix = ""
         card = "##{prefix}request-#{request.id}"
         assert has_element?(view, "#{card} h2", "Planning session")
         assert has_element?(view, card, "Question")
@@ -663,11 +676,13 @@ defmodule ForemanWeb.NeedsYouLiveTest do
 
       render_click(view, "open-request-drawer")
 
+      open_from_drawer(view, request.id)
+
       view
-      |> form("#drawer-reply-#{request.id}", %{"reply" => %{"text" => "yes"}})
+      |> form("#reply-#{request.id}", %{"reply" => %{"text" => "yes"}})
       |> render_submit()
 
-      assert has_element?(view, "#drawer-notice-#{request.id}", "not at its prompt")
+      assert has_element?(view, "#notice-#{request.id}", "not at its prompt")
     end
 
     test "a new question card reaches the browser notification snapshot", %{

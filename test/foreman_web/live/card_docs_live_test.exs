@@ -59,7 +59,8 @@ defmodule ForemanWeb.CardDocsLiveTest do
     refute has_element?(view, "#question-#{request.id}-more")
 
     render_click(view, "open-request-drawer")
-    assert has_element?(view, "#drawer-question-#{request.id} li", "Compact")
+    open_from_drawer(view, request.id)
+    assert has_element?(view, "#question-#{request.id} li", "Compact")
   end
 
   test "long text shows its first lines with Show more", %{conn: conn} do
@@ -162,10 +163,9 @@ defmodule ForemanWeb.CardDocsLiveTest do
 
     render_click(view, "open-request-drawer")
 
-    assert has_element?(
-             view,
-             "#drawer-ticket-link-#{request.id}[href='/needs-you?ticket=sample%3As-1']"
-           )
+    open_from_drawer(view, request.id)
+    assert has_element?(view, "#ticket-link-#{request.id}")
+    assert has_element?(view, "#card-panel #panel-document h1", "Spec")
   end
 
   test "chat-question and AskUserQuestion text render as Markdown with path links", %{conn: conn} do

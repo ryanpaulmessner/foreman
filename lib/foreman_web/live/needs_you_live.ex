@@ -40,6 +40,13 @@ defmodule ForemanWeb.NeedsYouLive do
     end
   end
 
+  @doc "Opens a drawer link against fresh pending cards while retaining page input and panels."
+  def open_from_drawer(socket, id) do
+    socket
+    |> load()
+    |> push_patch(to: card_path(socket, id))
+  end
+
   def handle_params(params, uri, socket) do
     socket = socket |> ForemanWeb.TicketDetail.load(params, uri) |> panel(params)
     card = params["card"]
@@ -594,7 +601,6 @@ defmodule ForemanWeb.NeedsYouLive do
     ~H"""
     <Layouts.app
       drawer_state={@drawer_state}
-      drawer_error={@drawer_error}
       streams={@streams}
       flash={@flash}
       pending_count={@pending_count}

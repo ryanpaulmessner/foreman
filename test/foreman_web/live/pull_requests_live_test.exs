@@ -82,8 +82,20 @@ defmodule ForemanWeb.PullRequestsLiveTest do
       {:ok, inbox, _} =
         live(conn, if(unquote(entry) == :drawer, do: "/settings", else: "/needs-you"))
 
-      prefix = if unquote(entry) == :drawer, do: "drawer-", else: ""
-      if unquote(entry) == :drawer, do: render_click(inbox, "open-request-drawer")
+      inbox =
+        if unquote(entry) == :drawer do
+          render_click(inbox, "open-request-drawer")
+
+          {:error, {:live_redirect, %{to: path}}} =
+            inbox |> element("#drawer-open-#{request.id}") |> render_click()
+
+          {:ok, landed, _} = live(conn, path)
+          landed
+        else
+          inbox
+        end
+
+      prefix = ""
       assert has_element?(inbox, "##{prefix}request-#{request.id}", stored.remote)
 
       inbox

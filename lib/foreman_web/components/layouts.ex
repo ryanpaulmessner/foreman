@@ -8,7 +8,6 @@ defmodule ForemanWeb.Layouts do
   attr :filters, :map, default: %{}
   attr :pending_count, :integer, default: 0
   attr :drawer_state, :atom, default: :closed
-  attr :drawer_error, :string, default: nil
   attr :streams, :map, default: %{}
   slot :inner_block, required: true
 
@@ -164,7 +163,7 @@ defmodule ForemanWeb.Layouts do
     <ForemanWeb.RequestDrawer.drawer
       :if={Map.has_key?(@streams, :drawer_requests)}
       state={@drawer_state}
-      error={@drawer_error}
+      count={@pending_count}
       streams={@streams}
     />
     <.flash_group flash={@flash} />

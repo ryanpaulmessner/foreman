@@ -89,7 +89,9 @@ defmodule ForemanWeb.CardQuestionsTest do
     {:ok, view, _} = live(conn, "/needs-you")
     render_click(view, "open-request-drawer")
 
-    for prefix <- ["", "drawer-"] do
+    for entry <- [:page, :drawer] do
+      if entry == :drawer, do: open_from_drawer(view, r.id)
+      prefix = ""
       ask(view, r, "Why this option?", prefix)
       assert has_element?(view, "##{prefix}card-text-#{r.id}", "Why this option?")
 
@@ -244,7 +246,11 @@ defmodule ForemanWeb.CardQuestionsTest do
       {:notification, :foreman_events, %{"kind" => "requests_changed", "key" => r.id}}
     )
 
-    for prefix <- ["", "drawer-"] do
+    refute has_element?(view, "#request-drawer [data-card-message]")
+
+    for entry <- [:page, :drawer] do
+      if entry == :drawer, do: open_from_drawer(view, r.id)
+      prefix = ""
       assert has_element?(view, "##{prefix}card-message-#{message.id} strong", "Because")
 
       assert view
