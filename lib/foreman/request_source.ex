@@ -7,14 +7,63 @@ defmodule Foreman.RequestSource do
   it was asked (D3). Never reads tmux and never guesses from a live window name.
   """
   def for_request(request, _opts \\ []) do
-    row =
-      case Map.get(request, :agent_session_id) do
-        nil -> Foreman.AgentSessions.legacy(request)
-        id -> Foreman.AgentSessions.get(id)
-      end
-
-    if row, do: source(row)
+    if row = row(request), do: source(row)
   end
+
+  @roles %{"main_coordinator" => "main coordinator", "epic_coordinator" => "epic coordinator"}
+
+  @doc """
+  The card's source row view (question cards spec, Decision 14), the one place a
+  card reads who asked it: `state` (`:live`, `:ended` or `:unknown`), the session
+  `name`, its `role` in the Sessions words, `ended_at`, and `focus` (the Focus
+  terminal icon is on). `link` (the session page, fm-9mm.12), `receiver` (where an
+  answer goes, fm-9mm.15) and `resumes` stay empty until that work ships.
+  """
+  def view(request) do
+    case row(request) do
+      nil ->
+        %{
+          state: :unknown,
+          name: nil,
+          role: nil,
+          ended_at: nil,
+          focus: false,
+          link: nil,
+          receiver: nil,
+          resumes: false,
+          source: nil
+        }
+
+      row ->
+        %{
+          state: if(row.ended_at, do: :ended, else: :live),
+          name: row.name,
+          role: role(row),
+          ended_at: row.ended_at,
+          focus: is_nil(row.ended_at),
+          link: nil,
+          receiver: nil,
+          resumes: false,
+          source: source(row)
+        }
+    end
+  end
+
+  defp row(request) do
+    case Map.get(request, :agent_session_id) do
+      nil -> Foreman.AgentSessions.legacy(request)
+      id -> Foreman.AgentSessions.get(id)
+    end
+  end
+
+  defp role(%{kind: "build", parent_id: parent}) when is_binary(parent) do
+    case Foreman.AgentSessions.get(parent) do
+      %{name: name} -> "build under " <> name
+      nil -> "build"
+    end
+  end
+
+  defp role(%{kind: kind, harness: harness}), do: @roles[kind] || kind || harness
 
   @doc "The source shape cards use for an `agent_sessions` row."
   def source(%Foreman.AgentSession{} = row) do

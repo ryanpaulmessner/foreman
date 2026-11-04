@@ -1,7 +1,9 @@
 defmodule ForemanWeb.NeedsYouLiveTest do
   use ForemanWeb.ConnCase, async: false
   import Phoenix.LiveViewTest
+  import Mimic
   alias Foreman.Requests
+  setup :set_mimic_global
 
   setup do
     Foreman.Beads.Projection.replace(
@@ -25,7 +27,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     %{request: request}
   end
 
-  test "ended registered sessions explain why Go to session is hidden", %{
+  test "an ended source shows its end time and the Focus icon off", %{
     conn: conn,
     request: request
   } do
@@ -43,28 +45,51 @@ defmodule ForemanWeb.NeedsYouLiveTest do
 
     assert :ok = Foreman.SessionRegistry.reconcile(runner: fn _, _, _ -> {"", 0} end)
     {:ok, view, _} = live(conn, "/needs-you")
-    assert has_element?(view, "#session-ended-#{request.id}", "This session has ended.")
+    source = "#card-source-#{request.id}"
+    assert has_element?(view, source, "Asked by")
+    assert has_element?(view, "#{source} .bb-src-name", "build")
+    assert has_element?(view, source, "ended")
+    # The end time in the shared format, with the full time on hover.
+    assert has_element?(view, "#{source} time[title]")
+
+    assert has_element?(
+             view,
+             ~s(#card-focus-#{request.id}[disabled][title="The pane is closed"][aria-label="The pane is closed"])
+           )
+
+    refute render(view) =~ "This session has ended."
+    refute render(view) =~ "Go to session"
     refute has_element?(view, "#go-session-#{request.id}")
   end
 
-  test "every card has ticket context and agent asks can be withdrawn", %{
-    conn: conn,
-    request: request
-  } do
+  test "every card has its ticket in the header, context from its text, and can be withdrawn",
+       %{conn: conn, request: request} do
     {:ok, view, _} = live(conn, "/needs-you")
     assert has_element?(view, "#request-#{request.id} [data-ticket-heading]", "A ticket")
-    refute has_element?(view, "#context-#{request.id} h2")
-    assert has_element?(view, "#context-#{request.id}", "One-off")
+    assert has_element?(view, "#card-open-#{request.id} .bb-qhead", "Decision")
+    assert has_element?(view, "#card-open-#{request.id} .bb-qhead-title[title='A ticket']")
+    # What and Why now from the card text; the board's own context block is gone (c)8.
+    assert has_element?(view, "#card-context-#{request.id} dd", "Layout")
+    assert has_element?(view, "#card-context-#{request.id} dd", "Review")
+    assert has_element?(view, "#card-context-#{request.id}-more summary", "More context: Part of")
+    refute has_element?(view, "#context-#{request.id}")
+
+    for word <- ["One-off", "Internal", "Unsorted"],
+        do: refute(has_element?(view, "#request-#{request.id}", word))
+
     # An unregistered asker: the unknown source and no tmux command (spec acceptance 3).
     assert has_element?(
              view,
-             "#source-#{request.id}",
+             "#card-source-#{request.id}",
              "The board does not know which session asked this."
            )
 
-    refute has_element?(view, "#session-command-#{request.id}")
+    refute has_element?(view, "#card-source-#{request.id}", "Source unknown ·")
+    refute has_element?(view, "#card-focus-#{request.id}")
     refute has_element?(view, "#copy-session-#{request.id}")
-    refute has_element?(view, "#go-session-#{request.id}")
+    refute render(view) =~ "tmux "
+    refute has_element?(view, "#withdraw-#{request.id}")
+    view |> element("#card-withdraw-#{request.id}") |> render_click()
     assert has_element?(view, "#withdraw-#{request.id}")
 
     view
@@ -77,7 +102,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     assert Requests.get(request.id).state == "withdrawn"
   end
 
-  test "a registered coordinator card keeps its own Go to session target after dispatch", %{
+  test "a registered coordinator card keeps its own Focus target after dispatch", %{
     conn: conn
   } do
     old = System.get_env("PREVIEW")
@@ -111,16 +136,21 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       })
 
     {:ok, view, _} = live(conn, "/needs-you")
-    assert has_element?(view, "#source-#{request.id}", "coordinator · claude")
-    view |> element("#go-session-#{request.id}") |> render_click()
+    assert has_element?(view, "#card-source-#{request.id} .bb-src-name", "coordinator")
+    assert has_element?(view, "#card-source-#{request.id}", "main coordinator")
+    assert Foreman.RequestSource.view(Requests.get(request.id)).source.target == "%99999998"
+    view |> element("#card-focus-#{request.id}") |> render_click()
 
     assert has_element?(
              view,
-             ~s(#session-command-#{request.id} input[value^="tmux select-window -t '%99999998'"])
+             "#card-focus-info-#{request.id}.bb-status-info",
+             "Could not focus the terminal. tmux does not answer."
            )
   end
 
-  test "registered sources and preview fallback commands appear on page and drawer", %{conn: conn} do
+  test "registered sources show the Asked by row and the Focus icon on page and drawer", %{
+    conn: conn
+  } do
     old = System.get_env("PREVIEW")
     System.put_env("PREVIEW", "1")
 
@@ -152,25 +182,25 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     render_click(view, "open-request-drawer")
 
     for prefix <- ["", "drawer-"] do
+      source = "##{prefix}card-source-#{request.id}"
+      assert has_element?(view, "#{source} .bb-src-name", "relay-build")
+      assert has_element?(view, source, "build")
+      assert has_element?(view, source, "live")
+
       assert has_element?(
                view,
-               "##{prefix}source-#{request.id}",
-               "relay-build · pi · sample · s-1"
+               ~s|##{prefix}card-focus-#{request.id}[title="Focus terminal"]:not([disabled])|
              )
 
       assert has_element?(view, "##{prefix}option-detail-#{request.id}-0", "Keep access enabled")
-      view |> element("##{prefix}go-session-#{request.id}") |> render_click()
-
-      assert has_element?(
-               view,
-               ~s(##{prefix}session-command-#{request.id} input[value^="tmux select-window -t '%99999999'"])
-             )
-
-      assert has_element?(view, "##{prefix}copy-session-#{request.id}[phx-hook=CopyField]")
+      view |> element("##{prefix}card-focus-#{request.id}") |> render_click()
+      assert has_element?(view, "##{prefix}card-focus-info-#{request.id}", "tmux does not answer")
     end
+
+    assert Foreman.RequestSource.view(Requests.get(request.id)).source.target == "%99999999"
   end
 
-  test "ticket context shows epic, origin and plain Summary on page and drawer", %{
+  test "the header shows the Summary title and no board context block on page and drawer", %{
     conn: conn,
     request: request
   } do
@@ -204,7 +234,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     render_click(view, "open-request-drawer")
 
     for prefix <- ["", "drawer-"] do
-      selector = "##{prefix}context-#{request.id}"
+      card = "##{prefix}card-open-#{request.id}"
 
       assert has_element?(
                view,
@@ -212,38 +242,47 @@ defmodule ForemanWeb.NeedsYouLiveTest do
                "Fix mobile login"
              )
 
-      refute has_element?(view, "#{selector} h2")
-      assert has_element?(view, selector, "Feature")
-      assert has_element?(view, selector, "Mobile access")
-      assert has_element?(view, selector, "Support Board T-123")
-      assert has_element?(view, selector, "Login works on phones.")
+      assert has_element?(view, "#{card} .bb-qhead-title", "Fix mobile login")
+      refute has_element?(view, "##{prefix}context-#{request.id}")
+
+      # Decision 13: the board's Kind, Part of, From and summary lines go away.
+      for text <- ["Feature", "Mobile access", "Support Board T-123", "Login works on phones."],
+          do: refute(has_element?(view, card, text))
     end
   end
 
-  test "closed source windows show a notice without a stale command", %{request: request} do
-    request = %{
-      request
-      | kind: "session_waiting",
-        facts: %{"target" => "external", "pane" => "%99999999"}
-    }
+  test "a failed Focus terminal says why under the source row", %{conn: conn, request: request} do
+    row = Foreman.AgentSessionFixtures.agent_session(name: "build", pane_id: "%99999999")
+    Foreman.AgentSessionFixtures.asked_by(request, row)
+    {:ok, view, _} = live(conn, "/needs-you")
+    render_click(view, "open-request-drawer")
 
-    for prefix <- ["", "drawer-"] do
-      document =
-        render_component(&ForemanWeb.RequestContext.context/1,
-          request: request,
-          prefix: prefix,
-          focus: :window_gone
-        )
-        |> LazyHTML.from_fragment()
+    for {error, text} <- [
+          window_gone: "Could not focus the terminal. The window is closed.",
+          tmux_unavailable: "Could not focus the terminal. tmux does not answer.",
+          no_client: "Could not focus the terminal. No terminal is attached."
+        ],
+        prefix <- ["", "drawer-"] do
+      stub(Foreman.RequestSource, :focus, fn _ -> {:error, error} end)
+      view |> element("##{prefix}card-focus-#{request.id}") |> render_click()
+      line = "##{prefix}card-focus-info-#{request.id}"
+      assert has_element?(view, "#{line}.bb-status-info", text)
+      copy = "##{prefix}copy-session-#{request.id}"
 
-      assert document
-             |> LazyHTML.query("##{prefix}session-closed-#{request.id}")
-             |> LazyHTML.text()
-             |> String.trim() == "The session window is closed."
-
-      assert Enum.empty?(LazyHTML.query(document, "##{prefix}session-command-#{request.id}"))
-      assert Enum.empty?(LazyHTML.query(document, "##{prefix}copy-session-#{request.id}"))
+      if error == :no_client,
+        do:
+          assert(
+            has_element?(
+              view,
+              ~s(#{copy}[phx-hook=CopyField] input[value^="tmux select-window -t '%99999999'"])
+            )
+          ),
+        else: refute(has_element?(view, copy))
     end
+
+    stub(Foreman.RequestSource, :focus, fn _ -> :ok end)
+    view |> element("#card-focus-#{request.id}") |> render_click()
+    refute has_element?(view, "#card-focus-info-#{request.id}")
   end
 
   test "same-ticket cards have one group heading", %{conn: conn, request: request} do
@@ -261,6 +300,8 @@ defmodule ForemanWeb.NeedsYouLiveTest do
            |> LazyHTML.query("[data-ticket-heading]")
            |> Enum.count() == 1
 
+    view |> element("#card-withdraw-#{request.id}") |> render_click()
+
     view
     |> form("#withdraw-#{request.id}", withdraw: %{reason: "No longer needed"})
     |> render_submit()
@@ -276,7 +317,8 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       })
 
     {:ok, view, _} = live(conn, "/needs-you")
-    refute has_element?(view, "#withdraw-#{request.id}")
+    refute has_element?(view, "#card-withdraw-#{request.id}")
+    assert has_element?(view, "#card-wrong-question-#{request.id}")
 
     render_click(view, "resolve", %{
       "id" => request.id,
@@ -454,13 +496,13 @@ defmodule ForemanWeb.NeedsYouLiveTest do
                ~s(#attach-#{request.id}[phx-hook=CopyField] input[value*="attach -t"])
              )
 
-      refute has_element?(view, "#session-command-#{request.id}")
+      refute has_element?(view, "#copy-session-#{request.id}")
       assert Requests.get(request.id).state == "pending"
 
       render_click(view, "open-request-drawer")
       view |> element("#drawer-open-#{request.id}") |> render_click()
       assert has_element?(view, "#drawer-notice-#{request.id}", "No terminal is attached")
-      refute has_element?(view, "#drawer-session-command-#{request.id}")
+      refute has_element?(view, "#drawer-copy-session-#{request.id}")
 
       old = System.get_env("PREVIEW")
       System.put_env("PREVIEW", "1")
@@ -470,8 +512,14 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       end)
 
       for prefix <- ["", "drawer-"] do
-        view |> element("##{prefix}go-session-#{request.id}") |> render_click()
-        assert has_element?(view, "##{prefix}session-command-#{request.id}")
+        view |> element("##{prefix}card-focus-#{request.id}") |> render_click()
+
+        assert has_element?(
+                 view,
+                 "##{prefix}card-focus-info-#{request.id}",
+                 "tmux does not answer"
+               )
+
         refute has_element?(view, "##{prefix}notice-#{request.id}")
       end
     end

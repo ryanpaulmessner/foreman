@@ -54,7 +54,7 @@ defmodule ForemanWeb.CardDocsLiveTest do
     assert has_element?(view, "#{question} p", "First paragraph.")
     assert has_element?(view, "#{question} p", "Which of these?")
     assert has_element?(view, "#{question} li strong", "Wide")
-    assert has_element?(view, "#text-#{request.id} code", "code")
+    assert has_element?(view, "#card-context-#{request.id} code", "code")
     refute render(view) =~ "<script>alert"
     refute has_element?(view, "#question-#{request.id}-more")
 
@@ -87,7 +87,7 @@ defmodule ForemanWeb.CardDocsLiveTest do
            )
 
     assert has_element?(view, "#{card} a[href='#{doc_href("docs/spec.md")}']")
-    assert has_element?(view, "#{card} #text-#{request.id}", "slices/one/reviews/99.md")
+    assert has_element?(view, "#{card} #card-context-#{request.id}", "slices/one/reviews/99.md")
     refute has_element?(view, "#{card} a[href*='99.md']")
     refute has_element?(view, "#{card} a[href*='secret']")
   end

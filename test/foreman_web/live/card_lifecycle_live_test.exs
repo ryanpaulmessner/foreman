@@ -60,6 +60,8 @@ defmodule ForemanWeb.CardLifecycleLiveTest do
 
   test "Wrong question ends the card with the required reason", %{conn: conn, request: r} do
     {:ok, view, _} = live(conn, "/needs-you")
+    refute has_element?(view, "#wrong-question-#{r.id}")
+    view |> element("#card-wrong-question-#{r.id}") |> render_click()
     assert has_element?(view, "#wrong-question-#{r.id} textarea[required]")
 
     view

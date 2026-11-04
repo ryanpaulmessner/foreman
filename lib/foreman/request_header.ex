@@ -10,6 +10,22 @@ defmodule Foreman.RequestHeader do
     build(ticket, tickets, Foreman.RuntimeState.repos(), request.repo_key)
   end
 
+  @doc "The card header's ticket title: the Summary title, else the ticket title. One row read."
+  def title(request) do
+    raw =
+      Foreman.Repo.one(
+        from b in "beads",
+          where: b.repo_key == ^request.repo_key and b.bead_id == ^request.bead_id,
+          select: b.raw
+      )
+
+    ticket = raw || fallback_ticket(request)
+    field(summary(ticket["description"] || ""), "Title") || ticket["title"] || request.bead_id
+  end
+
+  # TODO fm-49x.3: read projected Summary once the projection exposes it.
+  defp summary(body), do: capture(~r/^## Summary\r?\n(.*?)(?=^## |\z)/ms, body) || ""
+
   defp fallback_ticket(request) do
     overlay = Foreman.Overlay.get({request.repo_key, request.bead_id})
     %{"title" => (overlay && Map.get(overlay, :title)) || request.bead_id}
@@ -17,8 +33,7 @@ defmodule Foreman.RequestHeader do
 
   def build(ticket, tickets \\ [], repos \\ [], repo \\ "") do
     body = ticket["description"] || ""
-    # TODO fm-49x.3: read projected Summary once the projection exposes it.
-    summary = capture(~r/^## Summary\r?\n(.*?)(?=^## |\z)/ms, body) || ""
+    summary = summary(body)
 
     nodes =
       Enum.map([ticket | tickets], fn raw ->

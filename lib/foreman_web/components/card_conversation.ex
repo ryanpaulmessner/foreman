@@ -1,5 +1,9 @@
 defmodule ForemanWeb.CardConversation do
-  @moduledoc "A request's question box and durable Markdown conversation."
+  @moduledoc """
+  A request's durable Markdown thread: the questions asked with Ask about this and
+  the replies. It shows only when the card has messages. The Ask about this box
+  lives in the card footer (`ForemanWeb.OpenCard`).
+  """
   use ForemanWeb, :live_component
 
   # Each card owns a stream so a long thread is not retained in the page's assigns.
@@ -15,24 +19,8 @@ defmodule ForemanWeb.CardConversation do
   defp update_conversation(assigns, socket, messages) do
     socket =
       socket
-      |> assign(Map.merge(%{prefix: "", event: "resolve", card: :ready, repos: nil}, assigns))
-      |> assign(
-        source:
-          if(assigns.request.state == "pending",
-            do: Foreman.RequestSource.for_request(assigns.request)
-          ),
-        empty?: messages == []
-      )
-      |> assign_new(:form, fn -> to_form(%{"text" => ""}, as: :card_question) end)
-
-    socket =
-      case socket.assigns.card do
-        {state, text} ->
-          assign(socket, card: state, form: to_form(%{"text" => text}, as: :card_question))
-
-        _ ->
-          socket
-      end
+      |> assign(Map.merge(%{prefix: "", repos: nil, class: nil}, assigns))
+      |> assign(empty?: messages == [])
 
     socket =
       if socket.assigns[:streams],
@@ -45,31 +33,19 @@ defmodule ForemanWeb.CardConversation do
     stream(socket, :messages, messages, reset: true)
   end
 
-  def handle_event("retry", _, socket) do
-    {state, []} = Foreman.WaitingCard.step(socket.assigns.card, :retry, %{})
-
-    {:noreply,
-     assign(socket,
-       card: state,
-       source: Foreman.RequestSource.for_request(socket.assigns.request)
-     )}
-  end
-
   def render(assigns) do
     ~H"""
-    <section
-      id={@id}
-      class={[
-        (@empty? and @request.state != "pending") && "hidden",
-        "space-y-3 rounded-lg border border-base bg-base p-4"
-      ]}
-    >
-      <div id={@id <> "-messages"} phx-update="stream" class="space-y-3">
+    <section id={@id} class={[@empty? && "hidden", @class]}>
+      <div
+        id={@id <> "-messages"}
+        phx-update="stream"
+        class="space-y-3 rounded-lg border border-base bg-base p-4"
+      >
         <div
           :for={{id, message} <- @streams.messages}
           id={id}
           data-card-message
-          class="space-y-2 border-b border-base pb-3 last:border-0"
+          class="space-y-2 border-b border-base pb-3 last:border-0 last:pb-0"
         >
           <div class="flex items-center justify-between gap-3 text-xs text-foreground-softer">
             <span data-card-message-author>{Foreman.CardMessages.author_name(message.author)}</span>
@@ -81,75 +57,6 @@ defmodule ForemanWeb.CardConversation do
             repo={@request.repo_key}
             repos={@repos}
           />
-        </div>
-      </div>
-      <div :if={@request.state == "pending"} id={@prefix <> "card-question-" <> @request.id}>
-        <%= if @source || @form[:text].value != "" do %>
-          <.form
-            for={@form}
-            id={@prefix <> "card-question-form-" <> @request.id}
-            phx-submit={@event}
-            phx-value-id={@request.id}
-            phx-value-action="card-question"
-            class="space-y-3"
-          >
-            <.input
-              field={@form[:text]}
-              id={@prefix <> "card-question-text-" <> @request.id}
-              type="textarea"
-              label="Ask about this"
-              maxlength="1900"
-              rows="2"
-              required
-            />
-            <button
-              :if={@card == :ready and @source}
-              id={@prefix <> "card-question-send-" <> @request.id}
-              type="submit"
-              phx-disable-with="Sending…"
-              class="rounded-md border border-base px-3 py-2 text-sm transition hover:bg-sunken"
-            >
-              Send question
-            </button>
-          </.form>
-        <% else %>
-          <h3 class="text-sm font-medium">Ask about this</h3>
-        <% end %>
-        <div :if={is_nil(@source) or @card != :ready} class="mt-2 space-y-2">
-          <ForemanWeb.StatusLine.status_line
-            id={@prefix <> "card-question-unavailable-" <> @request.id}
-            kind={if(@source, do: :error, else: :info)}
-            retry="retry"
-            retry_id={@prefix <> "card-question-retry-" <> @request.id}
-            retry_target={@myself}
-          >
-            {cond do
-              is_nil(@source) ->
-                "Source unknown. Copy the question to the agent's chat."
-
-              @card == :window_gone ->
-                "The session window is closed. The question was not sent."
-
-              @card == :prompt_busy ->
-                "The session is not at an empty prompt. The question was not sent."
-
-              true ->
-                "Cannot send to the session. The question was not sent."
-            end}
-          </ForemanWeb.StatusLine.status_line>
-          <ForemanWeb.CopyField.copy_field
-            id={@prefix <> "card-question-copy-" <> @request.id}
-            value={"[card question #{@request.id}] #{@form[:text].value}"}
-            label="Question to copy"
-          />
-          <div :if={@source} class="space-y-2 text-sm">
-            <p>Copy this command to your terminal.</p>
-            <ForemanWeb.CopyField.copy_field
-              id={@prefix <> "card-question-command-" <> @request.id}
-              value={Foreman.RequestSource.command(@source)}
-              label="Command to focus the session"
-            />
-          </div>
         </div>
       </div>
     </section>

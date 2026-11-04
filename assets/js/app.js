@@ -48,6 +48,13 @@ const liveSocket = new LiveSocket("/live", Socket, {
 
 // Show progress bar on live navigation and form submits
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
+// Opening a card footer panel scrolls the card to the top (Foreman.CardFooterPanel, rule P2).
+window.addEventListener("phx:card-scroll-top", ({detail}) => {
+  requestAnimationFrame(() => {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    document.getElementById(detail.id)?.scrollIntoView({block: "start", behavior: reduce ? "auto" : "smooth"})
+  })
+})
 window.addEventListener("phx:page-loading-start", _info => topbar.show(300))
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 
