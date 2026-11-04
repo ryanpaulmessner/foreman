@@ -218,6 +218,42 @@ defmodule Foreman.CloseOutNagsTest do
     assert named["payload"]["coordinator"] == "coord-c"
   end
 
+  # The exact call pi-window makes from the coordinator's pane (fm-9mm.11).
+  test "a pi-window dispatch with --name, --pi-session and --coordinator has an owner", c do
+    {:ok, _} =
+      Foreman.SessionRegistry.register(%{
+        "name" => "coord-b",
+        "pane" => "%77",
+        "workdir" => "/tmp",
+        "harness" => "claude"
+      })
+
+    pi_session = Ecto.UUID.generate()
+
+    {:ok, %{request: request}} =
+      Foreman.CLI.parse(
+        ~w(dispatch s-3 --name b3 --pi-session #{pi_session} --coordinator coord-b
+           --window %80 --harness pi --branch feat/three),
+        tmux_pane: "%77",
+        actor: "pi",
+        session: "coord-b"
+      )
+
+    assert {200, _} = Foreman.AgentCommands.execute(Map.put(request, "repo", "sample"))
+    assert CloseOutNags.owner({"sample", "s-3"}) == {:ok, "coord-b"}
+
+    build = Foreman.AgentSessions.live_by_name("b3")
+    assert build.kind == "build"
+    assert build.pane_id == "%80"
+    assert build.conversation_id == pi_session
+    assert build.parent_id == Foreman.AgentSessions.live_by_name("coord-b").id
+
+    Overlay.apply_event({"sample", "s-3"}, {:report, %{path: "/tmp/r3.md"}})
+    run(c, 31)
+    refute "ownerless" in Enum.map(results("s-3"), &elem(&1, 0))
+    assert {"delivered", "coord-b", _} = List.last(results("s-3"))
+  end
+
   test "a coordinator that built and committed the work itself owns it" do
     Foreman.Agent.event("sample", "s-3", %{
       "event" => "commit",
