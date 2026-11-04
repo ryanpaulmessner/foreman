@@ -5,7 +5,7 @@ type: decision
 status: open
 priority: 2
 parent: fm-3fm
-blocked_by: ["fm-3fm.1","fm-3fm.2","fm-3fm.3"]
+blocked_by: ["fm-3fm.1","fm-3fm.2","fm-3fm.3","fm-3fm.6","fm-3fm.7"]
 related: []
 supersedes: []
 discovered_from: null
@@ -18,3 +18,4 @@ close_reason: null
 ## Question
 
 A statechart for the nudge, per initiative: the event that starts it (next piece ready and the initiative in the top N), the first-nudge delay and the repeat interval, what stops it (dispatch recorded, initiative drops below N, Ryan pauses it), what happens when the note is skipped (busy, ended, gone pane) and when the coordinator has no live session (goes to the main coordinator, per the map Notes), and how it avoids nudging two coordinators for one ticket. Reuse or extend the close-out nag machine if the research says so. Model-check the rules and let Ryan react to the chart.
+Also from the research (fm-3fm.1): when a note was delivered but the ticket stays queued, decide whether the board resends it, how often, and whether Ryan sees a signal. The main-coordinator fallback must check that the row is live.

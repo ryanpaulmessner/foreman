@@ -35,9 +35,11 @@ An approved spec, with its design pack, for an **initiative plan** on the board:
 
 ## Decisions so far
 
+- [How do coordinators pick their next ticket today, and where would a board nudge land?](tickets/fm-3fm.1.md): by hand (orient recommends, dispatch waits for a yes) and blind to board priority; build a new start-nudge machine on the close-out nag pattern; fm-c2w.27's skill and ready parts fold in here. Research: branch research/plan-nudge, docs/research/plan-nudge.md.
+
 ## Not yet specified
 
-- Whether fm-c2w.27 (orient and dispatch read board priority) folds into this effort or ships first on its own; depends on the research answer.
+- The orient, dispatch and foreman ready changes that make coordinators read the plan (folded in from fm-c2w.27); sharp once the nudge statechart is chosen.
 - How the plan shows on other pages: Initiatives ordering, Needs you, This week and the Friday report.
 - What Ryan sees to judge that the plan works (for example "top initiative idle for 2 h" as a signal), and whether that is a page, a badge or nothing.
 - Work repo (ReportSystem, human merge) initiatives next to foreman and skills initiatives in one list: any rule that differs by repo.
