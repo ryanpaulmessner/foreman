@@ -26,7 +26,7 @@ defmodule ForemanWeb.BatchLiveTest do
       assert has_element?(view, "#batch-#{r.id} input[type=checkbox][value=a]")
       assert has_element?(view, "#batch-#{r.id} input[type=checkbox][value=b]")
       assert has_element?(view, "#batch-#{r.id}", "Fix timeout")
-      assert has_element?(view, "#wrong-question-#{r.id}")
+      assert has_element?(view, "#card-wrong-question-#{r.id}", "Wrong question")
       view |> form("#batch-#{r.id}", batch: %{items: selected}) |> render_submit()
       assert Requests.get(r.id).outcome == %{"answer" => selected}
       refute has_element?(view, "#request-#{r.id}")

@@ -69,21 +69,20 @@ defmodule ForemanWeb.CardSharedFixesTest do
     refute view |> element("#request-drawer") |> render() =~ "break-all"
   end
 
-  test "the Always box has its full label next to the box", %{conn: conn} do
+  test "cards have no Always box and an answer from a card is not a standing answer", %{
+    conn: conn
+  } do
     request = decision("pi", "Which layout?")
     {:ok, view, _} = live(conn, "/needs-you")
-
-    assert has_element?(
-             view,
-             "#decision-#{request.id} .bb-check .label:has(#always-#{request.id})",
-             "Always use this answer"
-           )
+    refute has_element?(view, "#always-#{request.id}")
+    refute has_element?(view, "#decision-#{request.id} .bb-check")
 
     view
-    |> form("#decision-#{request.id}", decision: %{note: "Friday", always: "true"})
+    |> form("#decision-#{request.id}", decision: %{note: "Friday"})
     |> render_submit(%{"action" => "answer"})
 
-    assert [%{answer: "Friday"}] = Foreman.Answers.standing()
+    assert Requests.get(request.id).state == "answered"
+    assert Foreman.Answers.standing() == []
   end
 
   test "no actor word is a label on a card", %{conn: conn} do

@@ -3,6 +3,15 @@ defmodule ForemanWeb.RequestDrawer do
   use ForemanWeb, :html
   import Phoenix.LiveView
   alias Fluxon.Components.Sheet
+  alias ForemanWeb.CardItems
+
+  @cards [
+    stream: :drawer_requests,
+    ui: :drawer_card_ui,
+    footers: :drawer_card_footers,
+    headings: :drawer_headings,
+    prefix: "drawer-"
+  ]
 
   def mount(socket) do
     socket
@@ -13,6 +22,7 @@ defmodule ForemanWeb.RequestDrawer do
       drawer_headings: MapSet.new(),
       drawer_error: nil
     )
+    |> CardItems.assigns(@cards)
     |> stream_configure(:drawer_requests, dom_id: &("drawer-request-" <> &1.id))
     |> stream(:drawer_requests, [])
     |> attach_hook(:request_drawer, :handle_event, &handle_event/3)
@@ -30,7 +40,7 @@ defmodule ForemanWeb.RequestDrawer do
           stream_delete_by_dom_id(socket, :drawer_requests, "drawer-request-" <> id)
         end)
 
-      items = ForemanWeb.NeedsYouLive.grouped(pending)
+      items = CardItems.with_state(socket, @cards, ForemanWeb.NeedsYouLive.grouped(pending))
       headings = items |> Enum.filter(& &1.heading) |> MapSet.new(& &1.id)
 
       items
@@ -42,6 +52,7 @@ defmodule ForemanWeb.RequestDrawer do
            do: socket,
            else: stream_insert(socket, :drawer_requests, item, at: index)
       end)
+      |> CardItems.prune(@cards, ids)
       |> assign(:drawer_ids, ids)
       |> assign(:drawer_versions, versions)
       |> assign(:drawer_headings, headings)
@@ -57,32 +68,26 @@ defmodule ForemanWeb.RequestDrawer do
   defp handle_event("close-request-drawer", _, socket),
     do: {:halt, transition(socket, :close)}
 
+  defp handle_event("drawer-resolve-text", params, socket),
+    do: {:halt, CardItems.text(socket, @cards, params)}
+
   defp handle_event("drawer-resolve", params, socket) do
+    outcome = ForemanWeb.NeedsYouLive.resolve(params)
+
     socket =
-      case ForemanWeb.NeedsYouLive.resolve(params) do
+      case outcome do
         {:navigate, path} ->
           push_navigate(socket, to: path)
 
         {:ok, _} ->
-          assign(socket, :drawer_error, nil)
+          socket
+          |> assign(:drawer_error, nil)
+          |> CardItems.sent(@cards, params, outcome)
 
         {:card, id, card} ->
-          case Foreman.Requests.get(id) do
-            %{state: "pending"} = request ->
-              socket
-              |> assign(:drawer_error, nil)
-              |> stream_insert(
-                :drawer_requests,
-                ForemanWeb.NeedsYouLive.item(
-                  request,
-                  card,
-                  MapSet.member?(socket.assigns.drawer_headings, id)
-                )
-              )
-
-            _ ->
-              socket
-          end
+          socket
+          |> assign(:drawer_error, nil)
+          |> CardItems.notice(@cards, id, card)
 
         {:error, _} ->
           assign(socket, :drawer_error, "Request not updated")
@@ -146,11 +151,7 @@ defmodule ForemanWeb.RequestDrawer do
         <ForemanWeb.NeedsYouLive.request_card
           :for={{id, item} <- @streams.drawer_requests}
           id={id}
-          request={item.request}
-          card={item.card}
-          question={item.question}
-          focus={item.focus}
-          heading={item.heading}
+          item={item}
           prefix="drawer-"
           event="drawer-resolve"
         />

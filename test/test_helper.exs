@@ -10,6 +10,7 @@ Mimic.copy(Phoenix.Token)
 Mimic.copy(File)
 Mimic.copy(Foreman.SessionTmux)
 Mimic.copy(Foreman.Events)
+Mimic.copy(Foreman.RequestSource)
 
 ExUnit.start()
 
