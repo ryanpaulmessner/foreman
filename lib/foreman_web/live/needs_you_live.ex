@@ -2,6 +2,15 @@ defmodule ForemanWeb.NeedsYouLive do
   use ForemanWeb, :live_view
   alias Foreman.Requests
   alias Fluxon.Components.{Button, Badge}
+  alias ForemanWeb.{CardFooter, CardItems}
+
+  @cards [
+    stream: :pending,
+    ui: :card_ui,
+    footers: :card_footers,
+    headings: :pending_headings,
+    prefix: ""
+  ]
 
   def mount(_, _, socket) do
     if connected?(socket), do: Process.send_after(self(), :reconcile, 3_000)
@@ -11,6 +20,7 @@ defmodule ForemanWeb.NeedsYouLive do
      |> assign(:pending_ids, MapSet.new())
      |> assign(:pending_versions, %{})
      |> assign(:pending_headings, MapSet.new())
+     |> ForemanWeb.CardItems.assigns(@cards)
      |> assign(panel: Foreman.CardPanel.__fsm__(:initial), panel_doc: nil, card_repos: [])
      |> stream_configure(:pending, dom_id: &("request-" <> &1.id))
      |> stream(:pending, [])
@@ -54,7 +64,13 @@ defmodule ForemanWeb.NeedsYouLive do
     end
   end
 
-  def handle_event("resolve", params, socket), do: {:noreply, result(socket, resolve(params))}
+  def handle_event("resolve", params, socket) do
+    outcome = resolve(params)
+    {:noreply, socket |> CardItems.sent(@cards, params, outcome) |> result(outcome)}
+  end
+
+  def handle_event("resolve-text", params, socket),
+    do: {:noreply, CardItems.text(socket, @cards, params)}
 
   # Document links on cards and in the panel open in the side panel; the hook
   # leaves modified clicks (new tab) to the browser, which opens the viewer.
@@ -94,10 +110,20 @@ defmodule ForemanWeb.NeedsYouLive do
        |> ForemanWeb.TicketDetail.refresh()}
 
   @doc "Resolves a shared request form, regardless of its page or drawer location."
-  def resolve(%{"id" => id, "action" => "batch-answer"} = params) do
-    ids = get_in(params, ["batch", "items"]) || []
-    Requests.resolve(id, :answer, %{"answer" => ids})
-  end
+  def resolve(%{"id" => id, "action" => "ask"} = params),
+    do: ask(id, CardFooter.text(params) || "")
+
+  def resolve(%{"id" => id, "action" => "wrong-question"} = params),
+    do: Requests.resolve(id, :wrong_question, %{"note" => CardFooter.text(params)})
+
+  def resolve(%{"id" => id, "action" => "withdraw"} = params),
+    do: Requests.withdraw_from_card(id, CardFooter.text(params))
+
+  def resolve(%{"id" => id, "action" => "batch-answer", "batch" => batch}), do: batch(id, batch)
+
+  # Enter in the batch form submits it with no button: the answer.
+  def resolve(%{"id" => id, "batch" => batch} = params) when not is_map_key(params, "action"),
+    do: batch(id, batch)
 
   def resolve(%{"id" => id, "decision" => params, "action" => "answer"}) do
     answer = if params["choice"] in [nil, ""], do: params["note"], else: params["choice"]
@@ -105,8 +131,7 @@ defmodule ForemanWeb.NeedsYouLive do
     Requests.resolve(id, :answer, %{
       "answer" => answer,
       "note" => params["note"],
-      "image_comments" => params["image_comments"],
-      "always" => params["always"] in [true, "true"]
+      "image_comments" => params["image_comments"]
     })
   end
 
@@ -125,16 +150,6 @@ defmodule ForemanWeb.NeedsYouLive do
     end
   end
 
-  def resolve(%{
-        "id" => id,
-        "action" => "wrong-question",
-        "wrong_question" => %{"reason" => reason}
-      }),
-      do: Requests.resolve(id, :wrong_question, %{"note" => reason})
-
-  def resolve(%{"id" => id, "action" => "withdraw", "withdraw" => %{"reason" => reason}}),
-    do: Requests.withdraw_from_card(id, reason)
-
   def resolve(%{"id" => id, "action" => "go-session"}) do
     with request when not is_nil(request) <- Requests.get(id),
          source when not is_nil(source) <- Foreman.RequestSource.for_request(request) do
@@ -147,16 +162,8 @@ defmodule ForemanWeb.NeedsYouLive do
     end
   end
 
-  def resolve(%{"id" => id, "action" => "card-question", "card_question" => %{"text" => text}}) do
-    case Foreman.CardMessages.ask(id, text) do
-      {:ok, message} -> {:ok, message}
-      {:error, "refused in preview"} -> question_result(id, {:error, :tmux_unavailable}, text)
-      {:error, :source_unknown} -> question_result(id, {:error, :window_gone}, text)
-      error -> question_result(id, error, text)
-    end
-  end
-
-  def resolve(%{"id" => id, "action" => "complete"}), do: Requests.resolve(id, :complete, %{})
+  def resolve(%{"id" => id, "action" => "complete"} = params),
+    do: Requests.resolve(id, :complete, note(get_in(params, ["chore", "note"])))
 
   def resolve(%{"id" => id, "action" => "continue"}), do: Foreman.SessionWaiting.continue(id)
 
@@ -186,9 +193,35 @@ defmodule ForemanWeb.NeedsYouLive do
 
   def resolve(_), do: {:error, :invalid_action}
 
-  defp question_result(id, result, text) do
+  defp batch(id, batch),
+    do:
+      Requests.resolve(id, :answer, Map.put(note(batch["note"]), "answer", batch["items"] || []))
+
+  defp note(text) when is_binary(text) and text != "", do: %{"note" => text}
+  defp note(_), do: %{}
+
+  # Ask (Decision 18): a live source gets the question; otherwise the card shows
+  # the copy field, and a failed send shows why.
+  defp ask(id, text) do
+    with false <- String.trim(text) == "",
+         %{state: "pending"} = request <- Requests.get(id),
+         %{state: :live} <- Foreman.RequestSource.view(request) do
+      case Foreman.CardMessages.ask(id, text) do
+        {:ok, message} -> {:ok, message}
+        {:error, "refused in preview"} -> ask_failed(id, {:error, :tmux_unavailable}, text)
+        {:error, :source_unknown} -> {:card, id, {:ask, :unsendable, nil, text}}
+        error -> ask_failed(id, error, text)
+      end
+    else
+      true -> {:error, :text_required}
+      %{state: source} when is_atom(source) -> {:card, id, {:ask, :unsendable, nil, text}}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp ask_failed(id, result, text) do
     case card(id, result) do
-      {:card, ^id, state} -> {:card, id, {:question, {state, text}}}
+      {:card, ^id, reason} -> {:card, id, {:ask, :failed, reason, text}}
       error -> error
     end
   end
@@ -217,39 +250,6 @@ defmodule ForemanWeb.NeedsYouLive do
     end
   end
 
-  @doc "A pending-stream entry: the request and its card notice."
-  def item(request, card \\ Foreman.WaitingCard.__fsm__(:initial), heading \\ false)
-
-  def item(request, {:focus, state}, heading),
-    do: %{
-      id: request.id,
-      request: request,
-      card: :ready,
-      focus: state,
-      question: :ready,
-      heading: heading
-    }
-
-  def item(request, {:question, state}, heading),
-    do: %{
-      id: request.id,
-      request: request,
-      card: :ready,
-      focus: :ready,
-      question: state,
-      heading: heading
-    }
-
-  def item(request, card, heading),
-    do: %{
-      id: request.id,
-      request: request,
-      card: card,
-      focus: :ready,
-      question: :ready,
-      heading: heading
-    }
-
   def grouped(pending) do
     keys = pending |> Enum.map(&{&1.repo_key, &1.bead_id}) |> Enum.uniq()
     groups = Enum.group_by(pending, &{&1.repo_key, &1.bead_id})
@@ -257,7 +257,9 @@ defmodule ForemanWeb.NeedsYouLive do
     Enum.flat_map(keys, fn key ->
       groups[key]
       |> Enum.with_index()
-      |> Enum.map(fn {request, index} -> item(request, :ready, index == 0) end)
+      |> Enum.map(fn {request, index} ->
+        %{id: request.id, request: request, heading: index == 0}
+      end)
     end)
   end
 
@@ -272,19 +274,10 @@ defmodule ForemanWeb.NeedsYouLive do
   defp result(socket, {:navigate, path}), do: push_navigate(socket, to: path)
 
   defp result(socket, {:card, id, card}) do
-    case Requests.get(id) do
-      %{state: "pending"} = request ->
-        [request] = Requests.with_priority([request])
-
-        stream_insert(
-          socket,
-          :pending,
-          item(request, card, MapSet.member?(socket.assigns.pending_headings, id))
-        )
-
-      _ ->
-        refresh(socket)
-    end
+    if MapSet.member?(socket.assigns.pending_ids, id) and
+         match?(%{state: "pending"}, Requests.get(id)),
+       do: CardItems.notice(socket, @cards, id, card),
+       else: refresh(socket)
   end
 
   defp result(socket, {:ok, _}), do: refresh(socket)
@@ -297,7 +290,7 @@ defmodule ForemanWeb.NeedsYouLive do
     ids = MapSet.new(pending, & &1.id)
     socket = assign(socket, :card_repos, Foreman.CardText.repos())
     previous = socket.assigns.pending_ids
-    items = grouped(pending)
+    items = CardItems.with_state(socket, @cards, grouped(pending))
     messages = Foreman.CardMessages.versions(MapSet.to_list(ids))
     versions = Map.new(pending, &{&1.id, {messages[&1.id], &1.edited_at, &1.similar_question}})
     headings = items |> Enum.filter(& &1.heading) |> MapSet.new(& &1.id)
@@ -320,6 +313,7 @@ defmodule ForemanWeb.NeedsYouLive do
       end)
 
     socket
+    |> CardItems.prune(@cards, ids)
     |> assign(:pending_ids, ids)
     |> assign(:pending_versions, versions)
     |> assign(:pending_headings, headings)
@@ -370,11 +364,7 @@ defmodule ForemanWeb.NeedsYouLive do
             <.request_card
               :for={{id, item} <- @streams.pending}
               id={id}
-              request={item.request}
-              card={item.card}
-              question={item.question}
-              focus={item.focus}
-              heading={item.heading}
+              item={item}
               repos={@card_repos}
             />
           </div>
@@ -531,660 +521,25 @@ defmodule ForemanWeb.NeedsYouLive do
   end
 
   attr :id, :string, required: true
-  attr :request, :any, required: true
-
+  attr :item, :map, required: true
   attr :prefix, :string, default: ""
   attr :event, :string, default: "resolve"
-  attr :card, :atom, default: :ready
-  attr :question, :any, default: :ready
-  attr :focus, :atom, default: :ready
   attr :repos, :list, default: nil
 
-  attr :heading, :boolean, default: false
-
+  @doc "One pending card from a stream item (`ForemanWeb.CardItems.item/4`)."
   def request_card(assigns) do
-    assigns =
-      assign(
-        assigns,
-        :title,
-        if(assigns.heading, do: Foreman.RequestHeader.for_request(assigns.request).title)
-      )
-
     ~H"""
-    <article id={@id}>
-      <h2 :if={@heading} data-ticket-heading="true" class="mb-3 text-base font-semibold">{@title}</h2>
-      <div
-        :if={@request.edited_at || @request.similar_question}
-        class="mb-2 flex gap-3 text-xs text-foreground-softer"
-      >
-        <span :if={@request.edited_at} id={@prefix <> "updated-" <> @request.id}>
-          Updated <ForemanWeb.TicketDetail.timestamp at={@request.edited_at} />
-        </span>
-        <span :if={@request.similar_question} id={@prefix <> "duplicate-" <> @request.id}>
-          Similar question
-        </span>
-      </div>
-      <.card_body
-        id={"card-" <> @id}
-        request={@request}
-        prefix={@prefix}
-        event={@event}
-        card={@card}
-        focus={@focus}
-        heading={@heading}
-        repos={@repos}
-      />
-      <div
-        :if={@request.kind in ["push", "open_pr", "merge", "session_waiting"]}
-        class="mt-3 space-y-2"
-      >
-        <ForemanWeb.RequestCard.agent_text
-          :if={@request.facts["question"] && @request.kind in ["push", "open_pr", "merge"]}
-          id={@prefix <> "question-" <> @request.id}
-          text={@request.facts["question"]}
-          repo={@request.repo_key}
-          repos={@repos}
-        />
-        <ForemanWeb.RequestCard.agent_text
-          :if={@request.facts["text"]}
-          id={@prefix <> "text-" <> @request.id}
-          text={@request.facts["text"]}
-          repo={@request.repo_key}
-          repos={@repos}
-        />
-        <ForemanWeb.RequestCard.doc_links id={@prefix <> "docs-" <> @request.id} request={@request} />
-      </div>
-      <.wrong_question request={@request} prefix={@prefix} event={@event} />
-      <.live_component
-        module={ForemanWeb.CardConversation}
-        id={@prefix <> "card-conversation-" <> @request.id}
-        request={@request}
-        prefix={@prefix}
-        event={@event}
-        card={@question}
-        repos={@repos}
-      />
-    </article>
-    """
-  end
-
-  defp wrong_question(assigns) do
-    assigns = assign(assigns, :form, to_form(%{"reason" => ""}, as: :wrong_question))
-
-    ~H"""
-    <details id={@prefix <> "wrong-question-panel-" <> @request.id} class="mt-2 text-sm">
-      <summary class="cursor-pointer text-foreground-softer">Wrong question</summary>
-      <.form
-        for={@form}
-        id={@prefix <> "wrong-question-" <> @request.id}
-        phx-submit={@event}
-        phx-value-id={@request.id}
-        phx-value-action="wrong-question"
-        class="mt-3 space-y-3"
-      >
-        <.input
-          field={@form[:reason]}
-          id={@prefix <> "wrong-question-reason-" <> @request.id}
-          type="textarea"
-          label="Reason"
-          required
-          rows="2"
-          class="mt-2 block w-full rounded-lg border border-base bg-sunken px-3 py-2 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-        />
-        <Button.button id={@prefix <> "submit-wrong-question-" <> @request.id} type="submit">
-          Wrong question
-        </Button.button>
-      </.form>
-    </details>
-    """
-  end
-
-  defp card_body(%{request: %{kind: kind}} = assigns) when kind in ["push", "open_pr", "merge"],
-    do: action_card(assigns)
-
-  defp card_body(%{request: %{kind: "batch"}} = assigns), do: batch_card(assigns)
-  defp card_body(%{request: %{kind: "chore"}} = assigns), do: chore_card(assigns)
-  defp card_body(%{request: %{kind: "session_waiting"}} = assigns), do: waiting_card(assigns)
-  defp card_body(assigns), do: decision_card(assigns)
-
-  defp batch_card(assigns) do
-    assigns = assign(assigns, :form, to_form(%{}, as: :batch))
-
-    ~H"""
-    <article id={@id} class="space-y-4 rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
-      <ForemanWeb.RequestContext.context
-        request={@request}
-        prefix={@prefix}
-        event={@event}
-        focus={@focus}
-        heading={@heading}
-      />
-      <div class="flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
-        <Badge.badge>Batch</Badge.badge>
-        <ForemanWeb.RequestCard.ticket_link
-          id={@prefix <> "ticket-link-" <> @request.id}
-          request={@request}
-          link={if(@prefix == "", do: :patch, else: :navigate)}
-        />
-        <ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} />
-      </div>
-      <ForemanWeb.RequestCard.agent_text
-        id={@prefix <> "question-" <> @request.id}
-        text={@request.facts["question"]}
-        repo={@request.repo_key}
-        repos={@repos}
-        class="fm-card-question"
-      />
-      <ForemanWeb.RequestCard.agent_text
-        id={@prefix <> "text-" <> @request.id}
-        text={@request.facts["text"]}
-        repo={@request.repo_key}
-        repos={@repos}
-      />
-      <ForemanWeb.RequestCard.doc_links id={@prefix <> "docs-" <> @request.id} request={@request} />
-      <.form
-        for={@form}
-        id={@prefix <> "batch-" <> @request.id}
-        phx-submit={@event}
-        phx-value-id={@request.id}
-        phx-value-action="batch-answer"
-        class="space-y-4"
-      >
-        <fieldset class="space-y-2">
-          <legend class="sr-only">Items</legend>
-          <label
-            :for={{item, index} <- Enum.with_index(@request.facts["items"])}
-            class="flex cursor-pointer items-start gap-3 rounded-lg border border-base p-3 transition hover:bg-sunken has-[:checked]:border-primary"
-          >
-            <input
-              id={"#{@prefix}batch-item-#{@request.id}-#{index}"}
-              type="checkbox"
-              name="batch[items][]"
-              value={item["id"]}
-              class="mt-1 size-4 shrink-0 accent-current"
-            />
-            <span class="min-w-0 break-words">
-              <span class="block">{item["label"]}</span>
-              <span
-                :if={item["detail"]}
-                class="mt-1 block whitespace-pre-wrap text-sm text-foreground-softer"
-              >
-                {item["detail"]}
-              </span>
-            </span>
-          </label>
-        </fieldset>
-        <Button.button id={@prefix <> "submit-batch-" <> @request.id} type="submit" variant="solid">
-          Submit
-        </Button.button>
-      </.form>
-    </article>
-    """
-  end
-
-  defp chore_card(assigns) do
-    ~H"""
-    <article id={@id} class="space-y-4 rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
-      <ForemanWeb.RequestContext.context
-        request={@request}
-        prefix={@prefix}
-        event={@event}
-        focus={@focus}
-        heading={@heading}
-      />
-      <div class="flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
-        <Badge.badge>Chore</Badge.badge>
-        <ForemanWeb.RequestCard.ticket_link
-          id={@prefix <> "ticket-link-" <> @request.id}
-          request={@request}
-          link={if(@prefix == "", do: :patch, else: :navigate)}
-        />
-        <ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} />
-      </div>
-      <ForemanWeb.RequestCard.agent_text
-        id={@prefix <> "question-" <> @request.id}
-        text={@request.facts["question"]}
-        repo={@request.repo_key}
-        repos={@repos}
-        class="fm-card-question"
-      />
-      <ForemanWeb.RequestCard.agent_text
-        :if={@request.facts["text"]}
-        id={@prefix <> "text-" <> @request.id}
-        text={@request.facts["text"]}
-        repo={@request.repo_key}
-        repos={@repos}
-      />
-      <ol id={@prefix <> "chore-steps-" <> @request.id} class="list-decimal space-y-2 pl-5">
-        <li :for={step <- @request.facts["steps"]} class="whitespace-pre-wrap break-words">{step}</li>
-      </ol>
-      <ForemanWeb.RequestCard.doc_links id={@prefix <> "docs-" <> @request.id} request={@request} />
-      <Button.button
-        id={@prefix <> "submit-done-" <> @request.id}
-        phx-click={@event}
-        phx-value-id={@request.id}
-        phx-value-action="complete"
-        variant="solid"
-      >
-        Done
-      </Button.button>
-    </article>
-    """
-  end
-
-  def waiting_card(assigns) do
-    question =
-      if Foreman.Request.inline_question?(Requests.context(assigns.request), nil),
-        do: hd(assigns.request.facts["questions"])
-
-    assigns =
-      assign(assigns,
-        form: to_form(%{}, as: :waiting),
-        other: to_form(%{"other" => ""}, as: :reply),
-        reply: to_form(%{"text" => ""}, as: :reply),
-        question: question
-      )
-
-    ~H"""
-    <article id={@id} class="rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
-      <ForemanWeb.RequestContext.context
-        request={@request}
-        prefix={@prefix}
-        event={@event}
-        focus={@focus}
-        heading={@heading}
-      />
-      <div class="mb-4 flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
-        <Badge.badge>Session waiting</Badge.badge>
-        <ForemanWeb.RequestCard.ticket_link
-          id={@prefix <> "ticket-link-" <> @request.id}
-          request={@request}
-          link={if(@prefix == "", do: :patch, else: :navigate)}
-        />
-        <span class="ml-auto"><ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} /></span>
-      </div>
-      <ForemanWeb.RequestCard.waiting_facts request={@request} />
-      <%= if @question do %>
-        <ForemanWeb.RequestCard.agent_text
-          id={@prefix <> "question-" <> @request.id}
-          text={@question["question"]}
-          repo={@request.repo_key}
-          repos={@repos}
-          class="fm-card-question mt-4"
-        />
-        <.form
-          for={@form}
-          id={@prefix <> "answer-" <> @request.id}
-          phx-submit={@event}
-          phx-value-id={@request.id}
-          phx-value-action="reply"
-          class="mt-3 grid gap-2 sm:grid-cols-2"
-        >
-          <Button.button
-            :for={{label, index} <- Enum.with_index(@question["options"])}
-            id={@prefix <> "answer-" <> @request.id <> "-" <> Integer.to_string(index)}
-            type="submit"
-            name="reply[choice]"
-            value={index}
-            phx-disable-with="Sending…"
-            class="h-auto min-h-10 justify-start whitespace-normal py-2 text-left [overflow-wrap:anywhere]"
-          >
-            {label}
-          </Button.button>
-        </.form>
-        <.form
-          for={@other}
-          id={@prefix <> "other-" <> @request.id}
-          phx-submit={@event}
-          phx-value-id={@request.id}
-          phx-value-action="reply"
-          class="mt-2 flex gap-2"
-        >
-          <input
-            id={@prefix <> "other-text-" <> @request.id}
-            type="text"
-            name="reply[other]"
-            required
-            maxlength="2000"
-            placeholder="Other"
-            aria-label="Other answer"
-            class="min-w-0 flex-1 rounded-lg border border-base bg-sunken px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-          />
-          <Button.button
-            id={@prefix <> "other-send-" <> @request.id}
-            type="submit"
-            name="reply[choice]"
-            value="other"
-            phx-disable-with="Sending…"
-          >
-            Send
-          </Button.button>
-        </.form>
-      <% end %>
-      <%= if @request.facts["reason"] == "question" do %>
-        <ForemanWeb.RequestCard.agent_text
-          id={@prefix <> "chat-question-" <> @request.id}
-          text={@request.facts["question"]}
-          repo={@request.repo_key}
-          repos={@repos}
-          class="mt-4"
-        />
-        <.form
-          for={@reply}
-          id={@prefix <> "reply-" <> @request.id}
-          phx-submit={@event}
-          phx-value-id={@request.id}
-          phx-value-action="reply"
-          class="mt-3 flex gap-2"
-        >
-          <input
-            id={@prefix <> "reply-text-" <> @request.id}
-            type="text"
-            name="reply[text]"
-            required
-            maxlength="2000"
-            autocomplete="off"
-            aria-label="Reply"
-            class="min-w-0 flex-1 rounded-lg border border-base bg-sunken px-3 py-2 text-sm text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-          />
-          <Button.button
-            id={@prefix <> "reply-send-" <> @request.id}
-            type="submit"
-            variant="solid"
-            phx-disable-with="Sending…"
-          >
-            Reply
-          </Button.button>
-        </.form>
-      <% end %>
-      <%= if is_nil(@question) do %>
-        <ul
-          :if={is_list(@request.facts["questions"])}
-          id={@prefix <> "questions-" <> @request.id}
-          class="mt-4 space-y-3"
-        >
-          <li
-            :for={{question, index} <- Enum.with_index(@request.facts["questions"])}
-            class="space-y-1"
-          >
-            <ForemanWeb.RequestCard.agent_text
-              id={@prefix <> "questions-" <> @request.id <> "-" <> Integer.to_string(index)}
-              text={question["question"]}
-              repo={@request.repo_key}
-              repos={@repos}
-              class="font-medium"
-            />
-            <p class="break-words text-sm text-foreground-softer">
-              {Enum.join(question["options"], " · ")}
-            </p>
-          </li>
-        </ul>
-      <% end %>
-      <div class="mt-4 flex flex-wrap items-center gap-2">
-        <Button.button
-          id={@prefix <> "open-" <> @request.id}
-          type="button"
-          phx-click={@event}
-          phx-value-id={@request.id}
-          phx-value-action="open"
-          phx-disable-with="Opening…"
-          variant={
-            if(@question || @request.facts["reason"] == "question", do: "outline", else: "solid")
-          }
-        >
-          <.icon name="hero-arrow-top-right-on-square" class="size-4" /> Open session
-        </Button.button>
-        <.form
-          :if={@request.facts["reason"] == "usage_limit"}
-          for={@form}
-          id={@prefix <> "waiting-" <> @request.id}
-          phx-submit={@event}
-          phx-value-id={@request.id}
-        >
-          <Button.button
-            id={@prefix <> "continue-" <> @request.id}
-            type="submit"
-            name="action"
-            value="continue"
-            phx-disable-with="Continuing…"
-          >
-            Continue
-          </Button.button>
-        </.form>
-      </div>
-      <div :if={@card != :ready} class="mt-3 space-y-2">
-        <ForemanWeb.StatusLine.status_line id={@prefix <> "notice-" <> @request.id} kind={:info}>
-          {%{
-            unattached: "No terminal is attached to this session's tmux server. Attach with:",
-            window_gone: "Session window is gone.",
-            prompt_changed: "The question is no longer on screen. Open the session to answer it.",
-            prompt_busy: "The session is not at its prompt. Open the session to reply.",
-            tmux_unavailable: "tmux is unavailable."
-          }[@card]}
-        </ForemanWeb.StatusLine.status_line>
-        <ForemanWeb.CopyField.copy_field
-          :if={@card == :unattached and @request.facts["attach"]}
-          id={@prefix <> "attach-" <> @request.id}
-          value={@request.facts["attach"]}
-          label="Attach command"
-        />
-      </div>
-    </article>
-    """
-  end
-
-  attr :id, :string, required: true
-  attr :request, :any, required: true
-
-  def action_card(assigns) do
-    assigns = assign(assigns, :form, to_form(%{"note" => ""}, as: :decision))
-
-    ~H"""
-    <article id={@id} class="rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
-      <ForemanWeb.RequestContext.context
-        request={@request}
-        prefix={@prefix}
-        event={@event}
-        focus={@focus}
-        heading={@heading}
-      />
-      <div class="mb-4 flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
-        <Badge.badge>
-          {%{"push" => "Push", "open_pr" => "Open PR", "merge" => "Merge"}[@request.kind]}
-        </Badge.badge>
-        <ForemanWeb.RequestCard.ticket_link
-          id={@prefix <> "ticket-link-" <> @request.id}
-          request={@request}
-          link={if(@prefix == "", do: :patch, else: :navigate)}
-        />
-        <span :if={@request.session}>{@request.session}</span>
-        <span class="ml-auto"><ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} /></span>
-      </div>
-      <ForemanWeb.RequestCard.push_facts
-        :if={@request.kind == "push"}
-        request={@request}
-        prefix={@prefix}
-      />
-      <ForemanWeb.RequestCard.open_pr_facts
-        :if={@request.kind == "open_pr"}
-        request={@request}
-        repos={@repos}
-        prefix={@prefix}
-      />
-      <ForemanWeb.RequestCard.merge_facts :if={@request.kind == "merge"} request={@request} />
-      <.form
-        for={@form}
-        id={@prefix <> @request.kind <> "-" <> @request.id}
-        phx-submit={@event}
-        phx-value-id={@request.id}
-        class="mt-5 space-y-4"
-      >
-        <.input
-          field={@form[:note]}
-          id={@prefix <> @request.kind <> "-note-" <> @request.id}
-          type="textarea"
-          label="Note"
-          rows="2"
-          class="mt-2 block w-full rounded-lg border border-base bg-sunken px-3 py-2 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-        />
-        <div class="flex gap-2">
-          <Button.button
-            id={@prefix <> "submit-approve-" <> @request.id}
-            type="submit"
-            name="action"
-            value="approve"
-            variant="solid"
-            color="primary"
-          >
-            Approve
-          </Button.button>
-          <Button.button
-            id={@prefix <> "submit-decline-" <> @request.id}
-            type="submit"
-            name="action"
-            value="decline"
-          >
-            Decline
-          </Button.button>
-        </div>
-      </.form>
-    </article>
-    """
-  end
-
-  attr :id, :string, required: true
-  attr :request, :any, required: true
-
-  def decision_card(assigns) do
-    assigns =
-      assign(
-        assigns,
-        :form,
-        to_form(%{"note" => "", "choice" => ""}, as: :decision)
-      )
-
-    ~H"""
-    <article id={@id} class="rounded-xl border border-base bg-base p-5 shadow-sm sm:p-6">
-      <ForemanWeb.RequestContext.context
-        request={@request}
-        prefix={@prefix}
-        event={@event}
-        focus={@focus}
-        heading={@heading}
-      />
-      <div class="mb-4 flex flex-wrap items-center gap-2 text-xs text-foreground-softer">
-        <Badge.badge>
-          {if @request.kind == "review_ui", do: "UI review", else: "Decision"}
-        </Badge.badge>
-        <ForemanWeb.RequestCard.ticket_link
-          id={@prefix <> "ticket-link-" <> @request.id}
-          request={@request}
-          link={if(@prefix == "", do: :patch, else: :navigate)}
-        />
-        <span :if={@request.session}>{@request.session}</span>
-        <span class="ml-auto"><ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} /></span>
-      </div>
-      <ForemanWeb.RequestCard.agent_text
-        id={@prefix <> "question-" <> @request.id}
-        text={@request.facts["question"]}
-        repo={@request.repo_key}
-        repos={@repos}
-        class="fm-card-question"
-      />
-      <ForemanWeb.RequestCard.agent_text
-        :if={@request.facts["text"]}
-        id={@prefix <> "text-" <> @request.id}
-        text={@request.facts["text"]}
-        repo={@request.repo_key}
-        repos={@repos}
-        class="mt-2 text-foreground-softer"
-      />
-      <ForemanWeb.RequestCard.doc_links
-        id={@prefix <> "docs-" <> @request.id}
-        request={@request}
-      />
-      <.form
-        for={@form}
-        id={@prefix <> "decision-" <> @request.id}
-        phx-submit={@event}
-        phx-value-id={@request.id}
-        class="mt-5 space-y-4"
-      >
-        <ForemanWeb.ReviewImages.grid
-          :if={@request.kind == "review_ui"}
-          request={@request}
-          prefix={@prefix}
-        />
-        <fieldset :if={@request.facts["options"] != []} class="space-y-2">
-          <legend class="sr-only">Options</legend>
-          <label
-            :for={{option, index} <- Enum.with_index(@request.facts["options"])}
-            data-recommended={to_string(option == @request.facts["recommendation"])}
-            class="flex cursor-pointer items-center gap-3 rounded-lg border border-base px-3 py-3 hover:bg-sunken has-[:checked]:border-primary has-[:checked]:bg-sunken"
-          >
-            <input
-              id={"#{@prefix}option-#{@request.id}-#{index}"}
-              type="radio"
-              name="decision[choice]"
-              value={option}
-              class="size-4 shrink-0 accent-current"
-            />
-            <span class="min-w-0 flex-1 break-words">
-              <span class="block">{option}</span>
-              <span
-                :if={get_in(@request.facts, ["option_details", option])}
-                id={"#{@prefix}option-detail-#{@request.id}-#{index}"}
-                class="mt-1 block text-sm text-foreground-softer"
-              >
-                {get_in(@request.facts, ["option_details", option])}
-              </span>
-            </span>
-            <span
-              :if={option == @request.facts["recommendation"]}
-              class="text-xs text-foreground-softer"
-            >
-              Recommended
-            </span>
-          </label>
-        </fieldset>
-        <.input
-          field={@form[:note]}
-          id={@prefix <> "decision-note-" <> @request.id}
-          type="textarea"
-          label="Note"
-          rows="2"
-          class="mt-2 block w-full rounded-lg border border-base bg-sunken px-3 py-2 text-foreground outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-        />
-        <div :if={@request.kind == "decision"} class="bb-check">
-          <.input
-            field={@form[:always]}
-            id={@prefix <> "always-" <> @request.id}
-            type="checkbox"
-            label="Always use this answer"
-            class="size-4 shrink-0 accent-current"
-          />
-        </div>
-        <div id={@prefix <> "decision-actions-" <> @request.id} class="flex gap-3">
-          <Button.button
-            type="submit"
-            name="action"
-            value="answer"
-            id={@prefix <> "submit-answer-" <> @request.id}
-            variant="solid"
-          >
-            Answer
-          </Button.button>
-          <Button.button
-            type="submit"
-            name="action"
-            value="decline"
-            id={@prefix <> "submit-decline-" <> @request.id}
-          >
-            Decline
-          </Button.button>
-        </div>
-      </.form>
-    </article>
+    <ForemanWeb.OpenCard.card
+      id={@id}
+      request={@item.request}
+      prefix={@prefix}
+      event={@event}
+      card={@item.card}
+      focus={@item.focus}
+      footer={@item.footer}
+      heading={@item.heading}
+      repos={@repos}
+    />
     """
   end
 end

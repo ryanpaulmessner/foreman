@@ -156,6 +156,8 @@ Formal check: not recommended. The machine guards UI state only. The costly part
 
 ### Proposed: footer panel (`Foreman.CardFooterPanel`, new)
 
+Superseded (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918): no footer panel opens, so this machine was not kept. The card has one text box, and Ask's send state is `Foreman.CardAsk` (spec Decision 40, `docs/machines/card_ask.md`).
+
 From spec Decision 40. Replaces the `<details>` elements named in Now.
 
 ```mermaid
