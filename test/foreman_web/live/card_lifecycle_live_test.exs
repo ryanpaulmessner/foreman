@@ -30,7 +30,7 @@ defmodule ForemanWeb.CardLifecycleLiveTest do
         }
       })
 
-    {:ok, view, _} = live(conn, "/needs-you")
+    {:ok, view, _} = live(conn, "/needs-you?card=#{r.id}")
     assert has_element?(view, "#chore-steps-#{r.id} li", "Open preview")
     assert has_element?(view, "#submit-done-#{r.id}", "Done")
     refute has_element?(view, "#submit-answer-#{r.id}")
@@ -92,11 +92,15 @@ defmodule ForemanWeb.CardLifecycleLiveTest do
     {:ok, second} = ask("Which delivery date should we use now?")
     {:ok, other} = ask("Which database engine?")
     {:ok, view, _} = live(conn, "/needs-you")
-    assert has_element?(view, "#request-#{r.id} [data-ticket-heading]", "Delivery")
-    refute has_element?(view, "#request-#{second.id} [data-ticket-heading]")
+    # Decision 6: no per-ticket heading; the open card's header names the ticket.
+    refute has_element?(view, "[data-ticket-heading]")
+    assert has_element?(view, "#request-#{r.id} .bb-qhead-title", "Delivery")
     assert has_element?(view, "#duplicate-#{r.id}", "Similar question")
+    render_patch(view, "/needs-you?card=#{second.id}")
     assert has_element?(view, "#duplicate-#{second.id}")
+    render_patch(view, "/needs-you?card=#{other.id}")
     refute has_element?(view, "#duplicate-#{other.id}")
+    render_patch(view, "/needs-you?card=#{r.id}")
     {:ok, _} = Requests.resolve(second.id, :answer, %{"answer" => "Friday"})
     send(view.pid, :reconcile)
     refute has_element?(view, "#duplicate-#{r.id}")

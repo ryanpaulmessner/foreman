@@ -75,7 +75,11 @@ defmodule ForemanWeb.OpenCardTest do
     requests = for {kind, facts, _, _, _} <- @kinds, do: insert(kind, facts)
     {:ok, view, _} = live(conn, "/needs-you")
 
+    # One card is open at a time (Decision 3): open each in turn.
+    open = fn request -> render_patch(view, "/needs-you?card=#{request.id}") end
+
     for {request, {kind, _, badge, primary, busy}} <- Enum.zip(requests, @kinds) do
+      open.(request)
       card = "#card-open-#{request.id}"
       assert has_element?(view, "#{card}.bb-qcard")
       assert has_element?(view, "#{card} .bb-qhead", badge)
@@ -115,12 +119,19 @@ defmodule ForemanWeb.OpenCardTest do
     end
 
     [decision, review, batch, chore, push, open_pr, merge] = requests
+    open.(decision)
     assert has_element?(view, "#card-open-#{decision.id} .bb-opt input[type=radio]")
+    open.(review)
     assert has_element?(view, "#card-open-#{review.id} #review-images-#{review.id}")
+    open.(batch)
     assert has_element?(view, "#card-open-#{batch.id} .bb-opt input[type=checkbox]")
+    open.(chore)
     assert has_element?(view, "#chore-steps-#{chore.id} li", "Merge it.")
+    open.(push)
     assert has_element?(view, "#card-open-#{push.id} dt", "Destination")
+    open.(open_pr)
     assert has_element?(view, "#card-open-#{open_pr.id} dt", "Head branch")
+    open.(merge)
     assert has_element?(view, "#card-open-#{merge.id} dt", "Pull request")
   end
 
@@ -325,13 +336,19 @@ defmodule ForemanWeb.OpenCardTest do
 
     assert has_element?(view, "#card-source-#{live_card.id}", "build under foreman-board")
     assert has_element?(view, "#card-source-#{live_card.id} .bb-dot:not(.bb-dot-off)")
+    render_patch(view, "/needs-you?card=#{ended_card.id}")
     assert has_element?(view, "#card-source-#{ended_card.id} .bb-dot-off")
     assert has_element?(view, "#card-source-#{ended_card.id} time[title]")
     assert has_element?(view, "#card-focus-#{ended_card.id}[disabled]")
+    render_patch(view, "/needs-you?card=#{unknown.id}")
+    assert has_element?(view, "#card-source-#{unknown.id}")
     refute has_element?(view, "#card-focus-#{unknown.id}")
 
+    render_patch(view, "/needs-you?card=#{live_card.id}")
     assert has_element?(view, "#card-source-#{live_card.id} a[href='/sessions/#{live_row.id}']")
     refute render(view) =~ "answer goes to"
+
+    render_patch(view, "/needs-you?card=#{unknown.id}")
 
     assert has_element?(
              view,

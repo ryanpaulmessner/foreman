@@ -134,7 +134,7 @@ defmodule ForemanWeb.RequestDrawerTest do
           }
         })
 
-      {:ok, view, _} = live(conn, "/needs-you")
+      {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
       render_click(view, "open-request-drawer")
 
       for prefix <- ["", "drawer-"] do
