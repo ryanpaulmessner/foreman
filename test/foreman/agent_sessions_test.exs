@@ -189,6 +189,43 @@ defmodule Foreman.AgentSessionsTest do
       assert card.agent_session_id == row.id
     end
 
+    test "one tmux server for board and external sockets (fm-9mm.20)" do
+      for key <- [:planning_tmux_socket, :external_tmux_socket] do
+        previous = Application.get_env(:foreman, key)
+        Application.put_env(:foreman, key, "default")
+
+        on_exit(fn ->
+          if previous,
+            do: Application.put_env(:foreman, key, previous),
+            else: Application.delete_env(:foreman, key)
+        end)
+      end
+
+      socket = "/private/tmp/tmux-504/default"
+      assert AgentSessions.server_for_socket(socket) == "default"
+
+      coord = register("coord", "%1", "claude")
+
+      {:ok, by_name} = ask(%{"session" => "coord", "tmux_pane" => "%1", "tmux_socket" => socket})
+      assert by_name.agent_session_id == coord.id
+
+      {:ok, by_pane} = ask(%{"session" => nil, "tmux_pane" => "%1", "tmux_socket" => socket})
+      assert by_pane.agent_session_id == coord.id
+
+      # A build that inherited the coordinator's name still never resolves to it.
+      {:ok, build_card} =
+        ask(%{"session" => "coord", "tmux_pane" => "%2", "tmux_socket" => socket})
+
+      assert build_card.agent_session_id == nil
+
+      # Rows stored as "board" before the fix still match on the same server.
+      old = agent_session(name: "b-old", kind: "build", tmux_server: "board", pane_id: "%3")
+
+      {:ok, old_card} = ask(%{"session" => "b-old", "tmux_pane" => "%3", "tmux_socket" => socket})
+      assert old_card.agent_session_id == old.id
+      assert old.id in Enum.map(AgentSessions.live_default(), & &1.id)
+    end
+
     test "an unknown shell is accepted, warned and has no row" do
       register("coord", "%1", "claude")
 
