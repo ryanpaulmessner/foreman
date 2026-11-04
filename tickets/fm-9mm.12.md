@@ -2,7 +2,7 @@
 id: fm-9mm.12
 title: "Session page /sessions/:id: live and dead views, and every source link"
 type: task
-status: open
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.10"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-04
+close_reason: "Merged in PR #13 (8ecaaaf); live 2026-11-04 (/sessions/<foreman-board> renders); screenshots approved on card aa86367e"
 ---
 
 Spec: `docs/specs/sessions-view.md` (approved 2026-11-03, card cfb2bce5). Design pack: `docs/specs/sessions-view.design.md`. The spec's Non-goals, Ask-first boundaries and copy tables apply to every ticket.
