@@ -19,6 +19,33 @@ body { margin: 0; background: var(--background-base); }
 .phx-disconnected .bb-session-page .bb-session-offline { display: flex; }
 .phx-disconnected .bb-session-live { display: none; }
 .phx-disconnected .bb-session-page > section { opacity: .55; }
+/* Card list on Needs you (question cards spec, Decisions 1-5): one bordered list, one open card, rows and lines. */
+.bb-tri { border: 1px solid var(--border-base); border-radius: 12px; background: var(--background-base); box-shadow: 0 1px 2px #0000000d; overflow: clip; }
+.bb-tri:not(:has(> *)) { display: none; }
+.bb-tri > * + * { border-top: 1px solid var(--border-base); }
+.bb-tri .bb-qcard { position: relative; border: 0; border-radius: 0; box-shadow: none; }
+.bb-tri .bb-qcard::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--primary); z-index: 1; pointer-events: none; }
+.bb-tri-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 2px 12px; width: 100%; padding: 10px 14px; text-align: left; background: none; cursor: pointer; transition: background .15s; }
+.bb-tri-row:hover { background: var(--background-sunken); }
+.bb-tri-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.bb-tri-q { min-width: 0; font-size: 14px; font-weight: 500; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bb-tri-src, .bb-tri-age { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--foreground-softer); white-space: nowrap; }
+.bb-tri-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bb-tri-chev { color: var(--foreground-softer); transition: transform .15s ease-out; }
+.bb-tri-row:hover .bb-tri-chev { transform: translateY(1px); }
+.bb-dot.bb-dot-grey { background: var(--foreground-softer); }
+.bb-tri-item-result, .bb-tri-item-closed { padding: 10px 14px; }
+.phx-submit-loading .bb-opts { opacity: .6; pointer-events: none; transition: opacity .15s; }
+.bb-tri-loading > * + * { border-top: 1px solid var(--border-base); }
+.bb-skel { display: block; height: 10px; border-radius: 999px; background: var(--border-base); }
+.bb-skel-card { display: grid; gap: 10px; padding: 16px 18px 20px; }
+.bb-skel-row { display: flex; align-items: center; gap: 12px; padding: 14px; }
+@media (prefers-reduced-motion: no-preference) { .bb-skel { animation: bb-skel-pulse 1.4s ease-in-out infinite; } }
+@keyframes bb-skel-pulse { 50% { opacity: .55; } }
+@media (width < 1100px) {
+  .bb-tri-row { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+  .bb-tri-src { grid-column: 2 / 3; grid-row: 2; }
+}
 /* Open question card (question cards spec, Decision 12): one border, a body, one sunken footer strip. */
 .bb-qcard { border: 1px solid var(--border-base); border-radius: 12px; background: var(--background-base); box-shadow: 0 1px 2px #0000000d; overflow: clip; scroll-margin-top: 16px; }
 .bb-qcard-body { padding: 14px 18px 12px; min-width: 0; }
@@ -90,6 +117,7 @@ body { margin: 0; background: var(--background-base); }
 .bb-status-info .bb-status-icon { color: var(--foreground-softer); }
 .bb-status-body { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .bb-status-action { flex: none; margin-left: auto; }
+.bb-status-close { margin: -2px -4px -2px auto; border-color: transparent; background: transparent; }
 .bb-toast { width: min(24rem, calc(100vw - 40px)); box-shadow: var(--shadow-base); cursor: pointer; }
 .bb-copy { display: flex; gap: 6px; min-width: 0; align-items: center; }
 .bb-copy-value { min-width: 0; flex: 1; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-base); background: var(--background-sunken); color: var(--foreground); font-size: 12px; text-overflow: ellipsis; }

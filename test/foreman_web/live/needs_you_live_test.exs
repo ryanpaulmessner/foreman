@@ -65,7 +65,8 @@ defmodule ForemanWeb.NeedsYouLiveTest do
   test "every card has its ticket in the header, context from its text, and can be withdrawn",
        %{conn: conn, request: request} do
     {:ok, view, _} = live(conn, "/needs-you")
-    assert has_element?(view, "#request-#{request.id} [data-ticket-heading]", "A ticket")
+    # Decision 6: no per-ticket heading; the header line names the ticket.
+    refute has_element?(view, "#request-#{request.id} [data-ticket-heading]")
     assert has_element?(view, "#card-open-#{request.id} .bb-qhead", "Decision")
     assert has_element?(view, "#card-open-#{request.id} .bb-qhead-title[title='A ticket']")
     # What and Why now from the card text; the board's own context block is gone (c)8.
@@ -133,7 +134,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
         "facts" => Foreman.DecisionFacts.valid(%{"question" => "Proceed?"})
       })
 
-    {:ok, view, _} = live(conn, "/needs-you")
+    {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
     assert has_element?(view, "#card-source-#{request.id} .bb-src-name", "coordinator")
     assert has_element?(view, "#card-source-#{request.id}", "main coordinator")
     assert Foreman.RequestSource.view(Requests.get(request.id)).source.target == "%99999998"
@@ -176,7 +177,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
         }
       })
 
-    {:ok, view, _} = live(conn, "/needs-you")
+    {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
     render_click(view, "open-request-drawer")
 
     for prefix <- ["", "drawer-"] do
@@ -234,11 +235,17 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     for prefix <- ["", "drawer-"] do
       card = "##{prefix}card-open-#{request.id}"
 
-      assert has_element?(
-               view,
-               "##{prefix}request-#{request.id} [data-ticket-heading]",
-               "Fix mobile login"
-             )
+      # Needs you has no per-ticket heading (Decision 6); the drawer keeps it until fm-zgd.17.4.
+      if prefix == "",
+        do: refute(has_element?(view, "#request-#{request.id} [data-ticket-heading]")),
+        else:
+          assert(
+            has_element?(
+              view,
+              "#drawer-request-#{request.id} [data-ticket-heading]",
+              "Fix mobile login"
+            )
+          )
 
       assert has_element?(view, "#{card} .bb-qhead-title", "Fix mobile login")
       refute has_element?(view, "##{prefix}context-#{request.id}")
@@ -283,26 +290,30 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     refute has_element?(view, "#card-focus-info-#{request.id}")
   end
 
-  test "same-ticket cards have one group heading", %{conn: conn, request: request} do
-    {:ok, _} =
+  test "same-ticket cards have no group heading; the open card's header names the ticket",
+       %{conn: conn, request: request} do
+    {:ok, other} =
       Requests.ask({"sample", "s-1"}, "decision", %{
         "facts" => Foreman.DecisionFacts.valid(%{"question" => "Another?"})
       })
 
     {:ok, view, _} = live(conn, "/needs-you")
 
+    # Decision 6: the per-ticket heading went.
     assert view
            |> element("#pending-requests")
            |> render()
            |> LazyHTML.from_fragment()
            |> LazyHTML.query("[data-ticket-heading]")
-           |> Enum.count() == 1
+           |> Enum.count() == 0
+
+    assert has_element?(view, "#card-open-#{request.id} .bb-qhead-title", "A ticket")
 
     view
     |> form("#decision-#{request.id}", decision: %{note: "No longer needed"})
     |> render_submit(%{"action" => "withdraw"})
 
-    assert has_element?(view, "#pending-requests [data-ticket-heading]", "A ticket")
+    assert has_element?(view, "#card-open-#{other.id} .bb-qhead-title", "A ticket")
   end
 
   test "user asks cannot be withdrawn through a forged card event", %{conn: conn} do
@@ -312,7 +323,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
         "facts" => Foreman.DecisionFacts.valid(%{"question" => "Which?"})
       })
 
-    {:ok, view, _} = live(conn, "/needs-you")
+    {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
     refute has_element?(view, "#card-withdraw-#{request.id}")
     assert has_element?(view, "#card-wrong-question-#{request.id}")
 
@@ -345,7 +356,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
         "facts" => %{"reason" => "usage_limit", "provider" => "Codex", "reset_at" => "14:00"}
       })
 
-    {:ok, view, _} = live(conn, "/needs-you")
+    {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
     refute has_element?(view, "#request-#{request.id} code")
     assert has_element?(view, "#open-#{request.id}", "Open session")
     assert has_element?(view, "#continue-#{request.id}", "Continue")
@@ -430,6 +441,8 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       render_click(view, "open-request-drawer")
 
       for request <- requests, prefix <- ["", "drawer-"] do
+        # One card is open at a time on the page (Decision 3).
+        if prefix == "", do: render_patch(view, "/needs-you?card=#{request.id}")
         card = "##{prefix}request-#{request.id}"
         assert has_element?(view, "#{card} ##{prefix}open-#{request.id}", "Open session")
         assert has_element?(view, "#{card} h2", "Planning session")
@@ -437,19 +450,22 @@ defmodule ForemanWeb.NeedsYouLiveTest do
         refute render(element(view, card)) =~ "tmux -L"
       end
 
+      render_patch(view, "/needs-you?card=#{permission.id}")
       assert has_element?(view, "#request-#{permission.id}", "Permission needed")
       assert has_element?(view, "#request-#{permission.id}", "Bash")
       assert has_element?(view, "#request-#{permission.id}", "A ticket")
       refute has_element?(view, "#answer-#{permission.id}")
 
+      render_patch(view, "/needs-you?card=#{question.id}")
       assert has_element?(view, "#question-#{question.id}", "Which database?")
       assert has_element?(view, "#answer-#{question.id}-0", "Postgres")
       assert has_element?(view, "#answer-#{question.id}-1", "SQLite")
       assert has_element?(view, "#other-text-#{question.id}")
       assert has_element?(view, "#drawer-answer-#{question.id}-0")
 
-      assert has_element?(view, "#continue-#{limit.id}")
       refute has_element?(view, "#continue-#{question.id}")
+      render_patch(view, "/needs-you?card=#{limit.id}")
+      assert has_element?(view, "#continue-#{limit.id}")
     end
 
     test "the coordinator's card is titled Coordinator", %{conn: conn} do
@@ -464,7 +480,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
           state: "pending"
         })
 
-      {:ok, view, _} = live(conn, "/needs-you")
+      {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
       assert has_element?(view, "#request-#{request.id} h2", "Coordinator")
       assert has_element?(view, "#open-#{request.id}")
     end
@@ -481,7 +497,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
           "facts" => %{"reason" => "permission", "tool" => "p-1", "tool_name" => "Bash"}
         })
 
-      {:ok, view, _} = live(conn, "/needs-you")
+      {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
       refute has_element?(view, "#notice-#{request.id}")
       view |> element("#open-#{request.id}") |> render_click()
       assert has_element?(view, "#notice-#{request.id}", "No terminal is attached")
@@ -542,7 +558,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       end
 
       request = ask.("q-1")
-      {:ok, view, _} = live(conn, "/needs-you")
+      {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
 
       view
       |> form("#answer-#{request.id}")
@@ -558,6 +574,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
 
       stale = ask.("q-2")
       send(view.pid, :reconcile)
+      render_patch(view, "/needs-you?card=#{stale.id}")
 
       view
       |> form("#answer-#{stale.id}")
@@ -585,7 +602,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
       sessions: sessions
     } do
       request = chat_question(sessions["s-1"], "s-1")
-      {:ok, view, _} = live(conn, "/needs-you")
+      {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
       render_click(view, "open-request-drawer")
 
       for prefix <- ["", "drawer-"] do
@@ -612,7 +629,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     } do
       {session, received} = Foreman.ScratchPrompt.start_chat(sessions["s-1"], :idle)
       request = chat_question(session, "s-1")
-      {:ok, view, _} = live(conn, "/needs-you")
+      {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
 
       view
       |> form("#reply-#{request.id}", %{"reply" => %{"text" => "yes, commit"}})
@@ -632,7 +649,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     } do
       {session, received} = Foreman.ScratchPrompt.start_chat(sessions["s-2"], :busy)
       request = chat_question(session, "s-2")
-      {:ok, view, _} = live(conn, "/needs-you")
+      {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
 
       view
       |> form("#reply-#{request.id}", %{"reply" => %{"text" => "yes"}})
@@ -784,7 +801,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
         }
       })
 
-    {:ok, view, _} = live(conn, "/needs-you")
+    {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
 
     for text <- ["owner/repo", "/tmp/scratch", "feature", "published", String.duplicate("a", 40)] do
       assert has_element?(view, "#request-#{request.id} dd", text)
@@ -820,7 +837,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
         }
       })
 
-    {:ok, view, _} = live(conn, "/needs-you")
+    {:ok, view, _} = live(conn, "/needs-you?card=#{request.id}")
 
     for text <- [
           "owner/repo",

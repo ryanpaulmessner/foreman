@@ -111,9 +111,11 @@ defmodule ForemanWeb.CardDocsLiveTest do
 
     render_hook(view, "open-doc", %{"href" => href})
 
+    # The open card stays in the URL next to the panel (Decision 7).
     assert_patch(
       view,
-      "/needs-you?" <> URI.encode_query(%{"doc" => "sample:slices/one/reviews/27-r1.md"})
+      "/needs-you?" <>
+        URI.encode_query(%{"card" => request.id, "doc" => "sample:slices/one/reviews/27-r1.md"})
     )
 
     assert has_element?(view, "#card-panel #panel-document h1", "Review 27")
@@ -122,7 +124,7 @@ defmodule ForemanWeb.CardDocsLiveTest do
     assert has_element?(view, "#request-#{request.id}")
 
     view |> element("#panel-close") |> render_click()
-    assert_patch(view, "/needs-you")
+    assert_patch(view, "/needs-you?card=#{request.id}")
     refute has_element?(view, "#card-panel")
 
     {:ok, viewer, _} = live(conn, href)
@@ -214,12 +216,14 @@ defmodule ForemanWeb.CardDocsLiveTest do
         }
       })
 
-    {:ok, view, _} = live(conn, "/needs-you")
+    {:ok, view, _} = live(conn, "/needs-you?card=#{input.id}")
 
     assert has_element?(
              view,
              "#question-#{input.id} strong a[href='#{doc_href("docs/spec.md")}']"
            )
+
+    render_patch(view, "/needs-you?card=#{chat.id}")
 
     assert has_element?(view, "#chat-question-#{chat.id} li", "Hold")
     assert has_element?(view, "#chat-question-#{chat.id} a[href='#{doc_href("docs/spec.md")}']")

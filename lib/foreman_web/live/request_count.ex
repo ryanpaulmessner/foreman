@@ -26,8 +26,21 @@ defmodule ForemanWeb.RequestCount do
      end)}
   end
 
+  # When the database does not answer, the count stays as it was.
   def refresh(socket) do
-    pending = Foreman.Requests.pending()
+    case pending() do
+      {:ok, pending} -> refresh(socket, pending)
+      :error -> socket
+    end
+  end
+
+  defp pending do
+    {:ok, Foreman.Requests.pending()}
+  rescue
+    e -> if Foreman.Repo.unavailable?(e), do: :error, else: reraise(e, __STACKTRACE__)
+  end
+
+  defp refresh(socket, pending) do
     count = length(pending)
 
     socket
