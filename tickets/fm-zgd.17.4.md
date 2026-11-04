@@ -2,7 +2,7 @@
 id: fm-zgd.17.4
 title: "Question cards: request drawer shows rows that open the card on Needs you"
 type: task
-status: open
+status: in_progress
 priority: 2
 parent: fm-zgd.17
 blocked_by: ["fm-zgd.17.3"]
@@ -33,3 +33,6 @@ Flows F3.
 ## Acceptance
 - [ ] The drawer has no `decision-*` form; Open lands on `/needs-you?card=<id>` with that card open (spec acceptance 11).
 - [ ] verify ui of the drawer with 0, 1 and 7 cards at 1440 and 820, light and dark.
+
+## Notes
+- 2026-11-04 user: 2026-11-04: forge sync wrongly linked PR #14 (fm-zgd.17.3) to this ticket because its description mentioned it; stage reset by hand (abandon, revive, dispatch again). Bug: fm-zgd.18.
