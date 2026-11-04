@@ -31,7 +31,8 @@ defmodule Foreman.AgentSessions do
   def live_by_pane(pane, server) when is_binary(pane) and is_binary(server) do
     Repo.one(
       from s in AgentSession,
-        where: s.pane_id == ^pane and s.tmux_server == ^server and is_nil(s.ended_at),
+        where:
+          s.pane_id == ^pane and s.tmux_server in ^same_servers(server) and is_nil(s.ended_at),
         order_by: [desc: coalesce(s.last_seen_at, s.started_at), desc: s.started_at],
         limit: 1
     )
@@ -77,13 +78,30 @@ defmodule Foreman.AgentSessions do
 
   def server_for_socket(_), do: nil
 
+  # The external socket wins: when the board and external sockets name one tmux server
+  # (board.sh sets both to "default"), callers on it are "default", as registered rows are.
   defp socket_server(name) do
     cond do
-      name == Application.get_env(:foreman, :planning_tmux_socket, "foreman") -> "board"
-      name == Application.get_env(:foreman, :external_tmux_socket, "default") -> "default"
+      name == external_socket() -> "default"
+      name == planning_socket() -> "board"
       true -> nil
     end
   end
+
+  defp planning_socket, do: Application.get_env(:foreman, :planning_tmux_socket, "foreman")
+  defp external_socket, do: Application.get_env(:foreman, :external_tmux_socket, "default")
+
+  @doc """
+  The server labels that name the same tmux server as `server`: both labels when the
+  board and external sockets are one server, else `server` alone.
+  """
+  def same_servers(server) when server in ["board", "default"] do
+    if planning_socket() == external_socket(), do: ["board", "default"], else: [server]
+  end
+
+  def same_servers(server), do: [server]
+
+  defp same_server?(a, b), do: a in same_servers(b)
 
   @doc """
   Finds the session behind an ask (Decision 5): the row with that id (board hooks send the
@@ -119,7 +137,7 @@ defmodule Foreman.AgentSessions do
   defp consistent?(row, pane, server),
     do:
       is_nil(pane) or is_nil(server) or is_nil(row.pane_id) or
-        (row.pane_id == pane and row.tmux_server == server)
+        (row.pane_id == pane and same_server?(row.tmux_server, server))
 
   @doc """
   The source row of a card asked before identity rows existed (D3): the session with its
@@ -260,9 +278,10 @@ defmodule Foreman.AgentSessions do
   defp claim(name, server, pane, fields) do
     now = now()
 
-    case live_by_name(name) do
-      %AgentSession{tmux_server: ^server, pane_id: current} = row
-      when is_nil(current) or is_nil(pane) or current == pane ->
+    live = live_by_name(name)
+
+    case live && same_session?(live, server, pane) && live do
+      %AgentSession{pane_id: current} = row ->
         changes =
           fields
           |> Enum.reject(fn {key, value} ->
@@ -273,8 +292,8 @@ defmodule Foreman.AgentSessions do
 
         row |> AgentSession.changeset(changes) |> Repo.update!()
 
-      other ->
-        if other, do: end_session(other, now)
+      _ ->
+        if live, do: end_session(live, now)
 
         {:ok, row} =
           create(
@@ -290,6 +309,10 @@ defmodule Foreman.AgentSessions do
         row
     end
   end
+
+  # Same live name on the same tmux server and pane (or no pane yet on either side).
+  defp same_session?(%AgentSession{tmux_server: row_server, pane_id: current}, server, pane),
+    do: same_server?(row_server, server) and (is_nil(current) or is_nil(pane) or current == pane)
 
   @doc """
   Board launch: the planning session's own row (same id, conversation id and transaction),
@@ -361,13 +384,16 @@ defmodule Foreman.AgentSessions do
     do: row |> AgentSession.changeset(Map.put(changes, :last_seen_at, now())) |> Repo.update!()
 
   @doc """
-  Rows read before a pane listing, for `end_missing/2`. Only default-server rows: board
-  rows follow their planning session.
+  Rows read before a pane listing, for `end_missing/2`. Only default-server rows (and builds
+  stored as "board" when both sockets are one server): board rows follow their planning session.
   """
   def live_default do
     Repo.all(
       from s in AgentSession,
-        where: is_nil(s.ended_at) and s.tmux_server == "default",
+        where:
+          is_nil(s.ended_at) and
+            (s.tmux_server == "default" or
+               (s.tmux_server in ^same_servers("default") and s.kind == "build")),
         select: %{id: s.id, name: s.name, pane_id: s.pane_id, last_seen_at: s.last_seen_at}
     )
   end
