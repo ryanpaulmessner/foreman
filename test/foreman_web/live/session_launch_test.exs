@@ -105,19 +105,29 @@ defmodule ForemanWeb.SessionLaunchTest do
     assert has_element?(detail, "#epic-launch", "Relaunch")
   end
 
-  test "session state and copyable attach command are visible", %{conn: conn} do
-    Foreman.Repo.insert!(%Foreman.PlanningSession{
-      project: "sample",
-      ticket: "x-1",
-      state: :running,
-      workdir: "/tmp/sample",
-      window: "@1",
-      launched_at: DateTime.utc_now()
-    })
+  test "session state links to Details instead of showing an attach command", %{conn: conn} do
+    planning =
+      Foreman.Repo.insert!(%Foreman.PlanningSession{
+        project: "sample",
+        ticket: "x-1",
+        state: :running,
+        workdir: "/tmp/sample",
+        window: "@1",
+        error: "Launch failed; check tmux and retry",
+        launched_at: DateTime.utc_now()
+      })
 
+    Foreman.AgentSessions.sync_planning(planning)
     {:ok, view, _} = live(conn, "/?ticket=sample:x-1")
-    assert has_element?(view, "#ticket-planning-state", "running")
-    assert has_element?(view, "#ticket-attach[value*=tmux]")
-    assert has_element?(view, "#ticket-copy-attach")
+    assert has_element?(view, "#ticket-planning-session-state-label", "Working")
+
+    assert has_element?(
+             view,
+             "#ticket-planning-session-link[href='/sessions/#{planning.session_id}']"
+           )
+
+    refute has_element?(view, "#ticket-attach")
+    refute has_element?(view, "#ticket-copy-attach")
+    assert has_element?(view, "#ticket-planning-error", "Launch failed")
   end
 end

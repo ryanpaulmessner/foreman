@@ -9,7 +9,8 @@ defmodule ForemanWeb.SessionState do
   hand): `state` (column value or `Foreman.SessionLifecycle` atom), `kind`,
   `open_cards` (count), `card_at` (oldest open card), `stage` (ticket stage atom),
   `state_at`, `ended_at`, `reset_at` (usage-limit reset, text or time) and
-  `parent_ended_at` (a live build's ended coordinator, R8).
+  `parent_ended_at` (a live build's ended coordinator, R8). Detail callers also pass
+  `round`, `coordinator`, `resumable` and `output_at` for Decision 10's second lines.
   """
   use ForemanWeb, :html
   alias Foreman.SessionLifecycle
@@ -52,7 +53,43 @@ defmodule ForemanWeb.SessionState do
         label("Ended", "neutral", "outline")
         |> second(since("ended ", facts[:ended_at] || facts[:state_at], now))
     end
+    |> detail_line(facts, now)
   end
+
+  defp detail_line(view, %{round: round} = facts, now) do
+    coordinator = facts[:coordinator] || "The coordinator"
+    resumable = if facts[:resumable], do: "can resume", else: "cannot resume"
+    dead? = not SessionLifecycle.live?(state(facts.state))
+
+    cond do
+      facts[:parent_ended_at] && not dead? ->
+        view
+
+      dead? and view.label == "Waiting on you" ->
+        {text, at} = since("session ended ", facts[:ended_at] || facts[:state_at], now)
+        second(view, {text <> " · " <> resumable, at})
+
+      view.label == "Ended" and not facts[:resumable] ->
+        second(view, {(view.second || "Ended") <> " · cannot resume", view.at})
+
+      view.label == "Working" ->
+        case since("Round #{round} · output ", facts[:output_at], now) do
+          nil -> second(view, {"Round #{round}", nil})
+          line -> second(view, line)
+        end
+
+      view.label == "In review" ->
+        second(view, {"Round #{round} report · #{coordinator} reviews", nil})
+
+      state(facts.state) == :waiting_question ->
+        second(view, since("Question since ", facts[:card_at] || facts[:state_at], now))
+
+      true ->
+        view
+    end
+  end
+
+  defp detail_line(view, _, _), do: view
 
   defp waiting(state, cards, live?, facts, now) do
     line =
@@ -79,8 +116,12 @@ defmodule ForemanWeb.SessionState do
   defp reset(%DateTime{} = at, now),
     do: {"Usage limit · resets " <> RelativeTime.until(at, now), at}
 
-  defp reset(text, _now) when is_binary(text) and text != "",
-    do: {"Usage limit · resets " <> text, nil}
+  defp reset(text, now) when is_binary(text) and text != "" do
+    case DateTime.from_iso8601(text) do
+      {:ok, at, _} -> reset(at, now)
+      _ -> {"Usage limit · resets " <> text, nil}
+    end
+  end
 
   defp reset(_, _), do: {"Usage limit", nil}
 

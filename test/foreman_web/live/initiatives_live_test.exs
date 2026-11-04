@@ -139,39 +139,38 @@ defmodule ForemanWeb.InitiativesLiveTest do
            ]
   end
 
-  test "the global coordinator offers state, focus, resume and a separate fresh start", %{
+  test "the global coordinator links to its page and leaves resume controls there", %{
     conn: conn
   } do
     {:ok, _, :adopt} = Foreman.Sessions.prepare_coordinator({:adopt, Ecto.UUID.generate()})
     {:ok, view, _} = live(conn, "/")
     assert has_element?(view, "#coordinator-state", "ended")
     assert has_element?(view, "#coordinator-focus")
-    assert has_element?(view, "#coordinator-relaunch")
-    assert has_element?(view, "#coordinator-fresh[data-confirm]")
+    assert has_element?(view, "#coordinator-link[href^='/sessions/']")
+    refute has_element?(view, "#coordinator-relaunch")
+    refute has_element?(view, "#coordinator-fresh")
   end
 
-  test "coordinator focus without a client gives an attach command and explains disabled actions",
+  test "coordinator focus without a client points to Details",
        %{conn: conn} do
     {:ok, _, :fresh} = Foreman.Sessions.prepare_coordinator(:resume, window: "@123")
-    Mimic.stub(Foreman.SessionTmux, :focus, fn _ -> {:ok, :no_client} end)
+    Mimic.stub(Foreman.RequestSource, :focus, fn _ -> {:ok, :no_client} end)
     {:ok, view, _} = live(conn, "/")
-    Mimic.allow(Foreman.SessionTmux, self(), view.pid)
+    Mimic.allow(Foreman.RequestSource, self(), view.pid)
 
-    assert has_element?(
-             view,
-             "#coordinator-relaunch[disabled][title='The coordinator is still running.']"
-           )
-
-    assert has_element?(
-             view,
-             "#coordinator-fresh[disabled][title='The coordinator is still running.']"
-           )
+    refute has_element?(view, "#coordinator-relaunch")
+    refute has_element?(view, "#coordinator-fresh")
 
     view |> element("#coordinator-focus") |> render_click()
-    assert has_element?(view, "#flash-group", "No terminal is attached. Run: tmux attach")
+
+    assert has_element?(
+             view,
+             "#flash-group",
+             "No terminal is attached. Copy the attach command from Details."
+           )
   end
 
-  test "an idle coordinator shows waiting on its row with nothing in Needs you", %{conn: conn} do
+  test "a Stop hook does not show Waiting on you without a card", %{conn: conn} do
     {:ok, s, :fresh} = Foreman.Sessions.prepare_coordinator(:resume, window: "@123")
     {:waiting, facts} = Foreman.SessionHooks.facts("Stop", %{})
 
@@ -182,7 +181,7 @@ defmodule ForemanWeb.InitiativesLiveTest do
       })
 
     {:ok, view, _} = live(conn, "/")
-    assert has_element?(view, "#coordinator-state", "waiting")
+    assert has_element?(view, "#coordinator-state-label", "Working")
     refute has_element?(view, "#needs-you-count")
   end
 
@@ -334,7 +333,11 @@ defmodule ForemanWeb.InitiativesLiveTest do
 
   test "hidden streams update before switching tabs", %{conn: conn} do
     {:ok, view, _} = live(conn, "/?ticket=sample:f")
-    Foreman.Overlay.apply_event({"sample", "f"}, {:dispatch, %{window: "tab-worker"}})
+
+    Foreman.Overlay.apply_event(
+      {"sample", "f"},
+      {:dispatch, %{window: "%88", session: "tab-worker", harness: "pi"}}
+    )
 
     Foreman.Overlay.apply_event(
       {"sample", "f"},
@@ -377,7 +380,12 @@ defmodule ForemanWeb.InitiativesLiveTest do
     {:ok, view, _} = live(conn, "/?ticket=sample:f&project=sample")
     assert has_element?(view, "#ticket-stage", "queued")
     Foreman.Overlay.apply_event({"sample", "f"}, :review)
-    Foreman.Overlay.apply_event({"sample", "f"}, {:dispatch, %{window: "worker"}})
+
+    Foreman.Overlay.apply_event(
+      {"sample", "f"},
+      {:dispatch, %{window: "%89", session: "worker", harness: "pi"}}
+    )
+
     send(view.pid, {:notification, :foreman_events, "sample/f"})
     assert has_element?(view, "#ticket-stage", "dispatched")
     assert has_element?(view, "#ticket-history [data-outcome=invalid]", "review")
@@ -454,7 +462,9 @@ defmodule ForemanWeb.InitiativesLiveTest do
       {"sample", "f"},
       {:dispatch,
        %{
-         window: "worker",
+         window: "%90",
+         session: "worker",
+         harness: "pi",
          branch: "feature",
          brief_path: "docs/brief.md",
          internal_token: "hidden-detail"

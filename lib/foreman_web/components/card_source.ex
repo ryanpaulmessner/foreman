@@ -19,10 +19,14 @@ defmodule ForemanWeb.CardSource do
     <div id={@id} class="bb-src">
       <%= if @view.state == :unknown do %>
         <span>The board does not know which session asked this.</span>
+        <.link id={@id <> "-find"} navigate="/sessions" class="underline underline-offset-4">
+          Find the session
+        </.link>
       <% else %>
         <span>Asked by</span>
         <.link
           :if={@view.link}
+          id={@id <> "-link"}
           navigate={@view.link}
           class="bb-src-name underline-offset-4 hover:underline"
         >

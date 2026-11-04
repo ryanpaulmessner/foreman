@@ -19,10 +19,12 @@ defmodule Foreman.RequestSourceViewTest do
              role: "build under foreman-board",
              ended_at: nil,
              focus: true,
-             link: nil,
+             link: link,
              receiver: nil,
              source: %{target: "%7"}
            } = RequestSource.view(request(build))
+
+    assert link == "/sessions/#{build.id}"
   end
 
   test "coordinators use the Sessions role words" do
@@ -33,6 +35,9 @@ defmodule Foreman.RequestSourceViewTest do
     assert RequestSource.view(request(main)).role == "main coordinator"
     assert RequestSource.view(request(epic)).role == "epic coordinator"
     assert RequestSource.view(request(loose)).role == "build"
+
+    for row <- [main, epic, loose],
+        do: assert(RequestSource.view(request(row)).link == "/sessions/#{row.id}")
   end
 
   test "ended: the end time, Focus off, and no receiver or resume until those ship" do
@@ -49,6 +54,7 @@ defmodule Foreman.RequestSourceViewTest do
            } = RequestSource.view(request(row))
 
     assert ended_at == row.ended_at
+    assert RequestSource.view(request(row)).link == "/sessions/#{row.id}"
   end
 
   test "main coordinator ended: its role and end time" do
@@ -58,6 +64,8 @@ defmodule Foreman.RequestSourceViewTest do
 
     assert %{state: :ended, role: "main coordinator", focus: false} =
              RequestSource.view(request(row))
+
+    assert RequestSource.view(request(row)).link == "/sessions/#{row.id}"
   end
 
   test "unknown: no row for the card" do

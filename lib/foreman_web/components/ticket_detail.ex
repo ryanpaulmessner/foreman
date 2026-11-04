@@ -43,7 +43,14 @@ defmodule ForemanWeb.TicketDetail do
       sheet_return: Foreman.TicketSheet.path(uri)
     )
     |> stream(:ticket_history, if(ticket, do: ticket.history, else: []), reset: true)
-    |> stream(:ticket_sessions, if(ticket, do: ticket.sessions, else: []), reset: true)
+    |> stream(
+      :ticket_sessions,
+      if(ticket,
+        do: Enum.map(Foreman.AgentSessions.for_ticket(key), &ForemanWeb.SessionLink.view/1),
+        else: []
+      ),
+      reset: true
+    )
     |> stream(:ticket_notes, if(ticket, do: ticket.notes, else: []), reset: true)
     |> stream(:ticket_requests, if(ticket, do: Foreman.Requests.for_ticket(key), else: []),
       reset: true
@@ -464,24 +471,15 @@ defmodule ForemanWeb.TicketDetail do
       <Tabs.tabs_panel name="ticket-sessions" active={@tab == "sessions"} class="pt-5">
         <section id="ticket-sessions-section">
           <div id="ticket-sessions" phx-update="stream" class="space-y-3">
+            <p id="ticket-sessions-empty" class="hidden only:block text-foreground-softer">
+              No sessions for this ticket.
+            </p>
             <article
               :for={{id, session} <- @streams.ticket_sessions}
               id={id}
               class="rounded-lg border border-base p-4"
             >
-              <h4 class="font-mono font-medium">{session.window}</h4>
-              <dl class="mt-3 grid grid-cols-[100px_minmax(0,1fr)] gap-2 text-xs">
-                <dt>Started</dt>
-                <dd><.timestamp at={session.started_at} /></dd>
-                <dt>Last seen</dt>
-                <dd><.timestamp at={session.last_seen_at} /></dd>
-                <dt>Ended</dt>
-                <dd><.timestamp at={session.ended_at} /></dd>
-                <%= for {key, value} <- Enum.sort(session.details) do %>
-                  <dt class="text-foreground-softer">{key}</dt>
-                  <dd class="min-w-0"><ForemanWeb.LongText.path text={value_text(value)} /></dd>
-                <% end %>
-              </dl>
+              <ForemanWeb.SessionLink.row id={"ticket-session-#{session.id}"} session={session} />
             </article>
           </div>
         </section>

@@ -60,20 +60,11 @@ defmodule ForemanWeb.InitiativesLive do
     {:noreply, push_patch(socket, to: Filters.path(filters))}
   end
 
-  def handle_event("coordinator", %{"action" => action}, socket) do
+  def handle_event("coordinator", %{"action" => "focus"}, socket) do
     result =
-      case action do
-        "focus" ->
-          case Foreman.Sessions.coordinator() do
-            nil -> {:error, :not_relaunchable}
-            session -> Foreman.SessionTmux.focus(session)
-          end
-
-        "resume" ->
-          Foreman.Sessions.launch_coordinator(:resume)
-
-        "fresh" ->
-          Foreman.Sessions.launch_coordinator(:fresh)
+      case Foreman.AgentSessions.main_coordinator() do
+        nil -> {:error, :not_relaunchable}
+        row -> row |> Foreman.RequestSource.source() |> Foreman.RequestSource.focus()
       end
 
     socket =
@@ -82,8 +73,7 @@ defmodule ForemanWeb.InitiativesLive do
           put_flash(
             socket,
             :info,
-            "No terminal is attached. Run: " <>
-              Foreman.SessionTmux.attach_command(Foreman.Sessions.coordinator())
+            "No terminal is attached. Copy the attach command from Details."
           )
 
         {:error, reason} ->
@@ -186,7 +176,9 @@ defmodule ForemanWeb.InitiativesLive do
     |> assign(
       kind_sections: Enum.map(data.sections, &Map.take(&1, [:kind, :label, :count])),
       kind_streams: @kind_streams,
-      coordinator: Foreman.Sessions.coordinator(),
+      coordinator:
+        Foreman.AgentSessions.main_coordinator()
+        |> then(fn row -> if row, do: ForemanWeb.SessionLink.view(row) end),
       repos: data.repos,
       columns: data.columns,
       views: data.views,
@@ -364,50 +356,30 @@ defmodule ForemanWeb.InitiativesLive do
         class="flex flex-wrap items-center gap-3 rounded-lg border border-foreground/10 px-4 py-3 text-sm"
       >
         <span class="font-medium">Coordinator</span>
-        <span id="coordinator-state" class="text-foreground-softer">
-          {if @coordinator, do: @coordinator.state, else: "Not started"}
-        </span>
-        <div class="ml-auto flex flex-wrap gap-2">
-          <Button.button
+        <%= if @coordinator do %>
+          <ForemanWeb.SessionState.badge id="coordinator-state" view={@coordinator.state} />
+          <.link
+            id="coordinator-link"
+            navigate={@coordinator.source.link}
+            class="break-all font-mono underline-offset-4 hover:underline"
+          >
+            {@coordinator.row.name}
+          </.link>
+          <button
             id="coordinator-focus"
-            size="sm"
-            variant="ghost"
+            type="button"
+            class="bb-iconbtn ml-auto"
             phx-click="coordinator"
             phx-value-action="focus"
-            disabled={is_nil(@coordinator) or is_nil(@coordinator.window)}
+            disabled={!@coordinator.source.focus}
+            title={if(@coordinator.source.focus, do: "Focus terminal", else: "The pane is closed")}
+            aria-label="Focus terminal"
           >
-            Focus
-          </Button.button>
-          <Button.button
-            id="coordinator-relaunch"
-            title={
-              if @coordinator && @coordinator.state in [:starting, :running, :waiting],
-                do: "The coordinator is still running."
-            }
-            size="sm"
-            variant="outline"
-            phx-click="coordinator"
-            phx-value-action="resume"
-            disabled={@coordinator && @coordinator.state in [:starting, :running, :waiting]}
-          >
-            Relaunch
-          </Button.button>
-          <Button.button
-            id="coordinator-fresh"
-            title={
-              if @coordinator && @coordinator.state in [:starting, :running, :waiting],
-                do: "The coordinator is still running."
-            }
-            size="sm"
-            variant="ghost"
-            phx-click="coordinator"
-            phx-value-action="fresh"
-            data-confirm="Start a new coordinator conversation?"
-            disabled={@coordinator && @coordinator.state in [:starting, :running, :waiting]}
-          >
-            Start fresh
-          </Button.button>
-        </div>
+            <.icon name="hero-command-line" class="size-4" />
+          </button>
+        <% else %>
+          <span id="coordinator-state" class="text-foreground-softer">Not started</span>
+        <% end %>
       </section>
       <.form
         for={@form}
