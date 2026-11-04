@@ -43,6 +43,8 @@ defmodule ForemanWeb.ForgeRequestCardsTest do
 
     {:ok, view, _} = live(conn, "/needs-you")
     assert has_element?(view, "#force-push-#{push.id}", "Replace the branch history")
+    # One card is open at a time (Decision 3).
+    render_patch(view, "/needs-you?card=#{pr.id}")
     assert has_element?(view, "#base-override-#{pr.id}", "--base-ok")
   end
 end

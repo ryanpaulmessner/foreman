@@ -18,6 +18,8 @@ defmodule ForemanWeb.StatusLine do
   attr :retry, :any, default: nil, doc: "phx-click for Try again; errors only"
   attr :retry_id, :string, default: nil
   attr :retry_target, :any, default: nil
+  attr :close, :any, default: nil, doc: "phx-click for the X that closes the line"
+  attr :close_id, :string, default: nil
   attr :class, :any, default: nil
   attr :rest, :global
   slot :inner_block, required: true
@@ -45,6 +47,17 @@ defmodule ForemanWeb.StatusLine do
       >
         Try again
       </Button.button>
+      <button
+        :if={@close != nil}
+        id={@close_id}
+        type="button"
+        class="bb-iconbtn bb-status-close"
+        aria-label="Close"
+        title="Close"
+        phx-click={@close}
+      >
+        <.icon name="hero-x-mark" class="size-3.5" />
+      </button>
     </div>
     """
   end

@@ -74,6 +74,8 @@ defmodule ForemanWeb.SessionLinksTest do
 
     for {card, row} <- Enum.zip(cards, rows), prefix <- ["", "drawer-"] do
       selector = "##{prefix}card-source-#{card.id}"
+      # Needs you shows one open card at a time (fm-zgd.17.3); the drawer shows every card.
+      if prefix == "", do: render_patch(view, "/needs-you?card=#{card.id}")
 
       if row do
         assert has_element?(view, "#{selector} a[href='/sessions/#{row.id}']", row.name)

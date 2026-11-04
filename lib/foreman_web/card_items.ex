@@ -48,43 +48,47 @@ defmodule ForemanWeb.CardItems do
   `{:ask, event, reason, text}` (an Ask that did not reach the session) or a
   session-waiting state. A focus or waiting notice replaces the other one.
   """
-  def notice(socket, opts, id, {:ask, event, reason, text}) do
-    socket
-    |> update(opts[:footers], fn footers ->
+  def notice(socket, opts, id, notice),
+    do: socket |> keep_notice(opts, id, notice) |> reinsert(opts, id)
+
+  @doc "Keeps a card notice (see `notice/4`) without redrawing the card."
+  def keep_notice(socket, opts, id, {:ask, event, reason, text}) do
+    update(socket, opts[:footers], fn footers ->
       footers |> CardFooter.keep_text(id, text) |> CardFooter.step(id, event, reason)
     end)
-    |> reinsert(opts, id)
   end
 
-  def notice(socket, opts, id, notice) do
+  def keep_notice(socket, opts, id, notice) do
     ui =
       case notice do
         {:focus, state} -> %{@ready | focus: state}
         state -> %{@ready | card: state}
       end
 
-    socket |> update(opts[:ui], &Map.put(&1, id, ui)) |> reinsert(opts, id)
+    update(socket, opts[:ui], &Map.put(&1, id, ui))
   end
 
   @doc "After a card action: a sent question clears the text box (`Foreman.CardAsk`)."
-  def sent(socket, opts, %{"id" => id, "action" => "ask"}, {:ok, _}) do
-    socket
-    |> update(opts[:footers], &CardFooter.step(&1, id, :sent))
-    |> reinsert(opts, id)
-  end
+  def sent(socket, opts, params, outcome),
+    do: socket |> keep_sent(opts, params, outcome) |> reinsert_sent(opts, params, outcome)
 
-  def sent(socket, _, _, _), do: socket
+  @doc "Like `sent/4`, without redrawing the card."
+  def keep_sent(socket, opts, %{"id" => id, "action" => "ask"}, {:ok, _}),
+    do: update(socket, opts[:footers], &CardFooter.step(&1, id, :sent))
 
-  @doc "The text box as you type. It is kept, not redrawn, so your other input stays."
-  def text(socket, opts, %{"card_id" => id} = params) do
-    case CardFooter.text(params) do
-      text when is_binary(text) ->
-        update(socket, opts[:footers], &CardFooter.keep_text(&1, id, text))
+  def keep_sent(socket, _, _, _), do: socket
 
-      _ ->
-        socket
-    end
-  end
+  defp reinsert_sent(socket, opts, %{"id" => id, "action" => "ask"}, {:ok, _}),
+    do: reinsert(socket, opts, id)
+
+  defp reinsert_sent(socket, _, _, _), do: socket
+
+  @doc """
+  The card's input as you type (the text box and the choice). It is kept, not
+  redrawn, so your other input stays.
+  """
+  def text(socket, opts, %{"card_id" => id} = params),
+    do: update(socket, opts[:footers], &CardFooter.keep_input(&1, id, params))
 
   def text(socket, _, _), do: socket
 

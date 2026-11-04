@@ -159,7 +159,7 @@ defmodule ForemanWeb.PriorityLiveTest do
       view
       |> render()
       |> LazyHTML.from_fragment()
-      |> LazyHTML.query("#pending-requests > article")
+      |> LazyHTML.query("#pending-requests > [id^='request-']")
       |> LazyHTML.attribute("id")
 
     assert order == Enum.map([high, low, none], &("request-" <> &1))

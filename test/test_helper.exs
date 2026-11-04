@@ -11,6 +11,7 @@ Mimic.copy(File)
 Mimic.copy(Foreman.SessionTmux)
 Mimic.copy(Foreman.Events)
 Mimic.copy(Foreman.RequestSource)
+Mimic.copy(Foreman.Requests)
 
 ExUnit.start()
 

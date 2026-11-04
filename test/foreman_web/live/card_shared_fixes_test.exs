@@ -124,7 +124,8 @@ defmodule ForemanWeb.CardSharedFixesTest do
         |> Enum.count()
 
     test "one panel element opens as a sheet over a scrim, and the scrim closes it", %{
-      conn: conn
+      conn: conn,
+      request: request
     } do
       {:ok, view, _} = live(conn, "/needs-you?ticket=sample%3As-1")
       assert has_element?(view, "#card-panel.bb-sheet #ticket-title", "A ticket")
@@ -132,26 +133,27 @@ defmodule ForemanWeb.CardSharedFixesTest do
       assert panel_count(view) == 1
 
       view |> element("#card-panel-scrim") |> render_click()
-      assert_patch(view, "/needs-you")
+      # The open card stays in the URL next to the panel (Decision 7).
+      assert_patch(view, "/needs-you?card=#{request.id}")
       refute has_element?(view, "#card-panel")
       refute has_element?(view, "#card-panel-scrim")
     end
 
-    test "Esc closes the document panel", %{conn: conn} do
+    test "Esc closes the document panel", %{conn: conn, request: request} do
       {:ok, view, _} =
         live(conn, "/needs-you?" <> URI.encode_query(%{"doc" => "sample:docs/spec.md"}))
 
       assert has_element?(view, "#card-panel.bb-sheet #panel-document h1", "Spec")
       assert panel_count(view) == 1
       view |> element("#card-panel") |> render_keydown(%{"key" => "Escape"})
-      assert_patch(view, "/needs-you")
+      assert_patch(view, "/needs-you?card=#{request.id}")
       refute has_element?(view, "#card-panel")
     end
 
-    test "the X closes the ticket panel", %{conn: conn} do
+    test "the X closes the ticket panel", %{conn: conn, request: request} do
       {:ok, view, _} = live(conn, "/needs-you?ticket=sample%3As-1")
       view |> element("#card-panel #ticket-close") |> render_click()
-      assert_patch(view, "/needs-you")
+      assert_patch(view, "/needs-you?card=#{request.id}")
       refute has_element?(view, "#card-panel")
     end
   end

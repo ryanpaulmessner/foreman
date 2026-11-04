@@ -23,15 +23,20 @@ defmodule ForemanWeb.OpenCard do
     "session_waiting" => "Session waiting"
   }
 
+  @doc "The kind badge word of a request kind."
+  def kind_label(kind), do: @kinds[kind] || "Decision"
+
   attr :id, :string, required: true
   attr :request, :any, required: true
   attr :prefix, :string, default: ""
   attr :event, :string, default: "resolve"
   attr :card, :atom, default: :ready, doc: "the session-waiting notice"
   attr :focus, :atom, default: :ready, doc: "the last Focus terminal result"
-  attr :footer, :map, default: %{ask: :idle, reason: nil, text: ""}
+  attr :footer, :map, default: %{ask: :idle, reason: nil, text: "", choice: nil}
   attr :heading, :boolean, default: false
   attr :repos, :list, default: nil
+  attr :close, :string, default: nil, doc: "the Close card event; no button when nil"
+  attr :error, :map, default: nil, doc: "the error line of a failed action (ForemanWeb.CardLines)"
 
   def card(assigns) do
     request = assigns.request
@@ -61,6 +66,19 @@ defmodule ForemanWeb.OpenCard do
             <span class="bb-qhead-time">
               <ForemanWeb.TicketDetail.timestamp at={@request.inserted_at} />
             </span>
+            <button
+              :if={@close}
+              id={@prefix <> "card-close-" <> @request.id}
+              type="button"
+              class="bb-iconbtn"
+              aria-expanded="true"
+              aria-label="Close card"
+              title="Close card"
+              phx-click={@close}
+              phx-value-id={@request.id}
+            >
+              <.icon name="hero-chevron-up" class="size-3.5" />
+            </button>
           </div>
           <ForemanWeb.CardSource.row
             id={@prefix <> "card-source-" <> @request.id}
@@ -184,6 +202,7 @@ defmodule ForemanWeb.OpenCard do
               type="checkbox"
               name="batch[items][]"
               value={item["id"]}
+              checked={item["id"] in List.wrap(@footer.choice)}
             />
             <span class="min-w-0">
               <span class="bb-opt-label block">{item["label"]}</span>
@@ -460,6 +479,7 @@ defmodule ForemanWeb.OpenCard do
               type="radio"
               name="decision[choice]"
               value={option}
+              checked={option == @footer.choice}
             />
             <span class="min-w-0">
               <span class="bb-opt-label block">{option}</span>
@@ -526,7 +546,8 @@ defmodule ForemanWeb.OpenCard do
   end
 
   defp footer_attrs(assigns, form) do
-    Map.take(assigns, [:request, :prefix, :event, :footer, :source]) |> Map.put(:form, form)
+    Map.take(assigns, [:request, :prefix, :event, :footer, :source, :error])
+    |> Map.put(:form, form)
   end
 
   attr :request, :any, required: true
@@ -535,6 +556,7 @@ defmodule ForemanWeb.OpenCard do
   attr :footer, :map, required: true
   attr :source, :map, required: true
   attr :form, :string, required: true, doc: "the form the text box submits with"
+  attr :error, :map, default: nil
   attr :row_id, :string, default: nil
   slot :inner_block, required: true
 
@@ -549,6 +571,7 @@ defmodule ForemanWeb.OpenCard do
     ~H"""
     <div id={@prefix <> "card-footer-" <> @id} class="bb-qfoot">
       <input type="hidden" name="card_id" value={@id} />
+      <ForemanWeb.CardLines.error_line :if={@error} error={@error} />
       <div id={@row_id} class="bb-qrow">
         <.input
           id={@prefix <> "card-text-" <> @id}
