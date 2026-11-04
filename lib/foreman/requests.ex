@@ -27,7 +27,7 @@ defmodule Foreman.Requests do
         # The asking session is fixed now, never at render (Decision 5).
         agent_session_id =
           case Foreman.AgentSessions.resolve_asker(params) do
-            {:ok, session} -> session.id
+            {:ok, session} -> Foreman.AgentSessions.card_owner(session, kind, facts, key).id
             {:unknown, _} -> nil
           end
 
@@ -45,6 +45,7 @@ defmodule Foreman.Requests do
           })
 
         audit(request, :new, :ask, %{}, effects)
+        Foreman.AgentSessions.card_opened(request)
         notify(request)
         {:ok, %{request | standing_answer: standing}}
       else
@@ -480,6 +481,7 @@ defmodule Foreman.Requests do
           do: Foreman.Answers.remember(request)
 
         audit(request, state, event, payload, effects)
+        if state == :pending, do: Foreman.AgentSessions.card_closed(request)
 
         if {:enqueue, :job} in effects do
           with {:ok, handler} <- Kind.fetch(request.kind), :ok <- handler.enqueue(request) do

@@ -9,6 +9,7 @@ System.put_env("FOREMAN_CONFIG_DIR", config_dir)
 Mimic.copy(Phoenix.Token)
 Mimic.copy(File)
 Mimic.copy(Foreman.SessionTmux)
+Mimic.copy(Foreman.Events)
 
 ExUnit.start()
 

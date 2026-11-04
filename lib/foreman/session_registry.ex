@@ -15,6 +15,8 @@ defmodule Foreman.SessionRegistry do
 
     with {:ok, panes} <- Foreman.SessionTargets.list(opts) do
       Foreman.AgentSessions.end_missing(agents, panes)
+      # The same listing drives working and idle: no further tmux call (Decision 7).
+      Foreman.AgentSessions.observe_panes(agents, panes, opts)
 
       for row <- rows, not Foreman.SessionTargets.present?(panes, row.window) do
         {:ended, [save: :ended_at]} = Foreman.ExternalSession.step(:running, :pane_gone, %{})

@@ -4,10 +4,9 @@ defmodule Foreman.AgentSessionsMigrationTest do
 
   @prefix "agent_sessions_migration"
   @version 20_261_103_211_112
-  [{migration, _}] =
-    Code.require_file("priv/repo/migrations/20261103211112_create_agent_sessions.exs")
-
-  @migration migration
+  # Another migration test may have loaded it already (require_file then returns nil).
+  Code.require_file("priv/repo/migrations/20261103211112_create_agent_sessions.exs")
+  @migration Foreman.Repo.Migrations.CreateAgentSessions
 
   setup do
     Repo.query!("CREATE SCHEMA #{@prefix}")

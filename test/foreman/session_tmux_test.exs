@@ -69,7 +69,8 @@ defmodule Foreman.SessionTmuxTest do
     refute File.exists?(Path.join(c.dir, "BAD"))
 
     assert eventually(fn ->
-             Tmux.observe(c.session, c.opts) == {:ok, %{window: window, state: :ended}}
+             without_activity(Tmux.observe(c.session, c.opts)) ==
+               {:ok, %{window: window, state: :ended}}
            end)
 
     assert {_, 0} = System.cmd("tmux", ["-L", c.socket, "has-session", "-t", "=sample"])
@@ -132,7 +133,8 @@ defmodule Foreman.SessionTmuxTest do
     session = Map.put(c.session, :window, window)
 
     assert eventually(fn ->
-             Tmux.observe(session, c.opts) == {:ok, %{window: window, state: :running}}
+             without_activity(Tmux.observe(session, c.opts)) ==
+               {:ok, %{window: window, state: :running}}
            end)
 
     client =
@@ -165,7 +167,8 @@ defmodule Foreman.SessionTmuxTest do
     session = Map.put(c.session, :window, window)
 
     assert eventually(fn ->
-             Tmux.observe(session, c.opts) == {:ok, %{window: window, state: :running}}
+             without_activity(Tmux.observe(session, c.opts)) ==
+               {:ok, %{window: window, state: :running}}
            end)
 
     System.cmd("tmux", ["-L", c.socket, "set-option", "-wu", "-t", window, "@foreman-session"])
@@ -236,7 +239,8 @@ defmodule Foreman.SessionTmuxTest do
     assert String.trim(selected) == first
 
     assert eventually(fn ->
-             Tmux.observe(c.session, c.opts) == {:ok, %{window: first, state: :running}}
+             without_activity(Tmux.observe(c.session, c.opts)) ==
+               {:ok, %{window: first, state: :running}}
            end)
   end
 
@@ -308,6 +312,10 @@ defmodule Foreman.SessionTmuxTest do
     System.cmd("tmux", ["-L", c.socket, "rename-window", "-t", window, "odd\tname"])
     assert {:ok, :window_gone} = Tmux.observe(c.session, c.opts)
   end
+
+  # The window's activity time feeds the lifecycle observer; these tests check liveness.
+  defp without_activity({:ok, %{} = seen}), do: {:ok, Map.delete(seen, :activity)}
+  defp without_activity(other), do: other
 
   defp eventually(fun, attempts \\ 100)
   defp eventually(_, 0), do: false
