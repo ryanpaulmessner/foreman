@@ -156,7 +156,6 @@ defmodule ForemanWeb.SessionLive do
       repos={@repos}
       pending_count={@pending_count}
       drawer_state={@drawer_state}
-      drawer_error={@drawer_error}
       streams={@streams}
     >
       <div class="bb-session-page max-w-3xl space-y-6">

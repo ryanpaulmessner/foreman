@@ -76,7 +76,6 @@ defmodule ForemanWeb.AnswersLive do
       active={:answers}
       pending_count={@pending_count}
       drawer_state={@drawer_state}
-      drawer_error={@drawer_error}
       streams={@streams}
     >
       <div class="mx-auto w-full max-w-4xl space-y-6 p-4 sm:p-8">

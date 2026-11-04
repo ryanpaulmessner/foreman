@@ -31,6 +31,17 @@ defmodule ForemanWeb.ConnCase do
     end
   end
 
+  def open_from_drawer(view, id) do
+    import Phoenix.LiveViewTest
+    view |> element("#needs-you-badge") |> render_click()
+    refute has_element?(view, "#request-drawer form")
+    view |> element("#drawer-open-#{id}") |> render_click()
+    path = assert_patch(view)
+    assert URI.decode_query(URI.parse(path).query)["card"] == id
+    assert has_element?(view, "#needs-you-badge[aria-expanded=false]")
+    view
+  end
+
   setup tags do
     unless tags[:production_token_clock], do: ForemanWeb.LiveViewClock.install()
     if Application.get_env(:foreman, :start_repo, true), do: Foreman.DataCase.setup_sandbox(tags)

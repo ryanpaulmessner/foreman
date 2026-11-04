@@ -85,7 +85,8 @@ defmodule ForemanWeb.CardLifecycleLiveTest do
     assert has_element?(view, "#question-#{r.id}", "Which Friday?")
     assert has_element?(view, "#updated-#{r.id}", "Updated")
     assert has_element?(view, "#drawer-question-#{r.id}", "Which Friday?")
-    assert has_element?(view, "#drawer-updated-#{r.id}", "Updated")
+    open_from_drawer(view, r.id)
+    assert has_element?(view, "#updated-#{r.id}", "Updated")
   end
 
   test "similar pending questions are flagged within the ticket group", %{conn: conn, request: r} do

@@ -51,7 +51,6 @@ defmodule ForemanWeb.DocumentsLive do
     ~H"""
     <Layouts.app
       drawer_state={@drawer_state}
-      drawer_error={@drawer_error}
       streams={@streams}
       flash={@flash}
       active={:documents}

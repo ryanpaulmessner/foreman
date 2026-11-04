@@ -88,7 +88,6 @@ defmodule ForemanWeb.SettingsLive do
     ~H"""
     <Layouts.app
       drawer_state={@drawer_state}
-      drawer_error={@drawer_error}
       streams={@streams}
       flash={@flash}
       pending_count={@pending_count}
