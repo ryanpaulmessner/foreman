@@ -402,7 +402,7 @@ defmodule Foreman.SessionTmux do
     with {:ok, windows} <- windows(opts) do
       case Enum.find(windows, &matches?(&1, session)) do
         nil -> {:ok, :window_gone}
-        w -> {:ok, %{window: w.window, state: w.state}}
+        w -> {:ok, %{window: w.window, state: w.state, activity: w.activity}}
       end
     end
   end
@@ -528,7 +528,7 @@ defmodule Foreman.SessionTmux do
 
   defp windows(opts) do
     format =
-      ~S(#{session_name}\t#{window_name}\t#{window_id}\t#{@foreman-state}\t#{pane_dead}\t#{@foreman-session})
+      ~S(#{session_name}\t#{window_name}\t#{window_id}\t#{@foreman-state}\t#{pane_dead}\t#{@foreman-session}\t#{window_activity})
 
     format = String.replace(format, "\\t", "\t")
 
@@ -536,12 +536,17 @@ defmodule Foreman.SessionTmux do
       {:ok, output} ->
         rows =
           for line <- String.split(output, "\n", trim: true),
-              [project, ticket, window, state, dead, identity] = String.split(line, "\t"),
+              # Six fields come from listings without the activity time.
+              [project, ticket, window, state, dead, identity | activity] <- [
+                String.split(line, "\t")
+              ],
+              length(activity) <= 1,
               do: %{
                 project: project,
                 ticket: ticket,
                 identity: identity,
                 window: window,
+                activity: List.first(activity),
                 state:
                   cond do
                     dead == "1" or state == "ended" -> :ended

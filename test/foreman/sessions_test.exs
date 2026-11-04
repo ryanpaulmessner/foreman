@@ -152,7 +152,7 @@ defmodule Foreman.SessionsTest do
     assert eventually(fn -> Foreman.SessionTmux.attached?(session, c.opts) == {:ok, true} end)
 
     assert eventually(fn ->
-             Foreman.SessionTmux.observe(session, c.opts) ==
+             without_activity(Foreman.SessionTmux.observe(session, c.opts)) ==
                {:ok, %{window: session.window, state: :ended}}
            end)
 
@@ -217,7 +217,7 @@ defmodule Foreman.SessionsTest do
     assert resumed.window in String.split(windows)
 
     assert eventually(fn ->
-             Foreman.SessionTmux.observe(resumed, c.opts) ==
+             without_activity(Foreman.SessionTmux.observe(resumed, c.opts)) ==
                {:ok, %{window: resumed.window, state: :ended}}
            end)
 
@@ -335,4 +335,8 @@ defmodule Foreman.SessionsTest do
 
     refute Sessions.launchable?(nil)
   end
+
+  # The window's activity time feeds the lifecycle observer; these tests check liveness.
+  defp without_activity({:ok, %{} = seen}), do: {:ok, Map.delete(seen, :activity)}
+  defp without_activity(other), do: other
 end
