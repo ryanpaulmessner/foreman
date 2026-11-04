@@ -11,7 +11,11 @@ defmodule Foreman.SessionRegistry do
           select: %{id: s.id, window: s.window, last_seen_at: s.last_seen_at}
       )
 
+    agents = Foreman.AgentSessions.live_default()
+
     with {:ok, panes} <- Foreman.SessionTargets.list(opts) do
+      Foreman.AgentSessions.end_missing(agents, panes)
+
       for row <- rows, not Foreman.SessionTargets.present?(panes, row.window) do
         {:ended, [save: :ended_at]} = Foreman.ExternalSession.step(:running, :pane_gone, %{})
 
@@ -33,7 +37,7 @@ defmodule Foreman.SessionRegistry do
     text?(attrs["name"]) and text?(attrs["pane"]) and
       Regex.match?(~r/\A%\d+\z/, attrs["pane"]) and
       text?(attrs["workdir"]) and Path.type(attrs["workdir"]) == :absolute and
-      attrs["harness"] in ["claude", "pi"]
+      attrs["harness"] in ["claude", "pi"] and (is_nil(attrs["parent"]) or text?(attrs["parent"]))
   end
 
   def register(attrs) do
@@ -41,9 +45,8 @@ defmodule Foreman.SessionRegistry do
       Repo.transaction(fn ->
         name = attrs["name"]
 
-        Repo.query!("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
-          "foreman:session:" <> name
-        ])
+        Foreman.AgentSessions.lock(name)
+        agent = Foreman.AgentSessions.register(attrs)
 
         query =
           from s in "sessions",
@@ -61,7 +64,8 @@ defmodule Foreman.SessionRegistry do
             "workdir" => attrs["workdir"]
           },
           last_seen_at: now,
-          ended_at: nil
+          ended_at: nil,
+          agent_session_id: Ecto.UUID.dump!(agent.id)
         }
 
         existing = Repo.one(from s in query, select: %{id: s.id, ended_at: s.ended_at})
@@ -78,7 +82,7 @@ defmodule Foreman.SessionRegistry do
             Repo.update_all(query, set: Map.to_list(fields))
         end
 
-        %{name: name, pane: attrs["pane"]}
+        %{name: name, pane: attrs["pane"], id: agent.id}
       end)
     else
       {:error, :invalid_session}

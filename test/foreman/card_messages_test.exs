@@ -2,6 +2,7 @@ defmodule Foreman.CardMessagesTest do
   use Foreman.DataCase, async: false
   alias Foreman.{CardMessages, Requests}
   import Mimic
+  import Foreman.AgentSessionFixtures
   setup :set_mimic_global
 
   setup do
@@ -22,16 +23,10 @@ defmodule Foreman.CardMessagesTest do
 
   test "questions reach Claude and Pi panes and leave the card pending", %{request: r} do
     for harness <- ["claude", "pi"] do
-      Repo.insert_all("sessions", [
-        %{
-          repo_key: "sample",
-          bead_id: "s-1",
-          window: "%42",
-          details: %{"session" => "build", "harness" => harness},
-          last_seen_at: r.inserted_at,
-          started_at: DateTime.add(r.inserted_at, -1)
-        }
-      ])
+      if old = Foreman.AgentSessions.live_by_name("build"),
+        do: Foreman.AgentSessions.end_session(old)
+
+      asked_by(r, agent_session(name: "build", pane_id: "%42", harness: harness))
 
       parent = self()
 
@@ -81,6 +76,7 @@ defmodule Foreman.CardMessagesTest do
       })
 
     r = r |> Ecto.Changeset.change(session: session.session_id) |> Repo.update!()
+    asked_by(r, Foreman.AgentSessions.sync_planning(session))
 
     runner = fn _, args, _ ->
       assert Enum.take(args, 6) == ["-u", "-N", "-L", "foreman", "-f", "/dev/null"]
@@ -109,13 +105,15 @@ defmodule Foreman.CardMessagesTest do
   end
 
   test "external waiting cards refuse a replaced pane process", %{request: r} do
-    assert {:ok, _} =
+    assert {:ok, %{id: id}} =
              Foreman.SessionRegistry.register(%{
                "name" => r.session,
                "pane" => "%42",
                "workdir" => "/tmp",
                "harness" => "pi"
              })
+
+    r = asked_by(r, Foreman.AgentSessions.get(id))
 
     r =
       r
@@ -137,16 +135,7 @@ defmodule Foreman.CardMessagesTest do
   end
 
   test "Pi refuses a draft even when prior output contains an empty box", %{request: r} do
-    Repo.insert_all("sessions", [
-      %{
-        repo_key: "sample",
-        bead_id: "s-1",
-        window: "%42",
-        details: %{"session" => "build", "harness" => "pi"},
-        last_seen_at: r.inserted_at,
-        started_at: DateTime.add(r.inserted_at, -1)
-      }
-    ])
+    asked_by(r, agent_session(name: "build", pane_id: "%42", harness: "pi"))
 
     runner = fn _, args, _ ->
       case Enum.drop(args, 3) do
@@ -164,16 +153,7 @@ defmodule Foreman.CardMessagesTest do
   test "unknown, gone and busy sessions store no question", %{request: r} do
     assert {:error, :source_unknown} = CardMessages.ask(r.id, "Why?")
 
-    Repo.insert_all("sessions", [
-      %{
-        repo_key: "sample",
-        bead_id: "s-1",
-        window: "%42",
-        details: %{"session" => "build", "harness" => "claude"},
-        last_seen_at: r.inserted_at,
-        started_at: DateTime.add(r.inserted_at, -1)
-      }
-    ])
+    asked_by(r, agent_session(name: "build", pane_id: "%42", harness: "claude"))
 
     assert {:error, :window_gone} =
              CardMessages.ask(r.id, "Why?", runner: fn _, _, _ -> {"", 0} end)

@@ -1,5 +1,7 @@
 defmodule Foreman.CoordinatorNoteTest do
   use Foreman.DataCase, async: false
+  import Mimic
+  setup :set_mimic_global
   import Ecto.Query
 
   test "note CLI is a transient coordinator command, not a local ticket note" do
@@ -182,7 +184,7 @@ defmodule Foreman.CoordinatorNoteTest do
         })
     end
 
-    Repo.update_all(from(s in "sessions", where: s.window == "%3"),
+    Repo.update_all(from(s in Foreman.AgentSession, where: s.pane_id == "%3"),
       set: [ended_at: DateTime.utc_now()]
     )
 
@@ -237,7 +239,7 @@ defmodule Foreman.CoordinatorNoteTest do
         })
     end
 
-    Repo.update_all(from(s in "sessions", where: s.window == "%3"),
+    Repo.update_all(from(s in Foreman.AgentSession, where: s.pane_id == "%3"),
       set: [ended_at: DateTime.utc_now()]
     )
 
@@ -270,5 +272,49 @@ defmodule Foreman.CoordinatorNoteTest do
 
     assert {:error, :not_registered} =
              Foreman.CoordinatorNote.send_to("nobody", "x", runner: runner, key_delay: 0)
+  end
+
+  test "notes are looked up by session row: the live pane, or a board coordinator's window" do
+    for pane <- ["%1", "%2"] do
+      {:ok, _} =
+        Foreman.SessionRegistry.register(%{
+          "name" => "owner",
+          "pane" => pane,
+          "workdir" => "/tmp",
+          "harness" => "claude"
+        })
+    end
+
+    planning =
+      Repo.insert!(%Foreman.PlanningSession{
+        project: "sample",
+        ticket: "s-9",
+        window: "@12",
+        workdir: "/tmp",
+        state: :running,
+        launched_at: DateTime.utc_now()
+      })
+
+    Foreman.AgentSessions.sync_planning(planning)
+    parent = self()
+
+    Mimic.stub(Foreman.SessionTmux, :reply_source, fn source, text, _ ->
+      send(parent, {:note, source, text})
+      :ok
+    end)
+
+    assert :ok = Foreman.CoordinatorNote.send_to("owner", "Review s-1")
+    assert_receive {:note, %{server: :default, target: "%2", harness: "claude"}, _}
+
+    assert :ok = Foreman.CoordinatorNote.send_to("s-9", "Review s-9")
+    assert_receive {:note, %{server: :board, target: "@12", harness: "claude"}, text}
+    assert text =~ "Review s-9"
+
+    # A build known only from its dispatch was never a broadcast recipient.
+    Foreman.AgentSessionFixtures.agent_session(name: "dispatch-only", pane_id: "%30")
+
+    # The broadcast reaches the live pane once; the moved name's old pane is not a recipient.
+    assert {:ok, %{delivered: [%{name: "owner", pane: "%2"}], skipped: []}} =
+             Foreman.CoordinatorNote.send("claude", "source", "Note")
   end
 end

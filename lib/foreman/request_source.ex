@@ -1,53 +1,34 @@
 defmodule Foreman.RequestSource do
-  @moduledoc "Resolves the card's own named session before a unique live tmux name or tag."
-  import Ecto.Query
+  @moduledoc "The card's source session: its `agent_sessions` row, and focus on its pane."
 
-  def for_request(request, opts \\ [])
-  def for_request(%{session: nil}, _opts), do: nil
+  @doc """
+  The card's source, from its `agent_session_id` (fixed when the ask was accepted). A card
+  asked before identity rows existed uses the row with its session name that was live when
+  it was asked (D3). Never reads tmux and never guesses from a live window name.
+  """
+  def for_request(request, _opts \\ []) do
+    row =
+      case Map.get(request, :agent_session_id) do
+        nil -> Foreman.AgentSessions.legacy(request)
+        id -> Foreman.AgentSessions.get(id)
+      end
 
-  def for_request(request, opts) do
-    dispatches =
-      Foreman.Repo.all(
-        from s in "sessions",
-          where: fragment("?->>'session'", s.details) == ^request.session,
-          order_by: [desc: s.repo_key == "__foreman__" and s.bead_id == "registered", desc: s.id],
-          select: %{window: s.window, details: s.details, ended_at: s.ended_at}
-      )
-
-    resolve(request, dispatches, Foreman.Sessions.get({request.repo_key, request.bead_id})) ||
-      live_source(request, opts)
+    if row, do: source(row)
   end
 
-  def resolve(request, dispatches, planning \\ nil) do
-    cond do
-      is_nil(request.session) ->
-        nil
+  @doc "The source shape cards use for an `agent_sessions` row."
+  def source(%Foreman.AgentSession{} = row) do
+    target = Foreman.AgentSessions.target(row)
 
-      planning && planning.session_id == request.session && planning.window ->
-        %{name: planning.ticket, harness: "claude", target: planning.window, server: :board}
-
-      dispatch = Enum.find(dispatches, &matches?(&1, request.session)) ->
-        %{
-          name: request.session,
-          harness: dispatch.details["harness"] || request.actor,
-          target: dispatch.window,
-          server: :default
-        }
-        |> ended(dispatch)
-
-      true ->
-        nil
-    end
-  end
-
-  defp live_source(request, opts) do
-    case Foreman.SessionTargets.lookup(request.session, opts) do
-      {:ok, pane} ->
-        %{name: request.session, harness: request.actor, target: pane, server: :default}
-
-      _ ->
-        nil
-    end
+    %{
+      name: row.name,
+      harness: row.harness,
+      target: target.target,
+      server: target.server,
+      agent_session_id: row.id,
+      kind: row.kind
+    }
+    |> ended(row)
   end
 
   defp ended(source, %{ended_at: at}) when not is_nil(at), do: Map.put(source, :ended_at, at)
@@ -148,9 +129,4 @@ defmodule Foreman.RequestSource do
       _ -> {:error, :window_gone}
     end
   end
-
-  defp matches?(dispatch, name),
-    do:
-      is_binary(dispatch.window) and
-        (dispatch.details["session"] == name or dispatch.window == name)
 end

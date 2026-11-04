@@ -29,13 +29,17 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     conn: conn,
     request: request
   } do
-    assert {:ok, _} =
+    assert {:ok, %{id: id}} =
              Foreman.SessionRegistry.register(%{
                "name" => "build",
                "pane" => "%99999999",
                "workdir" => "/tmp",
                "harness" => "pi"
              })
+
+    request
+    |> Ecto.Changeset.change(agent_session_id: id)
+    |> Foreman.Repo.update!()
 
     assert :ok = Foreman.SessionRegistry.reconcile(runner: fn _, _, _ -> {"", 0} end)
     {:ok, view, _} = live(conn, "/needs-you")
@@ -51,8 +55,16 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     assert has_element?(view, "#request-#{request.id} [data-ticket-heading]", "A ticket")
     refute has_element?(view, "#context-#{request.id} h2")
     assert has_element?(view, "#context-#{request.id}", "One-off")
-    assert has_element?(view, "#source-#{request.id}", "Source unknown")
-    assert has_element?(view, ~s(#copy-session-#{request.id} input[value^="tmux "][readonly]))
+    # An unregistered asker: the unknown source and no tmux command (spec acceptance 3).
+    assert has_element?(
+             view,
+             "#source-#{request.id}",
+             "The board does not know which session asked this."
+           )
+
+    refute has_element?(view, "#session-command-#{request.id}")
+    refute has_element?(view, "#copy-session-#{request.id}")
+    refute has_element?(view, "#go-session-#{request.id}")
     assert has_element?(view, "#withdraw-#{request.id}")
 
     view
@@ -287,6 +299,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
         state: :running,
         launched_at: DateTime.utc_now()
       })
+      |> tap(&Foreman.AgentSessions.sync_planning/1)
 
     {:ok, request} =
       Requests.ask({"sample", "s-1"}, "session_waiting", %{
@@ -340,7 +353,8 @@ defmodule ForemanWeb.NeedsYouLiveTest do
              window: "@4#{String.last(ticket)}",
              state: :running,
              launched_at: DateTime.utc_now()
-           })}
+           })
+           |> tap(&Foreman.AgentSessions.sync_planning/1)}
         end
 
       %{sessions: sessions}
