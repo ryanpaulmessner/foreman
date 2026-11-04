@@ -185,7 +185,7 @@ defmodule Foreman.CoordinatorNoteTest do
     end
 
     Repo.update_all(from(s in Foreman.AgentSession, where: s.pane_id == "%3"),
-      set: [ended_at: DateTime.utc_now()]
+      set: [ended_at: DateTime.utc_now(), state: "ended"]
     )
 
     parent = self()
@@ -240,7 +240,7 @@ defmodule Foreman.CoordinatorNoteTest do
     end
 
     Repo.update_all(from(s in Foreman.AgentSession, where: s.pane_id == "%3"),
-      set: [ended_at: DateTime.utc_now()]
+      set: [ended_at: DateTime.utc_now(), state: "ended"]
     )
 
     parent = self()

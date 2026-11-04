@@ -18,8 +18,9 @@ defmodule Foreman.AgentSessionFixtures do
         pair -> pair
       end)
 
+    {ended_at, attrs} = Map.pop(attrs, :ended_at)
     {:ok, row} = Foreman.AgentSessions.create(attrs)
-    row
+    if ended_at, do: Foreman.AgentSessions.end_session(row, ended_at), else: row
   end
 
   @doc "Points `request` at `session`, as an accepted ask from that session would."

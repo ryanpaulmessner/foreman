@@ -325,7 +325,10 @@ defmodule Foreman.Sessions do
           pending = Foreman.SessionWaiting.pending(key, id)
 
           session = save(session, %{last_activity_at: DateTime.utc_now()})
-          {:ok, transition(session, event, %{resume_matches: resumes?(pending, tool)})}
+          session = transition(session, event, %{resume_matches: resumes?(pending, tool)})
+          # A hook that reports tool use or a resumed turn is output (Decision 7).
+          if event in [:resumed, :activity], do: AgentSessions.saw_output(session.session_id)
+          {:ok, session}
 
         _ ->
           {:error, :unknown_session}
@@ -444,8 +447,13 @@ defmodule Foreman.Sessions do
       {:ok, :window_gone} when not is_nil(session.window) ->
         transition(session, :window_gone)
 
-      {:ok, %{window: window, state: state}} ->
+      {:ok, %{window: window, state: state} = seen} ->
         session = save(session, %{window: window})
+
+        # The board window's activity time, read in the same tmux call (Decision 7).
+        if state == :running and is_binary(seen[:activity]),
+          do: AgentSessions.observe_output(session.session_id, "w:" <> seen.activity, opts)
+
         session = if state in [:running, :ended], do: transition(session, :started), else: session
         if state == :ended, do: transition(session, :exited), else: session
 
@@ -467,7 +475,8 @@ defmodule Foreman.Sessions do
 
     if state != session.state do
       result = save(session, %{state: state, observed_at: DateTime.utc_now()})
-      AgentSessions.sync_planning(result)
+      # Same transaction: the identity row takes the matching lifecycle event (Decision 7).
+      AgentSessions.sync_planning(result, event: event)
 
       Foreman.Events.broadcast(:sessions_changed, session.project)
       result

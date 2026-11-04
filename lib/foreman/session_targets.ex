@@ -11,8 +11,11 @@ defmodule Foreman.SessionTargets do
     socket =
       Keyword.get(opts, :socket, Application.get_env(:foreman, :external_tmux_socket, "default"))
 
+    # The activity fields feed the lifecycle's output observer in the same call
+    # (`Foreman.AgentSessions.observe_panes/3`); a listing without them still parses.
     format =
-      "\#{pane_id}\t\#{window_id}\t\#{session_name}\t\#{window_name}\t\#{pane_active}\t\#{@build}\t\#{@foreman-session}"
+      "\#{pane_id}\t\#{window_id}\t\#{session_name}\t\#{window_name}\t\#{pane_active}\t\#{@build}\t\#{@foreman-session}" <>
+        "\t\#{window_activity}\t\#{window_panes}\t\#{history_size}\t\#{cursor_x},\#{cursor_y}"
 
     case runner.("tmux", ["-N", "-L", socket, "list-panes", "-a", "-F", format],
            stderr_to_stdout: true
@@ -20,16 +23,23 @@ defmodule Foreman.SessionTargets do
       {output, 0} ->
         rows =
           for line <- String.split(output, "\n", trim: true),
-              [pane, window, session, name, active, build, tag] <- [String.split(line, "\t")],
-              do: %{
-                pane: pane,
-                window: window,
-                session: session,
-                name: name,
-                active: active == "1",
-                build: build,
-                tag: tag
-              }
+              [pane, window, session, name, active, build, tag | activity] <- [
+                String.split(line, "\t")
+              ],
+              activity == [] or length(activity) == 4,
+              do:
+                Map.merge(
+                  %{
+                    pane: pane,
+                    window: window,
+                    session: session,
+                    name: name,
+                    active: active == "1",
+                    build: build,
+                    tag: tag
+                  },
+                  activity(activity)
+                )
 
         if length(rows) == length(String.split(output, "\n", trim: true)),
           do: {:ok, rows},
@@ -45,6 +55,11 @@ defmodule Foreman.SessionTargets do
   rescue
     ErlangError -> {:error, :tmux_unavailable}
   end
+
+  defp activity([activity, panes, history, cursor]),
+    do: %{activity: activity, panes: panes, history: history, cursor: cursor}
+
+  defp activity([]), do: %{}
 
   def present?(panes, target),
     do: Enum.any?(panes, &(target in [&1.pane, &1.window, &1.name, &1.session <> ":" <> &1.name]))

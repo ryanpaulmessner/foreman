@@ -8,7 +8,7 @@ defmodule Foreman.AgentSession do
 
   @kinds ~w(main_coordinator epic_coordinator build)
   @servers ~w(board default)
-  @fields ~w(id name kind parent_id harness model conversation_id tmux_server pane_id project ticket workdir branch started_at last_seen_at ended_at)a
+  @fields ~w(id name kind parent_id harness model conversation_id tmux_server pane_id project ticket workdir branch started_at last_seen_at)a
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -25,8 +25,13 @@ defmodule Foreman.AgentSession do
     field :ticket, :string
     field :workdir, :string
     field :branch, :string
-    # Owned by the lifecycle machine (fm-9mm.10); never written here.
+    # Owned by `Foreman.SessionLifecycle` through `Foreman.AgentSessions.fire/3`;
+    # never written by the identity writers.
     field :state, :string
+    field :state_at, :utc_datetime_usec
+    # The monitor's last pane-activity fingerprint and when it last changed.
+    field :output_mark, :string
+    field :output_at, :utc_datetime_usec
     field :started_at, :utc_datetime_usec
     field :last_seen_at, :utc_datetime_usec
     field :ended_at, :utc_datetime_usec

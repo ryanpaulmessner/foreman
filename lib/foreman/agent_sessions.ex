@@ -3,14 +3,17 @@ defmodule Foreman.AgentSessions do
   Session identity (spec Decisions 1-6): lookups by id, live name and live pane, the
   writers (registration, dispatch, board launch) and ask resolution.
 
-  A row is live while `ended_at` is null; `Foreman.ExternalSession` decides the
-  liveness step. A writer that claims a live name on another pane or server ends
-  the older row first, so the partial unique index (Decision 2) holds.
+  A row is live while `ended_at` is null. `Foreman.SessionLifecycle` owns `state` and
+  `ended_at` (Decision 7): every change goes through `fire/3`, which saves the state
+  and broadcasts `:sessions_changed`. A writer that claims a live name on another pane
+  or server ends the older row first, so the partial unique index (Decision 2) holds.
   """
   import Ecto.Query
-  alias Foreman.{AgentSession, ExternalSession, PlanningSession, Repo}
+  alias Foreman.{AgentSession, PlanningSession, Repo, SessionLifecycle}
 
   @coordinators ~w(main_coordinator epic_coordinator)
+  # Decision 7: no output change for 2 minutes is quiet.
+  @quiet 120
   @main_name "coordinator"
 
   def get(id) when is_binary(id) do
@@ -40,21 +43,322 @@ defmodule Foreman.AgentSessions do
 
   def live_by_pane(_, _), do: nil
 
-  @doc "Inserts a live row. A second live row with the same name is refused by the index."
-  def create(attrs) do
+  @doc """
+  Inserts a live row in `starting`: the machine's `register` step, or `launch` for a
+  board launch. A second live row with the same name is refused by the index.
+  """
+  def create(attrs, event \\ :register) do
     attrs = Map.put_new(attrs, :started_at, now())
-    %AgentSession{} |> AgentSession.changeset(attrs) |> Repo.insert()
+    {state, _effects} = SessionLifecycle.step(:none, event, guard_data(attrs))
+
+    with {:ok, row} <-
+           %AgentSession{state: SessionLifecycle.dump(state), state_at: now()}
+           |> AgentSession.changeset(attrs)
+           |> Repo.insert() do
+      changed(row)
+      {:ok, row}
+    end
   end
 
-  @doc "Ends a live row; ended rows stay ended (a later claim of the name makes a new row)."
-  def end_session(session, at \\ nil)
+  @doc """
+  Ends a live row with an observed end (`pane_gone` by default, or `exited`); ended rows
+  stay ended (a later claim of the name makes a new row).
+  """
+  def end_session(session, at \\ nil, event \\ :pane_gone)
 
-  def end_session(%AgentSession{ended_at: nil} = session, at) do
-    {:ended, [save: :ended_at]} = ExternalSession.step(:running, :pane_gone, %{})
-    session |> Ecto.Changeset.change(ended_at: at || now()) |> Repo.update!()
+  def end_session(%AgentSession{ended_at: nil} = session, at, event) do
+    {:ok, row, _effects} = fire(session, event, at: at)
+    if is_nil(row.ended_at), do: end_session(row, at, :exited), else: row
   end
 
-  def end_session(session, _), do: session
+  def end_session(session, _, _), do: session
+
+  @doc """
+  Steps the row's lifecycle (spec Decision 7) under the session-name lock and a row lock,
+  and saves the new state. Entering parked or ended sets `ended_at`; leaving them clears
+  it. Returns `{:ok, row, effects}` (an ignored observation returns the row unchanged and
+  `[]`), `{:error, {:invalid, state, event}}` for a refused claim, `{:error, :name_taken}`
+  when another live row holds the name (R7), or `{:error, :not_found}`.
+
+  The caller runs the effects. Options: `:at` (when the new state began, default now) and
+  `:data` (extra guard data, such as `resumable`).
+  """
+  def fire(row_or_id, event, opts \\ [])
+
+  def fire(%AgentSession{id: id}, event, opts), do: fire(id, event, opts)
+
+  def fire(id, event, opts) when is_binary(id) do
+    transaction(fn ->
+      with %AgentSession{} = row <- locked(id) do
+        step(row, event, opts)
+      else
+        nil -> {:error, :not_found}
+      end
+    end)
+  end
+
+  defp locked(id) do
+    case get(id) do
+      nil ->
+        nil
+
+      %AgentSession{name: name} ->
+        lock(name)
+        Repo.one(from s in AgentSession, where: s.id == ^id, lock: "FOR UPDATE")
+    end
+  end
+
+  defp step(row, event, opts) do
+    from = SessionLifecycle.load(row.state)
+    data = Map.merge(guard_data(row, event), Keyword.get(opts, :data, %{}))
+
+    case SessionLifecycle.step(from, event, data) do
+      {:error, _} = refused ->
+        refused
+
+      {^from, effects} ->
+        {:ok, row, effects}
+
+      {to, effects} ->
+        at = Keyword.get(opts, :at) || now()
+        live? = SessionLifecycle.live?(to)
+
+        if live? and not is_nil(row.ended_at) and taken?(row) do
+          {:error, :name_taken}
+        else
+          ended_at =
+            cond do
+              live? -> nil
+              row.ended_at -> row.ended_at
+              true -> at
+            end
+
+          row =
+            row
+            |> Ecto.Changeset.change(
+              state: SessionLifecycle.dump(to),
+              state_at: at,
+              ended_at: ended_at
+            )
+            |> Repo.update!()
+
+          changed(row)
+          {:ok, row, effects}
+        end
+    end
+  end
+
+  defp taken?(row) do
+    case live_by_name(row.name) do
+      %AgentSession{id: id} when id != row.id -> true
+      _ -> false
+    end
+  end
+
+  defp guard_data(row, event \\ nil) do
+    data = %{kind: Map.get(row, :kind), harness: Map.get(row, :harness)}
+
+    if event in [:resume, :start_fresh, :relaunch_build],
+      do: Map.put(data, :resumable, resumable?(row)),
+      else: data
+  end
+
+  # Notifications go out at commit; the tree reloads rows from Postgres.
+  defp changed(row), do: Foreman.Events.broadcast(:sessions_changed, row.id)
+
+  @doc """
+  Whether a dead row can resume its own conversation (R4, fm-9mm.2): Claude needs the
+  conversation id; Pi needs the Pi session id, its worktree and the Pi session file.
+  """
+  def resumable?(%{harness: "pi", conversation_id: id, workdir: dir})
+      when is_binary(id) and is_binary(dir) do
+    File.dir?(dir) and
+      Path.wildcard(Path.join([pi_sessions_dir(), pi_project(dir), "*_" <> id <> ".jsonl"])) != []
+  end
+
+  def resumable?(%{harness: "claude", conversation_id: id}) when is_binary(id), do: id != ""
+  def resumable?(_), do: false
+
+  defp pi_sessions_dir,
+    do: Application.get_env(:foreman, :pi_sessions_dir, Path.expand("~/.pi/agent/sessions"))
+
+  # Pi names a project's session directory after its cwd: `/a/b` is `--a-b--`.
+  defp pi_project(dir),
+    do: "--" <> (dir |> String.trim_leading("/") |> String.replace("/", "-")) <> "--"
+
+  @doc """
+  The monitor's output observer for one live row: `mark` fingerprints the pane's
+  activity in this tick's tmux listing. A changed mark fires `output_changed`; an
+  unchanged one for 2 minutes fires `quiet` (Decision 7). `:now` injects the clock.
+  """
+  def observe_output(id, mark, opts \\ []) when is_binary(mark) do
+    now = Keyword.get(opts, :now) || now()
+
+    transaction(fn ->
+      case locked(id) do
+        %AgentSession{ended_at: nil, output_mark: ^mark, output_at: at} = row
+        when not is_nil(at) ->
+          if DateTime.diff(now, at, :second) >= @quiet,
+            do: step(row, :quiet, at: at),
+            else: {:ok, row, []}
+
+        %AgentSession{ended_at: nil} = row ->
+          row
+          |> Ecto.Changeset.change(output_mark: mark, output_at: now)
+          |> Repo.update!()
+          |> step(:output_changed, at: now)
+
+        _ ->
+          {:ok, nil, []}
+      end
+    end)
+  end
+
+  @doc """
+  The row a card names. A coordinator posts a Pi build's usage limit for it (when
+  `pi-wait` exits LIMITED), so that card names the live build it started on the ticket
+  (Decision 7); every other card names its asker.
+  """
+  def card_owner(
+        %AgentSession{kind: kind} = asker,
+        "session_waiting",
+        %{"reason" => "usage_limit"},
+        {repo, ticket}
+      )
+      when kind in @coordinators do
+    Repo.one(
+      from s in AgentSession,
+        where:
+          s.parent_id == ^asker.id and s.kind == "build" and is_nil(s.ended_at) and
+            s.project == ^repo and s.ticket == ^ticket,
+        order_by: [desc: s.started_at],
+        limit: 1
+    ) || asker
+  end
+
+  def card_owner(asker, _kind, _facts, _key), do: asker
+
+  @doc """
+  An accepted card from this row (Decision 7): a permission prompt or usage limit from
+  `Foreman.SessionWaiting`, else `asked`. Runs in the request's transaction.
+  """
+  def card_opened(%{agent_session_id: nil}), do: :ok
+
+  def card_opened(%{agent_session_id: id, kind: kind, facts: facts}) do
+    event =
+      case {kind, facts["reason"]} do
+        {"session_waiting", "permission"} -> :permission_prompt
+        {"session_waiting", "usage_limit"} -> :usage_limit
+        _ -> :asked
+      end
+
+    fire(id, event)
+    :ok
+  end
+
+  @doc """
+  A card from this row left pending: a closed permission request is `prompt_cleared`;
+  the last open card closing is `last_card_closed` (Decision 7).
+  """
+  def card_closed(%{agent_session_id: nil}), do: :ok
+
+  def card_closed(%{agent_session_id: id, kind: kind, facts: facts}) do
+    if kind == "session_waiting" and facts["reason"] == "permission",
+      do: fire(id, :prompt_cleared)
+
+    if open_cards(id) == [], do: fire(id, :last_card_closed)
+    :ok
+  end
+
+  @doc "The row's pending requests, oldest first: its open cards (R2)."
+  def open_cards(id) do
+    Repo.all(
+      from r in Foreman.Requests.Request,
+        where: r.agent_session_id == ^id and r.state == "pending",
+        order_by: [asc: r.inserted_at]
+    )
+  end
+
+  @doc """
+  What the shared state function (`ForemanWeb.SessionState.view/2`) reads for a row: its
+  state and times, its open cards, its ticket's stage and, for a live build, when its
+  coordinator ended (R8).
+  """
+  def label_facts(%AgentSession{} = row) do
+    cards = open_cards(row.id)
+    limit = Enum.find(cards, &(&1.facts["reason"] == "usage_limit"))
+    parent = if row.parent_id && is_nil(row.ended_at), do: get(row.parent_id)
+
+    %{
+      state: row.state,
+      kind: row.kind,
+      open_cards: length(cards),
+      card_at: cards |> List.first() |> then(&(&1 && &1.inserted_at)),
+      stage: if(row.project && row.ticket, do: stage(row.project, row.ticket)),
+      state_at: row.state_at,
+      ended_at: row.ended_at,
+      reset_at: if(limit, do: limit.facts["reset_at"]),
+      parent_ended_at: if(parent, do: parent.ended_at)
+    }
+  end
+
+  defp stage(project, ticket) do
+    case Foreman.Overlay.get({project, ticket}) do
+      %{stage: stage} -> stage
+      _ -> nil
+    end
+  end
+
+  @doc "A hook saw the agent work (tool use, a resumed turn): output now, without a mark."
+  def saw_output(id, opts \\ []) do
+    now = Keyword.get(opts, :now) || now()
+
+    transaction(fn ->
+      case locked(id) do
+        %AgentSession{ended_at: nil} = row ->
+          row
+          |> Ecto.Changeset.change(output_at: now)
+          |> Repo.update!()
+          |> step(:output_changed, at: now)
+
+        _ ->
+          {:ok, nil, []}
+      end
+    end)
+  end
+
+  @doc """
+  Output observation for default-server rows from the tick's one pane listing
+  (`Foreman.SessionTargets.list/1`); rows whose pane is not listed are left to
+  `end_missing/2`.
+  """
+  def observe_panes(rows, panes, opts \\ []) do
+    for row <- rows,
+        pane = listed(panes, row),
+        mark = pane_mark(pane),
+        do: observe_output(row.id, mark, opts)
+
+    :ok
+  end
+
+  defp listed(panes, %{pane_id: pane}) when is_binary(pane),
+    do: Enum.find(panes, &(&1.pane == pane))
+
+  defp listed(panes, %{name: name}) do
+    case Enum.filter(panes, &(&1.name == name and &1.active)) do
+      [pane] -> pane
+      _ -> nil
+    end
+  end
+
+  @doc """
+  A pane's activity fingerprint. A window with one pane uses tmux's window activity
+  time, which moves on every byte of output. In a shared window (pane-mode builds)
+  that time moves for every pane, so the pane's own history size and cursor are used.
+  """
+  def pane_mark(%{panes: "1", activity: activity}), do: "w:" <> activity
+  def pane_mark(%{history: h, cursor: c}), do: "p:" <> h <> ":" <> c
+  def pane_mark(_), do: nil
 
   @doc "The live main coordinator, else the most recent one."
   def main_coordinator do
@@ -316,7 +620,11 @@ defmodule Foreman.AgentSessions do
 
   @doc """
   Board launch: the planning session's own row (same id, conversation id and transaction),
-  live while the planning session is starting, running or waiting.
+  live while the planning session is starting, running or waiting. `:event` names the
+  `Foreman.SessionMachine` event that moved the planning session, so the row takes the
+  matching lifecycle event in the same transaction (Decision 7): `idle_timeout` parks,
+  `window_gone` is `pane_gone` (ended, while the planning row parks), the rest `exited`;
+  a planning session live again resumes the row.
   """
   def sync_planning(%PlanningSession{} = planning, opts \\ []) do
     lock(planning.ticket)
@@ -328,22 +636,22 @@ defmodule Foreman.AgentSessions do
         is_nil(row) and live? ->
           other = live_by_name(planning.ticket)
           if other, do: end_session(other)
-          {:ok, row} = create(planning_fields(planning, opts))
+          {:ok, row} = create(planning_fields(planning, opts), :launch)
           row
 
         is_nil(row) ->
-          {:ok, row} = create(Map.put(planning_fields(planning, opts), :ended_at, now()))
-          row
+          {:ok, row} = create(planning_fields(planning, opts), :launch)
+          end_session(row, nil, dead_event(planning, opts[:event]))
 
         live? and row.ended_at ->
           # A resumed conversation keeps its row; the name is claimed again.
           other = live_by_name(row.name)
           if other && other.id != row.id, do: end_session(other)
-          {:running, _} = ExternalSession.step(:ended, :register, %{})
-          touch(row, %{ended_at: nil, pane_id: opts[:pane] || row.pane_id})
+          {:ok, row, _} = fire(row, :resume, data: %{resumable: true})
+          touch(row, %{pane_id: opts[:pane] || row.pane_id})
 
         not live? and is_nil(row.ended_at) ->
-          end_session(row)
+          end_session(row, nil, dead_event(planning, opts[:event]))
 
         true ->
           touch(row, if(opts[:pane], do: %{pane_id: opts[:pane]}, else: %{}))
@@ -358,6 +666,11 @@ defmodule Foreman.AgentSessions do
 
     row
   end
+
+  defp dead_event(_planning, :idle_timeout), do: :idle_timeout
+  defp dead_event(_planning, :window_gone), do: :pane_gone
+  defp dead_event(%PlanningSession{state: :parked}, nil), do: :idle_timeout
+  defp dead_event(_planning, _), do: :exited
 
   defp planning_fields(planning, opts) do
     main? = Foreman.Sessions.coordinator?(planning)
@@ -402,17 +715,21 @@ defmodule Foreman.AgentSessions do
   def end_missing(rows, panes) do
     for row <- rows,
         not Foreman.SessionTargets.present?(panes, row.pane_id || row.name) do
-      {:ended, [save: :ended_at]} = ExternalSession.step(:running, :pane_gone, %{})
+      transaction(fn ->
+        lock(row.name)
 
-      # A claim made after the listing changes last_seen_at, so it is not ended here.
-      Repo.update_all(
-        from(s in AgentSession,
-          where:
-            s.id == ^row.id and is_nil(s.ended_at) and
-              s.last_seen_at == ^row.last_seen_at
-        ),
-        set: [ended_at: now()]
-      )
+        # A claim made after the listing changes last_seen_at, so it is not ended here.
+        case Repo.one(
+               from s in AgentSession,
+                 where:
+                   s.id == ^row.id and is_nil(s.ended_at) and
+                     s.last_seen_at == ^row.last_seen_at,
+                 lock: "FOR UPDATE"
+             ) do
+          nil -> :ok
+          current -> step(current, :pane_gone, [])
+        end
+      end)
     end
 
     :ok
@@ -449,6 +766,13 @@ defmodule Foreman.AgentSessions do
     do: if(String.trim(value) != "", do: value)
 
   defp text(_), do: nil
+
+  defp transaction(fun) do
+    case Repo.transaction(fun) do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   defp now, do: DateTime.utc_now()
 end
