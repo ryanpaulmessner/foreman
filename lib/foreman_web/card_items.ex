@@ -4,19 +4,18 @@ defmodule ForemanWeb.CardItems do
   item cannot be read back, so each card's own state is kept by card id in two
   assigns and every insert builds the full item from them:
 
-  - the card's notices: the session-waiting notice (`Foreman.WaitingCard`), the
-    last Focus terminal result and the last Ask about this send;
-  - its footer (`ForemanWeb.CardFooter`): the open panel and the panel text.
+  - the card's notices: the session-waiting notice (`Foreman.WaitingCard`) and
+    the last Focus terminal result;
+  - its footer (`ForemanWeb.CardFooter`): the text box and the Ask state.
 
-  `opts` name the host's assigns: `:stream`, `:ui`, `:footers`, `:headings` and
-  the DOM `:prefix` of its cards.
+  `opts` name the host's assigns: `:stream`, `:ui`, `:footers` and `:headings`.
   """
   import Phoenix.Component, only: [assign: 3, update: 3]
-  import Phoenix.LiveView, only: [stream_insert: 3, push_event: 3]
+  import Phoenix.LiveView, only: [stream_insert: 3]
   alias ForemanWeb.CardFooter
-  alias Foreman.{CardFooterPanel, Requests}
+  alias Foreman.Requests
 
-  @ready %{card: :ready, focus: :ready, question: :ready}
+  @ready %{card: :ready, focus: :ready}
 
   def assigns(socket, opts),
     do: socket |> assign(opts[:ui], %{}) |> assign(opts[:footers], %{})
@@ -33,7 +32,7 @@ defmodule ForemanWeb.CardItems do
     })
   end
 
-  @doc "Inserts `items` (from `ForemanWeb.NeedsYouLive.grouped/1`) with their kept state."
+  @doc "Builds `items` (from `ForemanWeb.NeedsYouLive.grouped/1`) with their kept state."
   def with_state(socket, opts, items),
     do: Enum.map(items, &item(socket, opts, &1.request, &1.heading))
 
@@ -46,73 +45,41 @@ defmodule ForemanWeb.CardItems do
 
   @doc """
   Keeps a card notice from `ForemanWeb.NeedsYouLive.resolve/1`: `{:focus, state}`,
-  `{:question, state}` or a session-waiting state. The newest notice replaces the
-  card's other notices.
+  `{:ask, event, reason, text}` (an Ask that did not reach the session) or a
+  session-waiting state. A focus or waiting notice replaces the other one.
   """
-  def notice(socket, opts, id, notice) do
-    {key, value} =
-      case notice do
-        {:focus, state} -> {:focus, state}
-        {:question, state} -> {:question, state}
-        state -> {:card, state}
-      end
-
-    socket = update(socket, opts[:ui], &Map.put(&1, id, Map.put(@ready, key, value)))
-
-    socket =
-      case value do
-        {_, text} when key == :question -> keep(socket, opts, id, :ask, text)
-        _ -> socket
-      end
-
-    reinsert(socket, opts, id)
+  def notice(socket, opts, id, {:ask, event, reason, text}) do
+    socket
+    |> update(opts[:footers], fn footers ->
+      footers |> CardFooter.keep_text(id, text) |> CardFooter.step(id, event, reason)
+    end)
+    |> reinsert(opts, id)
   end
 
-  @doc "After a card action: a sent question closes the Ask panel (`question_sent`)."
-  def sent(socket, opts, %{"id" => id, "action" => "card-question"}, {:ok, _}),
-    do: question_sent(socket, opts, id)
+  def notice(socket, opts, id, notice) do
+    ui =
+      case notice do
+        {:focus, state} -> %{@ready | focus: state}
+        state -> %{@ready | card: state}
+      end
+
+    socket |> update(opts[:ui], &Map.put(&1, id, ui)) |> reinsert(opts, id)
+  end
+
+  @doc "After a card action: a sent question clears the text box (`Foreman.CardAsk`)."
+  def sent(socket, opts, %{"id" => id, "action" => "ask"}, {:ok, _}) do
+    socket
+    |> update(opts[:footers], &CardFooter.step(&1, id, :sent))
+    |> reinsert(opts, id)
+  end
 
   def sent(socket, _, _, _), do: socket
 
-  @doc "A question was sent from the card: the Ask panel closes and its text clears."
-  def question_sent(socket, opts, id) do
-    case CardFooter.step(socket.assigns[opts[:footers]], id, :question_sent) do
-      {footers, _} ->
-        socket
-        |> assign(opts[:footers], footers)
-        |> update(opts[:ui], &Map.update(&1, id, @ready, fn ui -> %{ui | question: :ready} end))
-        |> reinsert(opts, id)
-
-      :error ->
-        socket
-    end
-  end
-
-  @doc "A footer text action: toggles its panel (P1) and scrolls the card up (P2)."
-  def toggle(socket, opts, %{"id" => id, "panel" => name}) do
-    with panel when not is_nil(panel) <- CardFooterPanel.panel(name),
-         {footers, effects} <-
-           CardFooter.step(socket.assigns[opts[:footers]], id, {:toggle, panel}) do
-      socket = socket |> assign(opts[:footers], footers) |> reinsert(opts, id)
-
-      if Keyword.has_key?(effects, :scroll_to_top),
-        do: push_event(socket, "card-scroll-top", %{id: opts[:prefix] <> "card-open-" <> id}),
-        else: socket
-    else
-      _ -> socket
-    end
-  end
-
-  def toggle(socket, _, _), do: socket
-
-  @doc "Panel text as you type. The Ask copy field shows the text, so that card redraws."
-  def text(socket, opts, %{"card" => id, "panel" => name} = params) do
-    panel = CardFooterPanel.panel(name)
-
-    case panel && text_param(panel, params) do
+  @doc "The text box as you type. It is kept, not redrawn, so your other input stays."
+  def text(socket, opts, %{"card_id" => id} = params) do
+    case CardFooter.text(params) do
       text when is_binary(text) ->
-        socket = keep(socket, opts, id, panel, text)
-        if panel == :ask, do: reinsert(socket, opts, id), else: socket
+        update(socket, opts[:footers], &CardFooter.keep_text(&1, id, text))
 
       _ ->
         socket
@@ -120,13 +87,6 @@ defmodule ForemanWeb.CardItems do
   end
 
   def text(socket, _, _), do: socket
-
-  defp keep(socket, opts, id, panel, text),
-    do: update(socket, opts[:footers], &CardFooter.keep_text(&1, id, panel, text))
-
-  defp text_param(:ask, params), do: get_in(params, ["card_question", "text"])
-  defp text_param(:wrong_question, params), do: get_in(params, ["wrong_question", "reason"])
-  defp text_param(:withdraw, params), do: get_in(params, ["withdraw", "reason"])
 
   @doc "Redraws one card from the database; returns the socket unchanged if it left."
   def reinsert(socket, opts, id) do

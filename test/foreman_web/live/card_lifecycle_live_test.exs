@@ -35,21 +35,27 @@ defmodule ForemanWeb.CardLifecycleLiveTest do
     assert has_element?(view, "#submit-done-#{r.id}", "Done")
     refute has_element?(view, "#submit-answer-#{r.id}")
     refute has_element?(view, "#submit-decline-#{r.id}")
-    view |> element("#submit-done-#{r.id}") |> render_click()
+
+    view
+    |> form("#chore-#{r.id}", chore: %{note: "Signed in as admin"})
+    |> render_submit(%{"action" => "complete"})
+
+    assert Requests.get(r.id).note == "Signed in as admin"
     assert Requests.get(r.id).state == "done"
     refute has_element?(view, "#request-#{r.id}")
   end
 
-  test "Always stores an answer on Answers where it can be removed", %{conn: conn, request: r} do
+  test "a standing answer made before still refuses the ask and shows on Answers", %{
+    conn: conn,
+    request: r
+  } do
     {:ok, view, _} = live(conn, "/needs-you")
-    assert has_element?(view, "#always-#{r.id}")
-
-    view
-    |> form("#decision-#{r.id}", decision: %{note: "Friday", always: "true"})
-    |> render_submit(%{"action" => "answer"})
+    refute has_element?(view, "#always-#{r.id}")
+    {:ok, _} = Requests.resolve(r.id, :answer, %{"answer" => "Friday", "always" => true})
 
     [answer] = Foreman.Answers.standing()
     assert answer.answer == "Friday"
+    assert {:error, %{standing_answer: %{answer: "Friday"}}} = ask(r.facts["question"])
     {:ok, answers, _} = live(conn, "/answers")
     assert has_element?(answers, "#standing-#{answer.id}", "Friday")
     answers |> element("#remove-standing-#{answer.id}") |> render_click()
@@ -58,15 +64,13 @@ defmodule ForemanWeb.CardLifecycleLiveTest do
     assert {:ok, _} = ask(r.facts["question"])
   end
 
-  test "Wrong question ends the card with the required reason", %{conn: conn, request: r} do
+  test "Wrong question ends the card with the text as its reason", %{conn: conn, request: r} do
     {:ok, view, _} = live(conn, "/needs-you")
-    refute has_element?(view, "#wrong-question-#{r.id}")
-    view |> element("#card-wrong-question-#{r.id}") |> render_click()
-    assert has_element?(view, "#wrong-question-#{r.id} textarea[required]")
+    assert has_element?(view, "#card-wrong-question-#{r.id}[disabled]")
 
     view
-    |> form("#wrong-question-#{r.id}", wrong_question: %{reason: "The date has passed"})
-    |> render_submit()
+    |> form("#decision-#{r.id}", decision: %{note: "The date has passed"})
+    |> render_submit(%{"action" => "wrong-question"})
 
     refute has_element?(view, "#request-#{r.id}")
     assert Requests.get(r.id).state == "wrong_question"

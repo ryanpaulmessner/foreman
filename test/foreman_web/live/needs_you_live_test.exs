@@ -88,13 +88,11 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     refute has_element?(view, "#card-focus-#{request.id}")
     refute has_element?(view, "#copy-session-#{request.id}")
     refute render(view) =~ "tmux "
-    refute has_element?(view, "#withdraw-#{request.id}")
-    view |> element("#card-withdraw-#{request.id}") |> render_click()
-    assert has_element?(view, "#withdraw-#{request.id}")
+    assert has_element?(view, "#card-withdraw-#{request.id}[disabled]")
 
     view
-    |> form("#withdraw-#{request.id}", withdraw: %{reason: "Answered in chat"})
-    |> render_submit()
+    |> form("#decision-#{request.id}", decision: %{note: "Answered in chat"})
+    |> render_submit(%{"action" => "withdraw"})
 
     refute has_element?(view, "#request-#{request.id}")
     assert has_element?(view, "#recent-requests", "withdrawn")
@@ -300,11 +298,9 @@ defmodule ForemanWeb.NeedsYouLiveTest do
            |> LazyHTML.query("[data-ticket-heading]")
            |> Enum.count() == 1
 
-    view |> element("#card-withdraw-#{request.id}") |> render_click()
-
     view
-    |> form("#withdraw-#{request.id}", withdraw: %{reason: "No longer needed"})
-    |> render_submit()
+    |> form("#decision-#{request.id}", decision: %{note: "No longer needed"})
+    |> render_submit(%{"action" => "withdraw"})
 
     assert has_element?(view, "#pending-requests [data-ticket-heading]", "A ticket")
   end
@@ -323,7 +319,7 @@ defmodule ForemanWeb.NeedsYouLiveTest do
     render_click(view, "resolve", %{
       "id" => request.id,
       "action" => "withdraw",
-      "withdraw" => %{"reason" => "Stale"}
+      "decision" => %{"note" => "Stale"}
     })
 
     assert Requests.get(request.id).state == "pending"

@@ -3,7 +3,10 @@ defmodule ForemanWeb.OpenCard do
   The open question card (question cards spec, Decisions 12-20 and 23). From top
   to bottom inside one border: the header line, the Asked by row, the question,
   What and Why now with the rest under More context, the body for the card's kind,
-  the card thread, and one footer strip with its panels.
+  the card thread, and one footer strip. The footer has one text box; the
+  button decides what it is for: the primary button sends it as the note, Ask
+  sends it to the session as a question, and Wrong question and Withdraw send it
+  as their reason (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918).
   """
   use ForemanWeb, :html
   alias Fluxon.Components.{Badge, Button}
@@ -25,9 +28,8 @@ defmodule ForemanWeb.OpenCard do
   attr :prefix, :string, default: ""
   attr :event, :string, default: "resolve"
   attr :card, :atom, default: :ready, doc: "the session-waiting notice"
-  attr :question, :any, default: :ready, doc: "the Ask about this send: :ready or {state, text}"
   attr :focus, :atom, default: :ready, doc: "the last Focus terminal result"
-  attr :footer, :map, default: %{panel: :none, text: %{}}
+  attr :footer, :map, default: %{ask: :idle, reason: nil, text: ""}
   attr :heading, :boolean, default: false
   attr :repos, :list, default: nil
 
@@ -108,15 +110,6 @@ defmodule ForemanWeb.OpenCard do
           <RequestCard.doc_links id={@prefix <> "docs-" <> @request.id} request={@request} />
         </div>
         {body(assigns)}
-        <.panels
-          :if={@footer.panel != :none}
-          request={@request}
-          prefix={@prefix}
-          event={@event}
-          footer={@footer}
-          question={@question}
-          source={@source}
-        />
       </div>
     </article>
     """
@@ -130,6 +123,7 @@ defmodule ForemanWeb.OpenCard do
       for={@form}
       id={@prefix <> @request.kind <> "-" <> @request.id}
       phx-submit={@event}
+      phx-change={@event <> "-text"}
       phx-value-id={@request.id}
     >
       <div class="bb-qcard-body space-y-3">
@@ -143,11 +137,7 @@ defmodule ForemanWeb.OpenCard do
         <RequestCard.merge_facts :if={@request.kind == "merge"} request={@request} />
       </div>
       <.thread request={@request} prefix={@prefix} event={@event} repos={@repos} />
-      <.footer request={@request} prefix={@prefix} event={@event} footer={@footer}>
-        <.note
-          field={@form[:note]}
-          id={@prefix <> @request.kind <> "-note-" <> @request.id}
-        />
+      <.footer {footer_attrs(assigns, "decision")}>
         <Button.button
           id={@prefix <> "submit-approve-" <> @request.id}
           type="submit"
@@ -179,8 +169,8 @@ defmodule ForemanWeb.OpenCard do
       for={@form}
       id={@prefix <> "batch-" <> @request.id}
       phx-submit={@event}
+      phx-change={@event <> "-text"}
       phx-value-id={@request.id}
-      phx-value-action="batch-answer"
     >
       <div class="bb-qcard-body">
         <fieldset class="bb-opts">
@@ -208,10 +198,12 @@ defmodule ForemanWeb.OpenCard do
         </fieldset>
       </div>
       <.thread request={@request} prefix={@prefix} event={@event} repos={@repos} />
-      <.footer request={@request} prefix={@prefix} event={@event} footer={@footer}>
+      <.footer {footer_attrs(assigns, "batch")}>
         <Button.button
           id={@prefix <> "submit-batch-" <> @request.id}
           type="submit"
+          name="action"
+          value="batch-answer"
           variant="solid"
           phx-disable-with="Submitting…"
         >
@@ -233,18 +225,27 @@ defmodule ForemanWeb.OpenCard do
       </ol>
     </div>
     <.thread request={@request} prefix={@prefix} event={@event} repos={@repos} />
-    <.footer request={@request} prefix={@prefix} event={@event} footer={@footer}>
-      <Button.button
-        id={@prefix <> "submit-done-" <> @request.id}
-        phx-click={@event}
-        phx-value-id={@request.id}
-        phx-value-action="complete"
-        phx-disable-with="Saving…"
-        variant="solid"
-      >
-        Done
-      </Button.button>
-    </.footer>
+    <.form
+      for={%{}}
+      as={:chore}
+      id={@prefix <> "chore-" <> @request.id}
+      phx-submit={@event}
+      phx-change={@event <> "-text"}
+      phx-value-id={@request.id}
+    >
+      <.footer {footer_attrs(assigns, "chore")}>
+        <Button.button
+          id={@prefix <> "submit-done-" <> @request.id}
+          type="submit"
+          name="action"
+          value="complete"
+          phx-disable-with="Saving…"
+          variant="solid"
+        >
+          Done
+        </Button.button>
+      </.footer>
+    </.form>
     """
   end
 
@@ -393,31 +394,40 @@ defmodule ForemanWeb.OpenCard do
       </div>
     </div>
     <.thread request={@request} prefix={@prefix} event={@event} repos={@repos} />
-    <.footer request={@request} prefix={@prefix} event={@event} footer={@footer}>
-      <Button.button
-        id={@prefix <> "open-" <> @request.id}
-        type="button"
-        phx-click={@event}
-        phx-value-id={@request.id}
-        phx-value-action="open"
-        phx-disable-with="Opening…"
-        variant={if(@inline || @chat? || @limit?, do: "outline", else: "solid")}
-      >
-        <.icon name="hero-arrow-top-right-on-square" class="size-4" /> Open session
-      </Button.button>
-      <Button.button
-        :if={@limit?}
-        id={@prefix <> "continue-" <> @request.id}
-        type="button"
-        phx-click={@event}
-        phx-value-id={@request.id}
-        phx-value-action="continue"
-        phx-disable-with="Continuing…"
-        variant="solid"
-      >
-        Continue
-      </Button.button>
-    </.footer>
+    <.form
+      for={%{}}
+      as={:waiting}
+      id={@prefix <> "waiting-" <> @request.id}
+      phx-submit={@event}
+      phx-change={@event <> "-text"}
+      phx-value-id={@request.id}
+    >
+      <.footer {footer_attrs(assigns, "waiting")}>
+        <Button.button
+          id={@prefix <> "open-" <> @request.id}
+          type="button"
+          phx-click={@event}
+          phx-value-id={@request.id}
+          phx-value-action="open"
+          phx-disable-with="Opening…"
+          variant={if(@inline || @chat? || @limit?, do: "outline", else: "solid")}
+        >
+          <.icon name="hero-arrow-top-right-on-square" class="size-4" /> Open session
+        </Button.button>
+        <Button.button
+          :if={@limit?}
+          id={@prefix <> "continue-" <> @request.id}
+          type="button"
+          phx-click={@event}
+          phx-value-id={@request.id}
+          phx-value-action="continue"
+          phx-disable-with="Continuing…"
+          variant="solid"
+        >
+          Continue
+        </Button.button>
+      </.footer>
+    </.form>
     """
   end
 
@@ -429,6 +439,7 @@ defmodule ForemanWeb.OpenCard do
       for={@form}
       id={@prefix <> "decision-" <> @request.id}
       phx-submit={@event}
+      phx-change={@event <> "-text"}
       phx-value-id={@request.id}
     >
       <div class="bb-qcard-body">
@@ -470,13 +481,9 @@ defmodule ForemanWeb.OpenCard do
       </div>
       <.thread request={@request} prefix={@prefix} event={@event} repos={@repos} />
       <.footer
-        request={@request}
-        prefix={@prefix}
-        event={@event}
-        footer={@footer}
+        {footer_attrs(assigns, "decision")}
         row_id={@prefix <> "decision-actions-" <> @request.id}
       >
-        <.note field={@form[:note]} id={@prefix <> "decision-note-" <> @request.id} />
         <Button.button
           type="submit"
           name="action"
@@ -495,36 +502,8 @@ defmodule ForemanWeb.OpenCard do
         >
           Decline
         </Button.button>
-        <:always :if={@request.kind == "decision"}>
-          <div class="bb-check">
-            <.input
-              field={@form[:always]}
-              id={@prefix <> "always-" <> @request.id}
-              type="checkbox"
-              label="Always use this answer"
-              class="size-4 shrink-0 accent-current"
-            />
-          </div>
-        </:always>
       </.footer>
     </.form>
-    """
-  end
-
-  attr :field, :any, required: true
-  attr :id, :string, required: true
-
-  defp note(assigns) do
-    ~H"""
-    <.input
-      field={@field}
-      id={@id}
-      type="textarea"
-      rows="1"
-      aria-label="Note"
-      placeholder="Note (optional)"
-      class="bb-note"
-    />
     """
   end
 
@@ -546,78 +525,111 @@ defmodule ForemanWeb.OpenCard do
     """
   end
 
+  defp footer_attrs(assigns, form) do
+    Map.take(assigns, [:request, :prefix, :event, :footer, :source]) |> Map.put(:form, form)
+  end
+
   attr :request, :any, required: true
   attr :prefix, :string, required: true
   attr :event, :string, required: true
   attr :footer, :map, required: true
+  attr :source, :map, required: true
+  attr :form, :string, required: true, doc: "the form the text box submits with"
   attr :row_id, :string, default: nil
   slot :inner_block, required: true
-  slot :always
 
   defp footer(assigns) do
     assigns =
-      assign(
-        assigns,
-        :two_rows,
-        assigns.request.kind in ~w(decision review_ui push open_pr merge)
+      assign(assigns,
+        id: assigns.request.id,
+        empty: String.trim(assigns.footer.text) == "",
+        withdraw: Foreman.Requests.withdrawable?(assigns.request)
       )
 
     ~H"""
-    <div id={@prefix <> "card-footer-" <> @request.id} class="bb-qfoot">
+    <div id={@prefix <> "card-footer-" <> @id} class="bb-qfoot">
+      <input type="hidden" name="card_id" value={@id} />
       <div id={@row_id} class="bb-qrow">
-        {render_slot(@inner_block)}
-        <.actions
-          :if={!@two_rows}
-          request={@request}
-          prefix={@prefix}
-          event={@event}
-          footer={@footer}
+        <.input
+          id={@prefix <> "card-text-" <> @id}
+          name={@form <> "[note]"}
+          value={@footer.text}
+          type="textarea"
+          rows="1"
+          maxlength="1900"
+          aria-label="Note, question or reason"
+          placeholder="Note, question or reason"
+          phx-hook="CardText"
+          phx-debounce="300"
+          class="bb-note"
         />
+        {render_slot(@inner_block)}
+        <Button.button
+          id={@prefix <> "card-ask-" <> @id}
+          type="submit"
+          name="action"
+          value="ask"
+          disabled={@empty}
+          data-needs-text
+          phx-mounted={JS.ignore_attributes(["disabled"])}
+          phx-disable-with="Sending…"
+          title={
+            if(@source.state == :live, do: "Goes to #{@source.name}. The reply shows on this card.")
+          }
+        >
+          <.icon name="hero-chat-bubble-left-ellipsis" class="size-4" /> Ask
+        </Button.button>
       </div>
-      <div :if={@two_rows} class="bb-qrow">
-        {render_slot(@always)}
-        <.actions request={@request} prefix={@prefix} event={@event} footer={@footer} />
+      <div class="bb-qrow">
+        <div class="bb-qlinks">
+          <.text_action
+            id={@prefix <> "card-wrong-question-" <> @id}
+            action="wrong-question"
+            icon="hero-no-symbol"
+            busy="Sending…"
+            empty={@empty}
+          >
+            Wrong question
+          </.text_action>
+          <.text_action
+            :if={@withdraw}
+            id={@prefix <> "card-withdraw-" <> @id}
+            action="withdraw"
+            icon="hero-archive-box"
+            busy="Withdrawing…"
+            empty={@empty}
+          >
+            Withdraw
+          </.text_action>
+        </div>
       </div>
+      <.ask_line request={@request} prefix={@prefix} event={@event} footer={@footer} source={@source} />
     </div>
     """
   end
 
-  attr :request, :any, required: true
-  attr :prefix, :string, required: true
-  attr :event, :string, required: true
-  attr :footer, :map, required: true
+  attr :id, :string, required: true
+  attr :action, :string, required: true
+  attr :icon, :string, required: true
+  attr :busy, :string, required: true
+  attr :empty, :boolean, required: true
+  slot :inner_block, required: true
 
-  defp actions(assigns) do
-    assigns =
-      assign(
-        assigns,
-        :actions,
-        [
-          {:ask, "ask", "Ask about this", "hero-chat-bubble-left-ellipsis"},
-          {:wrong_question, "wrong-question", "Wrong question", "hero-no-symbol"}
-        ] ++
-          if(Foreman.Requests.withdrawable?(assigns.request),
-            do: [{:withdraw, "withdraw", "Withdraw", "hero-archive-box"}],
-            else: []
-          )
-      )
-
+  defp text_action(assigns) do
     ~H"""
-    <div class="bb-qlinks">
-      <button
-        :for={{panel, dom, label, icon} <- @actions}
-        id={@prefix <> "card-" <> dom <> "-" <> @request.id}
-        type="button"
-        class="bb-tbtn"
-        phx-click={@event <> "-panel"}
-        phx-value-id={@request.id}
-        phx-value-panel={panel}
-        aria-expanded={to_string(@footer.panel == panel)}
-        aria-controls={@prefix <> "card-" <> dom <> "-panel-" <> @request.id}
-      >
-        <.icon name={icon} class="size-3.5" />{label}
-      </button>
-    </div>
+    <button
+      id={@id}
+      type="submit"
+      name="action"
+      value={@action}
+      class="bb-tbtn"
+      disabled={@empty}
+      data-needs-text
+      phx-mounted={JS.ignore_attributes(["disabled"])}
+      phx-disable-with={@busy}
+    >
+      <.icon name={@icon} class="size-3.5" />{render_slot(@inner_block)}
+    </button>
     """
   end
 
@@ -625,180 +637,40 @@ defmodule ForemanWeb.OpenCard do
   attr :prefix, :string, required: true
   attr :event, :string, required: true
   attr :footer, :map, required: true
-  attr :question, :any, required: true
   attr :source, :map, required: true
 
-  defp panels(%{footer: %{panel: :ask}} = assigns) do
-    {failed, text} =
-      case assigns.question do
-        {state, text} -> {state, text}
-        _ -> {nil, assigns.footer.text[:ask] || ""}
-      end
-
+  # Decision 18: what shows when Ask did not reach the session (Foreman.CardAsk).
+  defp ask_line(assigns) do
     assigns =
-      assign(assigns,
-        failed: failed,
-        sendable: assigns.source.state == :live,
-        form: to_form(%{"text" => text}, as: :card_question),
-        text: text
-      )
+      assign(assigns, :copy, "[card question #{assigns.request.id}] #{assigns.footer.text}")
 
     ~H"""
-    <div class="bb-qfoot bb-qfoot-panel">
-      <div id={@prefix <> "card-ask-panel-" <> @request.id} class="bb-panelbox">
-        <.form
-          for={@form}
-          id={@prefix <> "card-question-form-" <> @request.id}
-          phx-submit={@event}
-          phx-change={@event <> "-text"}
-          phx-value-id={@request.id}
-          phx-value-action="card-question"
-          class="grid gap-2"
-        >
-          <input type="hidden" name="card" value={@request.id} />
-          <input type="hidden" name="panel" value="ask" />
-          <.input
-            field={@form[:text]}
-            id={@prefix <> "card-question-text-" <> @request.id}
-            type="textarea"
-            label="Ask about this"
-            maxlength="1900"
-            rows="2"
-            required
-            phx-debounce="300"
-            class="bb-field"
-          />
-          <div :if={@sendable and is_nil(@failed)} class="bb-qrow">
-            <Button.button
-              id={@prefix <> "card-question-send-" <> @request.id}
-              type="submit"
-              size="sm"
-              phx-disable-with="Sending…"
-            >
-              Send question
-            </Button.button>
-            <span class="bb-hint">Goes to {@source.name}. The reply shows on this card.</span>
-          </div>
-          <p :if={!@sendable} id={@prefix <> "card-question-hint-" <> @request.id} class="bb-hint">
-            {if @source.state == :unknown,
-              do:
-                "The board cannot send this question, because it does not know which session asked. Copy it and paste it in the agent's chat.",
-              else:
-                "The session that asked has ended, so the board cannot send this question. Copy it and paste it in the agent's chat."}
-          </p>
-        </.form>
-        <ForemanWeb.StatusLine.status_line
-          :if={@failed}
-          id={@prefix <> "card-question-unavailable-" <> @request.id}
-          kind={:error}
-          retry={
-            JS.push(@event,
-              value: %{id: @request.id, action: "card-question", card_question: %{text: @text}}
-            )
-          }
-          retry_id={@prefix <> "card-question-retry-" <> @request.id}
-        >
-          {question_error(@failed)}
-        </ForemanWeb.StatusLine.status_line>
-        <ForemanWeb.CopyField.copy_field
-          :if={!@sendable or @failed}
-          id={@prefix <> "card-question-copy-" <> @request.id}
-          value={"[card question #{@request.id}] #{@text}"}
-          label="Question to copy"
-        />
-      </div>
-    </div>
-    """
-  end
-
-  defp panels(%{footer: %{panel: :wrong_question}} = assigns) do
-    assigns =
-      assign(
-        assigns,
-        :form,
-        to_form(%{"reason" => assigns.footer.text[:wrong_question] || ""}, as: :wrong_question)
-      )
-
-    ~H"""
-    <div class="bb-qfoot bb-qfoot-panel">
-      <.form
-        for={@form}
-        id={@prefix <> "wrong-question-" <> @request.id}
-        phx-submit={@event}
-        phx-change={@event <> "-text"}
-        phx-value-id={@request.id}
-        phx-value-action="wrong-question"
-        class="bb-panelbox"
+    <div :if={@footer.ask != :idle} class="space-y-2">
+      <p
+        :if={@footer.ask == :copy}
+        id={@prefix <> "card-question-hint-" <> @request.id}
+        class="bb-hint"
       >
-        <input type="hidden" name="card" value={@request.id} />
-        <input type="hidden" name="panel" value="wrong_question" />
-        <.input
-          field={@form[:reason]}
-          id={@prefix <> "wrong-question-reason-" <> @request.id}
-          type="textarea"
-          label="What is wrong with the question?"
-          required
-          rows="2"
-          phx-debounce="300"
-          class="bb-field"
-        />
-        <div class="bb-qrow">
-          <Button.button
-            id={@prefix <> "submit-wrong-question-" <> @request.id}
-            type="submit"
-            size="sm"
-            phx-disable-with="Sending…"
-          >
-            Send as wrong question
-          </Button.button>
-          <span class="bb-hint">The card closes and the agent gets your reason.</span>
-        </div>
-      </.form>
-    </div>
-    """
-  end
-
-  defp panels(%{footer: %{panel: :withdraw}} = assigns) do
-    assigns =
-      assign(
-        assigns,
-        :form,
-        to_form(%{"reason" => assigns.footer.text[:withdraw] || ""}, as: :withdraw)
-      )
-
-    ~H"""
-    <div class="bb-qfoot bb-qfoot-panel">
-      <.form
-        for={@form}
-        id={@prefix <> "withdraw-" <> @request.id}
-        phx-submit={@event}
-        phx-change={@event <> "-text"}
-        phx-value-id={@request.id}
-        phx-value-action="withdraw"
-        class="bb-panelbox"
+        {if @source.state == :unknown,
+          do:
+            "The board cannot send this question, because it does not know which session asked. Copy it and paste it in the agent's chat.",
+          else:
+            "The session that asked has ended, so the board cannot send this question. Copy it and paste it in the agent's chat."}
+      </p>
+      <ForemanWeb.StatusLine.status_line
+        :if={@footer.ask == :failed}
+        id={@prefix <> "card-question-unavailable-" <> @request.id}
+        kind={:error}
+        retry={JS.push(@event, value: %{id: @request.id, action: "ask", text: @footer.text})}
+        retry_id={@prefix <> "card-question-retry-" <> @request.id}
       >
-        <input type="hidden" name="card" value={@request.id} />
-        <input type="hidden" name="panel" value="withdraw" />
-        <.input
-          field={@form[:reason]}
-          id={@prefix <> "withdraw-reason-" <> @request.id}
-          label="Reason"
-          required
-          phx-debounce="300"
-          class="bb-field"
-        />
-        <div class="bb-qrow">
-          <Button.button
-            id={@prefix <> "submit-withdraw-" <> @request.id}
-            type="submit"
-            size="sm"
-            phx-disable-with="Withdrawing…"
-          >
-            Withdraw card
-          </Button.button>
-          <span class="bb-hint">The card closes. The agent gets the reason.</span>
-        </div>
-      </.form>
+        {question_error(@footer.reason)}
+      </ForemanWeb.StatusLine.status_line>
+      <ForemanWeb.CopyField.copy_field
+        id={@prefix <> "card-question-copy-" <> @request.id}
+        value={@copy}
+        label="Question to copy"
+      />
     </div>
     """
   end

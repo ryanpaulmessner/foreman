@@ -21,7 +21,16 @@ defmodule ForemanWeb.CardQuestionsTest do
     %{request: r}
   end
 
-  test "the box sends a question and keeps the request pending", %{conn: conn, request: r} do
+  defp ask(view, r, text, prefix \\ "") do
+    view
+    |> form("##{prefix}decision-#{r.id}", decision: %{note: text})
+    |> render_submit(%{"action" => "ask"})
+  end
+
+  test "Ask sends the text as a question and keeps the request pending", %{
+    conn: conn,
+    request: r
+  } do
     register(r)
 
     expect(Foreman.SessionTmux, :reply_source, fn source, text, [] ->
@@ -31,21 +40,20 @@ defmodule ForemanWeb.CardQuestionsTest do
     end)
 
     {:ok, view, _} = live(conn, "/needs-you")
-    view |> element("#card-ask-#{r.id}") |> render_click()
-    assert has_element?(view, "#card-question-send-#{r.id}")
-    assert has_element?(view, "#card-ask-panel-#{r.id}", "Goes to build.")
 
-    view
-    |> form("#card-question-form-#{r.id}", card_question: %{text: "Why this option?"})
-    |> render_submit()
+    assert has_element?(
+             view,
+             ~s(#card-ask-#{r.id}[title="Goes to build. The reply shows on this card."])
+           )
+
+    ask(view, r, "Why this option?")
 
     assert has_element?(view, "#request-#{r.id} [data-card-message]", "Why this option?")
     assert Requests.get(r.id).state == "pending"
-    # A sent question closes the panel (question_sent) and clears its text.
-    refute has_element?(view, "#card-question-form-#{r.id}")
-    view |> element("#card-ask-#{r.id}") |> render_click()
-    assert has_element?(view, "#card-question-text-#{r.id}")
-    refute has_element?(view, "#card-question-text-#{r.id}", "Why this option?")
+    # A sent question clears the text box (CardAsk: sent).
+    assert has_element?(view, "#card-text-#{r.id}")
+    refute has_element?(view, "#card-text-#{r.id}", "Why this option?")
+    refute has_element?(view, "#card-question-copy-#{r.id}")
   end
 
   test "a closed session explains the failure and keeps the copy field", %{
@@ -55,10 +63,9 @@ defmodule ForemanWeb.CardQuestionsTest do
     register(r)
     expect(Foreman.SessionTmux, :reply_source, fn _, _, _ -> {:error, :window_gone} end)
     {:ok, view, _} = live(conn, "/needs-you")
-    view |> element("#card-ask-#{r.id}") |> render_click()
-    view |> form("#card-question-form-#{r.id}", card_question: %{text: "Why?"}) |> render_submit()
+    ask(view, r, "Why?")
     assert has_element?(view, "#card-question-unavailable-#{r.id}", "window is closed")
-    assert has_element?(view, "#card-question-text-#{r.id}", "Why?")
+    assert has_element?(view, "#card-text-#{r.id}", "Why?")
 
     assert has_element?(
              view,
@@ -68,13 +75,12 @@ defmodule ForemanWeb.CardQuestionsTest do
     assert has_element?(view, "#card-question-unavailable-#{r.id}.bb-status-error")
     assert has_element?(view, "#card-question-retry-#{r.id}", "Try again")
     assert has_element?(view, "#card-focus-#{r.id}:not([disabled])")
-    # Decision 18: the error line and the copy field, no tmux command.
     refute render(view) =~ "tmux select-window"
 
     assert CardMessages.list(r.id) == []
   end
 
-  test "failed questions keep their draft and can be retried in page and drawer", %{
+  test "failed questions keep their text and can be retried in page and drawer", %{
     conn: conn,
     request: r
   } do
@@ -84,13 +90,8 @@ defmodule ForemanWeb.CardQuestionsTest do
     render_click(view, "open-request-drawer")
 
     for prefix <- ["", "drawer-"] do
-      view |> element("##{prefix}card-ask-#{r.id}") |> render_click()
-
-      view
-      |> form("##{prefix}card-question-form-#{r.id}", card_question: %{text: "Why this option?"})
-      |> render_submit()
-
-      assert has_element?(view, "##{prefix}card-question-text-#{r.id}", "Why this option?")
+      ask(view, r, "Why this option?", prefix)
+      assert has_element?(view, "##{prefix}card-text-#{r.id}", "Why this option?")
 
       assert has_element?(
                view,
@@ -101,23 +102,15 @@ defmodule ForemanWeb.CardQuestionsTest do
       # Try again sends the same question again; it fails the same way.
       view |> element("##{prefix}card-question-retry-#{r.id}") |> render_click()
       send(view.pid, :reconcile)
-      assert has_element?(view, "##{prefix}card-question-text-#{r.id}", "Why this option?")
+      assert has_element?(view, "##{prefix}card-text-#{r.id}", "Why this option?")
       assert has_element?(view, "##{prefix}card-question-unavailable-#{r.id}", "empty prompt")
-      # Another panel and back: the draft is kept on the server.
-      view |> element("##{prefix}card-wrong-question-#{r.id}") |> render_click()
-      refute has_element?(view, "##{prefix}card-question-text-#{r.id}")
-      view |> element("##{prefix}card-ask-#{r.id}") |> render_click()
-      assert has_element?(view, "##{prefix}card-question-text-#{r.id}", "Why this option?")
     end
 
     assert CardMessages.list(r.id) == []
     stub(Foreman.SessionTmux, :reply_source, fn _, _, _ -> :ok end)
-
-    view
-    |> form("#card-question-form-#{r.id}", card_question: %{text: "Why this option?"})
-    |> render_submit()
-
+    view |> element("#card-question-retry-#{r.id}") |> render_click()
     assert [%{body: "Why this option?"}] = CardMessages.list(r.id)
+    refute has_element?(view, "#card-question-unavailable-#{r.id}")
   end
 
   test "closed sessions supersede questioned cards and keep the thread in outcomes", %{
@@ -215,10 +208,12 @@ defmodule ForemanWeb.CardQuestionsTest do
     )
   end
 
-  test "unknown source shows a fallback instead of a send button", %{conn: conn, request: r} do
+  test "Ask on an unknown source shows the copy field instead of sending", %{
+    conn: conn,
+    request: r
+  } do
     {:ok, view, _} = live(conn, "/needs-you")
-    view |> element("#card-ask-#{r.id}") |> render_click()
-    assert has_element?(view, "#card-ask-panel-#{r.id}", "Ask about this")
+    ask(view, r, "Why?")
 
     assert has_element?(
              view,
@@ -226,22 +221,14 @@ defmodule ForemanWeb.CardQuestionsTest do
              "The board cannot send this question, because it does not know which session asked."
            )
 
-    view
-    |> form("#card-question-form-#{r.id}", card_question: %{text: "Why?"})
-    |> render_change()
-
-    assert has_element?(
-             view,
-             ~s(#card-question-copy-#{r.id} input[value="[card question #{r.id}] Why?"])
-           )
-
     refute has_element?(view, "#card-question-retry-#{r.id}")
-    refute has_element?(view, "#card-question-send-#{r.id}")
 
     assert has_element?(
              view,
-             ~s(#card-question-copy-#{r.id} input[value^="[card question #{r.id}]"][readonly])
+             ~s(#card-question-copy-#{r.id} input[value="[card question #{r.id}] Why?"][readonly])
            )
+
+    assert CardMessages.list(r.id) == []
   end
 
   test "replies update the card and drawer without reload and survive withdrawal", %{
@@ -268,8 +255,10 @@ defmodule ForemanWeb.CardQuestionsTest do
              |> String.trim() == "build"
     end
 
-    view |> element("#card-withdraw-#{r.id}") |> render_click()
-    view |> form("#withdraw-#{r.id}", withdraw: %{reason: "No longer needed"}) |> render_submit()
+    view
+    |> form("#decision-#{r.id}", decision: %{note: "No longer needed"})
+    |> render_submit(%{"action" => "withdraw"})
+
     assert has_element?(view, "#recent-requests [data-card-message] strong", "Because")
   end
 end

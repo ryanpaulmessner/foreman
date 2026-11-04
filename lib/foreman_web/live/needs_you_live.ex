@@ -2,7 +2,7 @@ defmodule ForemanWeb.NeedsYouLive do
   use ForemanWeb, :live_view
   alias Foreman.Requests
   alias Fluxon.Components.{Button, Badge}
-  alias ForemanWeb.CardItems
+  alias ForemanWeb.{CardFooter, CardItems}
 
   @cards [
     stream: :pending,
@@ -69,9 +69,6 @@ defmodule ForemanWeb.NeedsYouLive do
     {:noreply, socket |> CardItems.sent(@cards, params, outcome) |> result(outcome)}
   end
 
-  def handle_event("resolve-panel", params, socket),
-    do: {:noreply, CardItems.toggle(socket, @cards, params)}
-
   def handle_event("resolve-text", params, socket),
     do: {:noreply, CardItems.text(socket, @cards, params)}
 
@@ -113,10 +110,20 @@ defmodule ForemanWeb.NeedsYouLive do
        |> ForemanWeb.TicketDetail.refresh()}
 
   @doc "Resolves a shared request form, regardless of its page or drawer location."
-  def resolve(%{"id" => id, "action" => "batch-answer"} = params) do
-    ids = get_in(params, ["batch", "items"]) || []
-    Requests.resolve(id, :answer, %{"answer" => ids})
-  end
+  def resolve(%{"id" => id, "action" => "ask"} = params),
+    do: ask(id, CardFooter.text(params) || "")
+
+  def resolve(%{"id" => id, "action" => "wrong-question"} = params),
+    do: Requests.resolve(id, :wrong_question, %{"note" => CardFooter.text(params)})
+
+  def resolve(%{"id" => id, "action" => "withdraw"} = params),
+    do: Requests.withdraw_from_card(id, CardFooter.text(params))
+
+  def resolve(%{"id" => id, "action" => "batch-answer", "batch" => batch}), do: batch(id, batch)
+
+  # Enter in the batch form submits it with no button: the answer.
+  def resolve(%{"id" => id, "batch" => batch} = params) when not is_map_key(params, "action"),
+    do: batch(id, batch)
 
   def resolve(%{"id" => id, "decision" => params, "action" => "answer"}) do
     answer = if params["choice"] in [nil, ""], do: params["note"], else: params["choice"]
@@ -124,8 +131,7 @@ defmodule ForemanWeb.NeedsYouLive do
     Requests.resolve(id, :answer, %{
       "answer" => answer,
       "note" => params["note"],
-      "image_comments" => params["image_comments"],
-      "always" => params["always"] in [true, "true"]
+      "image_comments" => params["image_comments"]
     })
   end
 
@@ -144,16 +150,6 @@ defmodule ForemanWeb.NeedsYouLive do
     end
   end
 
-  def resolve(%{
-        "id" => id,
-        "action" => "wrong-question",
-        "wrong_question" => %{"reason" => reason}
-      }),
-      do: Requests.resolve(id, :wrong_question, %{"note" => reason})
-
-  def resolve(%{"id" => id, "action" => "withdraw", "withdraw" => %{"reason" => reason}}),
-    do: Requests.withdraw_from_card(id, reason)
-
   def resolve(%{"id" => id, "action" => "go-session"}) do
     with request when not is_nil(request) <- Requests.get(id),
          source when not is_nil(source) <- Foreman.RequestSource.for_request(request) do
@@ -166,16 +162,8 @@ defmodule ForemanWeb.NeedsYouLive do
     end
   end
 
-  def resolve(%{"id" => id, "action" => "card-question", "card_question" => %{"text" => text}}) do
-    case Foreman.CardMessages.ask(id, text) do
-      {:ok, message} -> {:ok, message}
-      {:error, "refused in preview"} -> question_result(id, {:error, :tmux_unavailable}, text)
-      {:error, :source_unknown} -> question_result(id, {:error, :window_gone}, text)
-      error -> question_result(id, error, text)
-    end
-  end
-
-  def resolve(%{"id" => id, "action" => "complete"}), do: Requests.resolve(id, :complete, %{})
+  def resolve(%{"id" => id, "action" => "complete"} = params),
+    do: Requests.resolve(id, :complete, note(get_in(params, ["chore", "note"])))
 
   def resolve(%{"id" => id, "action" => "continue"}), do: Foreman.SessionWaiting.continue(id)
 
@@ -205,9 +193,35 @@ defmodule ForemanWeb.NeedsYouLive do
 
   def resolve(_), do: {:error, :invalid_action}
 
-  defp question_result(id, result, text) do
+  defp batch(id, batch),
+    do:
+      Requests.resolve(id, :answer, Map.put(note(batch["note"]), "answer", batch["items"] || []))
+
+  defp note(text) when is_binary(text) and text != "", do: %{"note" => text}
+  defp note(_), do: %{}
+
+  # Ask (Decision 18): a live source gets the question; otherwise the card shows
+  # the copy field, and a failed send shows why.
+  defp ask(id, text) do
+    with false <- String.trim(text) == "",
+         %{state: "pending"} = request <- Requests.get(id),
+         %{state: :live} <- Foreman.RequestSource.view(request) do
+      case Foreman.CardMessages.ask(id, text) do
+        {:ok, message} -> {:ok, message}
+        {:error, "refused in preview"} -> ask_failed(id, {:error, :tmux_unavailable}, text)
+        {:error, :source_unknown} -> {:card, id, {:ask, :unsendable, nil, text}}
+        error -> ask_failed(id, error, text)
+      end
+    else
+      true -> {:error, :text_required}
+      %{state: source} when is_atom(source) -> {:card, id, {:ask, :unsendable, nil, text}}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp ask_failed(id, result, text) do
     case card(id, result) do
-      {:card, ^id, state} -> {:card, id, {:question, {state, text}}}
+      {:card, ^id, reason} -> {:card, id, {:ask, :failed, reason, text}}
       error -> error
     end
   end
@@ -521,7 +535,6 @@ defmodule ForemanWeb.NeedsYouLive do
       prefix={@prefix}
       event={@event}
       card={@item.card}
-      question={@item.question}
       focus={@item.focus}
       footer={@item.footer}
       heading={@item.heading}

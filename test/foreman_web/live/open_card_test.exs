@@ -100,11 +100,18 @@ defmodule ForemanWeb.OpenCardTest do
 
       decline? = kind in ~w(decision review_ui push open_pr merge)
       assert has_element?(view, "#{footer} #submit-decline-#{request.id}", "Decline") == decline?
-      assert has_element?(view, "#{footer} textarea[placeholder='Note (optional)']") == decline?
-      assert has_element?(view, "#{footer} #always-#{request.id}") == (kind == "decision")
 
-      for action <- ["ask", "wrong-question", "withdraw"],
+      # One text box for every kind; Ask, Wrong question and Withdraw use it.
+      assert has_element?(view, "#{footer} textarea#card-text-#{request.id}[name$='[note]']")
+      assert has_element?(view, "#{footer} #card-ask-#{request.id}", "Ask")
+
+      for action <- ["wrong-question", "withdraw"],
           do: assert(has_element?(view, "#{footer} .bb-qlinks #card-#{action}-#{request.id}"))
+
+      # No Always on cards (Ryan, card 8ff81918); no footer panels (card 602ad7c1).
+      refute has_element?(view, "#always-#{request.id}")
+      refute render(element(view, card)) =~ "Always use this answer"
+      refute has_element?(view, "#card-ask-panel-#{request.id}")
     end
 
     [decision, review, batch, chore, push, open_pr, merge] = requests
@@ -117,22 +124,21 @@ defmodule ForemanWeb.OpenCardTest do
     assert has_element?(view, "#card-open-#{merge.id} dt", "Pull request")
   end
 
-  test "Always sits on the footer's second row with the text actions at its right", %{
-    conn: conn
-  } do
+  test "the footer: the text box and the buttons, then Wrong question and Withdraw at the right",
+       %{conn: conn} do
     request = insert("decision", %{"question" => "Which?", "options" => ["A"]})
     {:ok, view, _} = live(conn, "/needs-you")
     [row1, row2] = rows(view, request)
-    assert LazyHTML.query(row1, "#decision-note-#{request.id}") |> Enum.count() == 1
-    assert LazyHTML.query(row1, "#submit-answer-#{request.id}") |> Enum.count() == 1
-    assert LazyHTML.query(row2, "#always-#{request.id}") |> Enum.count() == 1
-    assert LazyHTML.text(row2) =~ "Always use this answer"
+
+    assert row1 |> LazyHTML.query("textarea, button") |> Enum.map(&id/1) ==
+             Enum.map(~w(card-text submit-answer submit-decline card-ask), &"#{&1}-#{request.id}")
 
     assert row2
            |> LazyHTML.query(".bb-qlinks button")
-           |> Enum.map(&String.trim(LazyHTML.text(&1))) ==
-             ["Ask about this", "Wrong question", "Withdraw"]
+           |> Enum.map(&String.trim(LazyHTML.text(&1))) == ["Wrong question", "Withdraw"]
   end
+
+  defp id(node), do: node |> LazyHTML.attribute("id") |> hd()
 
   defp rows(view, request) do
     view
@@ -143,90 +149,105 @@ defmodule ForemanWeb.OpenCardTest do
     |> Enum.to_list()
   end
 
-  test "P1 and P2: one panel at a time, a second click closes it, opening scrolls up", %{
-    conn: conn
-  } do
-    request = insert("decision", %{"question" => "Which?", "options" => ["A"]})
+  defp type(view, request, text) do
+    view
+    |> form("#decision-#{request.id}", decision: %{note: text})
+    |> render_change()
+  end
+
+  test "Ask, Wrong question and Withdraw are off until there is text", %{conn: conn} do
+    facts = Foreman.DecisionFacts.valid(%{"question" => "Which?", "options" => ["A"]})
+    request = insert("decision", facts)
     {:ok, view, _} = live(conn, "/needs-you")
     id = request.id
-    panels = ["#card-ask-panel-#{id}", "#wrong-question-#{id}", "#withdraw-#{id}"]
-    open = fn -> Enum.filter(panels, &has_element?(view, &1)) end
-    assert open.() == []
 
-    for {action, panel} <- Enum.zip(["ask", "wrong-question", "withdraw"], panels) do
-      view |> element("#card-#{action}-#{id}") |> render_click()
-      assert open.() == [panel]
-      assert has_element?(view, ~s(#card-#{action}-#{id}[aria-expanded="true"]))
-      assert_push_event(view, "card-scroll-top", %{id: "card-open-" <> ^id})
+    for action <- ["ask", "wrong-question", "withdraw"] do
+      assert has_element?(view, "#card-#{action}-#{id}[disabled][data-needs-text]")
     end
 
-    view |> element("#card-withdraw-#{id}") |> render_click()
-    assert open.() == []
-    refute_push_event(view, "card-scroll-top", _)
+    # The browser turns them on as you type (CardText hook); the server keeps the text,
+    # so a later redraw of the card shows them on.
+    assert has_element?(view, "#card-text-#{id}[phx-hook=CardText]")
+    type(view, request, "Asked twice")
+    {:ok, _} = Requests.update(id, "pi", nil, %{"question" => "Which one?"})
+    send(view.pid, :reconcile)
+    assert has_element?(view, "#card-text-#{id}", "Asked twice")
+
+    for action <- ["ask", "wrong-question", "withdraw"] do
+      assert has_element?(view, "#card-#{action}-#{id}:not([disabled])")
+    end
   end
 
-  test "panel text is kept on the server when another panel opens", %{conn: conn} do
-    request = insert("decision", %{"question" => "Which?", "options" => ["A"]})
+  test "the button decides: the primary sends the text as its note", %{conn: conn} do
+    request = insert("decision", %{"question" => "Which?", "options" => ["A", "B"]})
     {:ok, view, _} = live(conn, "/needs-you")
-    id = request.id
-
-    view |> element("#card-wrong-question-#{id}") |> render_click()
 
     view
-    |> form("#wrong-question-#{id}", wrong_question: %{reason: "Asked twice"})
-    |> render_change()
+    |> form("#decision-#{request.id}", decision: %{choice: "B", note: "Keep it short"})
+    |> render_submit(%{"action" => "answer"})
 
-    view |> element("#card-withdraw-#{id}") |> render_click()
-    view |> form("#withdraw-#{id}", withdraw: %{reason: "Stale"}) |> render_change()
-    view |> element("#card-wrong-question-#{id}") |> render_click()
-    assert has_element?(view, "#wrong-question-reason-#{id}", "Asked twice")
-    send(view.pid, :reconcile)
-    assert has_element?(view, "#wrong-question-reason-#{id}", "Asked twice")
-    view |> element("#card-withdraw-#{id}") |> render_click()
-    assert has_element?(view, ~s(#withdraw-reason-#{id}[value="Stale"]))
+    assert %{state: "answered", outcome: %{"answer" => "B"}, note: "Keep it short"} =
+             Requests.get(request.id)
   end
 
-  test "the panels use the Decision 18 copy", %{conn: conn} do
+  test "Wrong question and Withdraw use the text as their reason; no text, no change", %{
+    conn: conn
+  } do
+    wrong = insert("decision", %{"question" => "Which?", "options" => ["A"]})
+    gone = insert("decision", %{"question" => "Other?", "options" => ["A"]})
+    {:ok, view, _} = live(conn, "/needs-you")
+
+    render_click(view, "resolve", %{"id" => wrong.id, "action" => "wrong-question"})
+
+    render_click(view, "resolve", %{
+      "id" => gone.id,
+      "action" => "withdraw",
+      "decision" => %{"note" => " "}
+    })
+
+    assert Requests.get(wrong.id).state == "pending"
+    assert Requests.get(gone.id).state == "pending"
+
+    view
+    |> form("#decision-#{wrong.id}", decision: %{note: "Asked twice"})
+    |> render_submit(%{"action" => "wrong-question"})
+
+    view
+    |> form("#decision-#{gone.id}", decision: %{note: "Done in chat"})
+    |> render_submit(%{"action" => "withdraw"})
+
+    assert %{state: "wrong_question", note: "Asked twice"} = Requests.get(wrong.id)
+    assert %{state: "withdrawn"} = Requests.get(gone.id)
+    refute has_element?(view, "#request-#{wrong.id}")
+    refute has_element?(view, "#request-#{gone.id}")
+  end
+
+  test "a card sets no standing answer, even from a forged Always", %{conn: conn} do
     request = insert("decision", %{"question" => "Which?", "options" => ["A"]})
     {:ok, view, _} = live(conn, "/needs-you")
-    id = request.id
 
-    view |> element("#card-wrong-question-#{id}") |> render_click()
-    assert has_element?(view, "#wrong-question-#{id} label", "What is wrong with the question?")
+    view
+    |> form("#decision-#{request.id}", decision: %{choice: "A"})
+    |> render_submit(%{
+      "action" => "answer",
+      "decision" => %{"choice" => "A", "always" => "true"}
+    })
 
-    assert has_element?(
-             view,
-             "#submit-wrong-question-#{id}[phx-disable-with='Sending…']",
-             "Send as wrong question"
-           )
-
-    assert has_element?(
-             view,
-             "#wrong-question-#{id}",
-             "The card closes and the agent gets your reason."
-           )
-
-    view |> element("#card-withdraw-#{id}") |> render_click()
-    assert has_element?(view, "#withdraw-#{id} label", "Reason")
-
-    assert has_element?(
-             view,
-             "#submit-withdraw-#{id}[phx-disable-with='Withdrawing…']",
-             "Withdraw card"
-           )
-
-    assert has_element?(view, "#withdraw-#{id}", "The card closes. The agent gets the reason.")
-
-    view |> form("#withdraw-#{id}", withdraw: %{reason: "Done in chat"}) |> render_submit()
-    assert %{state: "withdrawn"} = Requests.get(id)
+    assert Requests.get(request.id).state == "answered"
+    assert Foreman.Answers.standing() == []
   end
 
-  test "an ended source's Ask about this copies the question instead of sending", %{conn: conn} do
+  test "Ask on an ended source shows the copy field with the text instead of sending", %{
+    conn: conn
+  } do
     request = insert("decision", %{"question" => "Which?", "options" => ["A"]})
     row = agent_session(name: "gone-build", pane_id: "%5") |> Foreman.AgentSessions.end_session()
     asked_by(request, row)
     {:ok, view, _} = live(conn, "/needs-you")
-    view |> element("#card-ask-#{request.id}") |> render_click()
+
+    view
+    |> form("#decision-#{request.id}", decision: %{note: "Why A?"})
+    |> render_submit(%{"action" => "ask"})
 
     assert has_element?(
              view,
@@ -234,8 +255,13 @@ defmodule ForemanWeb.OpenCardTest do
              "The session that asked has ended, so the board cannot send this question."
            )
 
-    refute has_element?(view, "#card-question-send-#{request.id}")
-    assert has_element?(view, "#card-question-copy-#{request.id}[phx-hook=CopyField]")
+    assert has_element?(
+             view,
+             ~s(#card-question-copy-#{request.id}[phx-hook=CopyField] input[value="[card question #{request.id}] Why A?"])
+           )
+
+    assert has_element?(view, "#card-text-#{request.id}", "Why A?")
+    assert Requests.get(request.id).state == "pending"
   end
 
   test "text with no What and no Why now shows as today, with Show more", %{conn: conn} do

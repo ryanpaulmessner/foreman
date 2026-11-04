@@ -68,9 +68,6 @@ defmodule ForemanWeb.RequestDrawer do
   defp handle_event("close-request-drawer", _, socket),
     do: {:halt, transition(socket, :close)}
 
-  defp handle_event("drawer-resolve-panel", params, socket),
-    do: {:halt, CardItems.toggle(socket, @cards, params)}
-
   defp handle_event("drawer-resolve-text", params, socket),
     do: {:halt, CardItems.text(socket, @cards, params)}
 

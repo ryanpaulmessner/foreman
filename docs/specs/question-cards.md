@@ -37,10 +37,10 @@ Each decision is marked (user) when Ryan made it, or (agent call) when the coord
 5. **Which card is "next" (agent call).** The board takes the list order at the time of the result. Next is the row under the resolved card. If the resolved card was the last row, next is the first row. If no card is left, the empty box shows under the result line.
 6. **List order (agent call).** Keep today's order: ticket priority, then oldest first, with the cards of one ticket kept together. Remove the per-ticket heading above a group: the open card header shows the ticket title.
 7. **The open card is in the URL (agent call).** The page keeps `?card=<id>` in the URL and patches it when a card opens or the next card opens. Close card removes the parameter, and the list stays closed. On page load with no `card` parameter, the first row opens; later URL changes with no `card` parameter do not open a card. The `ticket` and `doc` panel parameters stay next to `card`; opening or closing a panel does not change the open card. If `card` names a card that is no longer pending, the first row opens and an info line shows above the list (copy in Decision 31).
-8. **Your input is kept per card (agent call).** The board keeps each card's choice, note, Always tick and panel text on the server, by card id, while the page is open. Closing a card or opening another one never loses this input. A poll never resets the open card's form (today's rule, kept).
+8. **Your input is kept per card (agent call).** The board keeps each card's choice and the text in its text box on the server, by card id, while the page is open. Closing a card or opening another one never loses this input. A poll never resets the open card's form (today's rule, kept). Amended (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918): cards have no Always tick and no panels, so the input is the choice and the one text.
 9. **New cards (agent call).** A card that arrives by poll or notification joins the list as a row, in list order. It never closes, moves or replaces the open card. When the list was empty, the new card opens.
 10. **The open card closes without your action (agent call).** Another tab answered it, the agent withdrew it, or its facts changed. An info line takes its place and the next card opens (Decision 5). If you had typed a note, the line shows it so that you can copy it. Copy in Decision 31.
-11. **The list sits on a declared machine (agent call, house rule).** See "State: card list" below. The footer panels sit on a second machine. Today the list keeps its state in loose assigns (ids, versions, headings) and every card is open.
+11. **The list sits on a declared machine (agent call, house rule).** See "State: card list" below. The Ask send state sits on a second machine (Decision 40, amended (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918)). Today the list keeps its state in loose assigns (ids, versions, headings) and every card is open.
 
 ### B. The open card
 
@@ -52,7 +52,7 @@ Each decision is marked (user) when Ryan made it, or (agent call) when the coord
     5. What and Why now, as a short definition list. Each value shows 2 lines at most. When "More context" is open, they show in full.
     6. "More context: <the parts that exist>", folded. It holds Part of, From and the agent notes (the rest of the card text). Its label lists only the parts that exist, for example "More context: Part of, agent notes". When open, its label is "Less context".
     7. The card's document links, as today, then the body for the card's kind (Decision 16).
-    8. The card thread (questions you asked with Ask about this, and the replies), when there is one.
+    8. The card thread (questions you asked with Ask, and the replies), when there is one.
     9. The footer strip (Decision 17).
 13. **Context comes from the card text (agent call by the coordinator, 2026-11-03).** The board parses the labelled lines What, Why now, Part of and From from the agent's card text. It uses the same label match as the ask lint (start of a line, any case, optional bold, then a colon). A value runs to the next labelled line or the next blank line. The ask lint requires What, Part of and Why now on decision and batch cards; From is optional. Other kinds can have the labels too. When the text has no What and no Why now, the card shows no list and shows the text under the question as today (first lines, then "Show more"). The board's own context block (Kind, Part of and From from the ticket, and the ticket's "What users see" line) goes away. Thus the kind words "Internal" and "Unsorted" go away (audit (c)8). Paths in the text still become document links.
 14. **Source row: "Live or ended" (user).** One row under the header. The session is named once (audit A2).
@@ -82,7 +82,7 @@ Each decision is marked (user) when Ryan made it, or (agent call) when the coord
 15. **Ended session that can resume (agent call, the same as Sessions Decision 21).** The Sessions rule R9 says: when a session with an open card can resume, answering resumes it first and then delivers the answer; when it cannot, the answer goes to its parent coordinator as a note. Ryan's pick names the second case. For the first case the row says "○ ended 3 min ago · your answer resumes it".
 16. **Body by kind (agent call: today's parts in the compact layout).**
 
-    | Kind badge | Body | Primary button (busy text) | Decline | Always | Wrong question | Withdraw |
+    | Kind badge | Body | Primary button (busy text) | Decline | Always (removed (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918)) | Wrong question | Withdraw |
     | --- | --- | --- | --- | --- | --- | --- |
     | Decision | options as compact rows: radio, label, detail (2 lines, full when picked or focused), "Recommended" badge | Answer (Answering…) | yes | yes | yes | when the agent asked |
     | UI review | the review image grid, then the options | Answer (Answering…) | yes | no | yes | when the agent asked |
@@ -91,24 +91,28 @@ Each decision is marked (user) when Ryan made it, or (agent call) when the coord
     | Push, Open PR, Merge | the facts list for the kind | Approve (Approving…) | yes | no | yes | when the agent asked |
     | Session waiting | the waiting facts; for one single-choice question, its options as buttons and an "Other" field; for a chat question, a Reply field | by reason: option button or Reply (Sending…); Continue (Continuing…) at a usage limit; otherwise Open session (Opening…) | no | no | yes | when the agent asked |
 
-    Decline, Always, Wrong question and Withdraw show where they show today. "When the agent asked" is today's rule: the card's actor is an agent. A merge Approve still goes to the confirm step on Pull requests.
-17. **Footer strip (user, negative actions "Keep three, Decline first").** One sunken strip at the bottom of the card, inside its border (audit (c)9).
-    - Row 1: the Note field (placeholder "Note (optional)") on the kinds that have a note today (decision, UI review, push, open PR, merge), then the primary button (filled), then Decline (outline) next to it. Session waiting cards keep their Reply or Other field in the body.
-    - Row 2: "Always use this answer" at the left (decisions only). At the right end, small text actions: Ask about this, Wrong question, Withdraw. Each is 30 px high. Wrong question and Withdraw are the last two (user). Ask about this sits before them (agent call, as in the mockup).
-    - Each text action opens its panel inside the strip, under row 2. One panel is open at a time. A second click on the same action closes it. When a panel opens, the page scrolls the open card to the top of the view.
+    Amended (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918): no card shows Always. Standing answers made before keep working: the ask is still refused with the standing answer, and they stay on the Answers page (fm-zgd.17.5). Every kind, session waiting included, has the one text box and Ask (Decision 17).
+
+    Decline, Wrong question and Withdraw show where they show today. "When the agent asked" is today's rule: the card's actor is an agent. A merge Approve still goes to the confirm step on Pull requests.
+17. **Footer strip (user, negative actions "Keep three, Decline first"; amended (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918), "The button decides").** One sunken strip at the bottom of the card, inside its border (audit (c)9).
+    - Row 1: one text box (placeholder "Note, question or reason") on every kind, then the primary button (filled), then Decline (outline) where the kind has it, then Ask (outline, busy "Sending…"). Session waiting cards keep their Reply or Other field in the body.
+    - The button decides what the text is for. The primary button and Decline send the choice with the text as the note. Ask sends the text to the asking session as a question; the card stays open and the reply shows in its thread (Decision 18 for where it goes and what shows). Wrong question and Withdraw send the text as their reason.
+    - Row 2: at the right end, small text actions: Wrong question, then Withdraw. Each is 30 px high.
+    - Ask, Wrong question and Withdraw are off until the text box has text.
+    - No panels open from the footer, and no card shows "Always use this answer".
     - An error line (Decision 32) shows at the top of the strip, over row 1.
     - Only one filled button per card.
-18. **Panels and their copy (agent call: copy from the critique).**
+18. **Ask and its copy (agent call: copy from the critique; amended (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918): no panels).** Ask sends the text box.
 
-    | Panel | Label | Button (busy) | Hint |
-    | --- | --- | --- | --- |
-    | Ask about this, the board can send | Ask about this | Send question (Sending…) | Goes to <receiver>. The reply shows on this card. |
-    | Ask about this, unknown source | Ask about this | Copy, then "Copied" with a check for 2 s | The board cannot send this question, because it does not know which session asked. Copy it and paste it in the agent's chat. |
-    | Ask about this, ended source, fallback until the Sessions work ships | Ask about this | Copy, as above | The session that asked has ended, so the board cannot send this question. Copy it and paste it in the agent's chat. |
-    | Wrong question | What is wrong with the question? | Send as wrong question (Sending…) | The card closes and the agent gets your reason. |
-    | Withdraw | Reason | Withdraw card (Withdrawing…) | The card closes. The agent gets the reason. |
+    | Source | What Ask does | What shows under the footer |
+    | --- | --- | --- |
+    | Live | sends `[card question <id>] <your text>` to the session; the text box clears | nothing; the question shows in the thread. Ask's title: "Goes to <receiver>. The reply shows on this card." |
+    | Unknown | does not send | "The board cannot send this question, because it does not know which session asked. Copy it and paste it in the agent's chat." and the copy field |
+    | Ended, fallback until the Sessions work ships | does not send | "The session that asked has ended, so the board cannot send this question. Copy it and paste it in the agent's chat." and the copy field |
+    | Wrong question | — | Busy text "Sending…". The card closes and the agent gets the text as the reason. |
+    | Withdraw | — | Busy text "Withdrawing…". The card closes and the agent gets the text as the reason. |
 
-    The copy field holds `[card question <id>] <your text>`. When a send fails (the window is closed, the session is not at its prompt), the panel shows an error line with the reason and the same copy field, and keeps your text. Error lines: "The question was not sent. The session window is closed." / "The question was not sent. The session is not at an empty prompt." / "The question was not sent. The board cannot reach the session."
+    The copy field holds `[card question <id>] <your text>`. When a send fails (the window is closed, the session is not at its prompt), an error line with the reason and Try again shows under the footer, with the same copy field, and the text stays. Error lines: "The question was not sent. The session window is closed." / "The question was not sent. The session is not at an empty prompt." / "The question was not sent. The board cannot reach the session."
 19. **Focus terminal (agent call).** The icon focuses the session's terminal, as "Go to session" does today. The "Go to session" button goes away. If focus fails after the click, an info line shows under the source row: "Could not focus the terminal. The window is closed." / "Could not focus the terminal. tmux does not answer." / "Could not focus the terminal. No terminal is attached." For the last one, until the session page ships, the line has the one copy field (Decision 22) with the attach command. After the session page ships, the attach command lives only there (audit A5).
 20. **Session waiting notices (agent call: today's notices in the shared line style).** "The question is no longer on screen. Open the session to answer it." / "The session is not at its prompt. Open the session to reply." / "The session window is closed." / "tmux does not answer. Try again." / "No terminal is attached." with the copy field for the attach command, as in Decision 19.
 
@@ -116,7 +120,7 @@ Each decision is marked (user) when Ryan made it, or (agent call) when the coord
 
 21. **Three status line styles (audit (c)2).** Success: green-soft fill, check-circle icon. Error: red-soft fill, warning icon, and a Try again button when a retry can work. Info: sunken fill, info icon. Colour is never the only cue. The board flash group uses the same three styles, so info and error flashes no longer look the same.
 22. **One copy pattern (audit A5).** A read-only mono field and a Copy button. On click, the button text changes to "Copied" with a check icon for 2 s. If the clipboard fails, the field text is selected so that you can copy it by hand. This is a client hook, not board state. Every copy box on the changed screens uses it. On cards it shows only when the board cannot send (Decisions 18, 19, 20).
-23. **Always checkbox (audit (c)3).** Label "Always use this answer". 8 px gap between the box and the label.
+23. **Always checkbox (audit (c)3).** Label "Always use this answer". 8 px gap between the box and the label. Superseded (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918): cards have no Always checkbox (Decision 17).
 24. **Long ids and paths (audit (c)12).** Use `overflow-wrap: anywhere`, with a word-break opportunity after each "/". Do not use `break-all` on the changed screens.
 25. **Ticket and document panel under 1024 px (audit A10).** A sheet on the right, `min(460px, 100% - 96px)` wide, over a scrim. The sidebar and the left edge of the list stay in view. Esc, the X and a click on the scrim close it. At 1024 px and wider it stays in the right column, as today. Only one copy of the panel shows at any width.
 26. **Board parts only.** Use `Layouts.app`, `bb-nav`, the Fluxon badges and buttons, the ticket chip, board tokens and `bb-` classes in the board stylesheet next to `.bb-panel`. No new hex colours. The mockup lists the parts it uses.
@@ -133,7 +137,7 @@ Each decision is marked (user) when Ryan made it, or (agent call) when the coord
     | Empty | list | Dashed box: **Nothing waits on you.** New questions and approvals from sessions show here. |
     | Loading | list | Two skeleton blocks (an open-card shape and two rows), bars in `--border-base`. Screen reader: "Loading cards…". It shows only while the list has not loaded (first connect, reconnect), never on a poll. |
     | List load failed (agent call) | above the list | ⚠ **Could not load cards.** The database did not answer. The list shows the last cards it loaded. [Try again] |
-    | Sending | open card | The primary button shows its busy text (Decision 16) and is disabled. Choice, note and Always stay. The options dim. |
+    | Sending | open card | The primary button shows its busy text (Decision 16) and is disabled. Choice and text stay. The options dim. |
     | Error | top of the footer strip | Decision 32. |
     | Result | in place of the card | Decision 30. |
     | Closed elsewhere | in place of the card | Decision 31. |
@@ -190,7 +194,7 @@ Each decision is marked (user) when Ryan made it, or (agent call) when the coord
     | No match (any tab) | **No answers match “<search>”.** Search looks in questions and answer text. [Clear filters] — when the search is empty and another filter is on: **No answers match these filters.** [Clear filters] |
     | Saved answers, none at all | **No saved answers yet.** Answers that agents save show here. |
     | Your answers, none at all | **You have not answered a card yet.** |
-    | Always rules, none | None yet. To add one, tick Always use this answer when you answer a card. |
+    | Always rules, none | None yet. (Amended (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918): cards no longer set Always; the copy for this state is fm-zgd.17.5's to settle.) |
     | Archived | Info flash at the bottom right for 5 s: ⓘ Archived “<question>”. [Undo] — Undo restores it. |
     | Copied link | "Copied" next to the icon for 2 s; the icon turns to a check. |
     | Pin, unpin, restore failed | Error flash: ⚠ **Answer not changed.** The answer is not there now. |
@@ -236,7 +240,7 @@ Each decision is marked (user) when Ryan made it, or (agent call) when the coord
     - R7 When nothing waits on you, the page shows the empty box and no open card.
     - R8 A result line goes after 10 s; the card is then in Recent outcomes.
     - R9 An error line stays until your next action on that card.
-40. **Footer panel machine (agent call).** Proposed name `Foreman.CardFooterPanel`, one per open card. States `none`, `ask`, `wrong_question`, `withdraw`. Event `toggle(panel)`: the same panel goes to `none`; another panel opens in its place. Event `card_closed` goes to `none` and keeps the panel text (Decision 8). Event `question_sent` goes from `ask` to `none`; the thread shows your question. Rule P1: at most one panel is open. Rule P2: opening a panel scrolls the open card to the top of the view.
+40. **Ask machine (agent call; replaces the footer panel machine, amended (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918)).** `Foreman.CardAsk`, one per open card. No footer panel opens any more, so `Foreman.CardFooterPanel` and its rules P1 and P2 are gone. States `idle`, `copy` (the source cannot get the question: show the hint and the copy field) and `failed` (the send failed: show the reason, Try again and the copy field). Events `sent` (to `idle`, clears the text box), `unsendable` (to `copy`), `failed` (to `failed`) and `card_closed` (to `idle`, keeps the text, Decision 8). Only `sent` clears the text.
 41. **Answers tab machine (agent call).** Proposed name `Foreman.Answers.Tab`, URL-driven like the ticket panel machine. States `saved`, `yours`, `rules`; event `select(tab)` from any state. The existing answer expansion and pin/archive machines stay as they are. The request drawer and ticket panel machines stay as they are; only what they show changes.
 42. **Generated machine docs.** The new machines get their generated pages in `docs/machines/` from the machine docs task, as the other machines do.
 
@@ -255,7 +259,7 @@ Each decision is marked (user) when Ryan made it, or (agent call) when the coord
 7. **Poll does not move the open card.** While card 2 is open, a new card arrives with a higher priority. Card 2 stays open; the new card is a row.
 8. **Closed elsewhere.** Answer the open card from a second tab: the first tab shows the closed-elsewhere line with "Answered" and opens the next card.
 9. **Failure.** Make the answer fail (test double): the card stays open with `card-error-<id>`, the choice and note, and Try again sends it again.
-10. **Copy.** In the unknown-source Ask about this panel, Copy changes to "Copied" for 2 s.
+10. **Copy.** On an unknown-source card, type text and press Ask: the copy field shows the text, and Copy changes to "Copied" for 2 s (amended (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918)).
 11. **Drawer.** The drawer shows rows only (no `decision-*` form inside it). Open on a row lands on `/needs-you?card=<id>` with that card open.
 12. **Answers.** Three tabs, each with a count. The filter inputs have a visible border at 1440 and 820 in light and dark. Show archived shows only on Saved answers. Your answers lists answered decision cards newest first with the answer and note. No row shows the word "user" as an actor.
 13. **820.** The ticket panel opens as a right sheet; the sidebar and the left edge of the list stay visible; Esc closes it.
@@ -265,7 +269,7 @@ Each decision is marked (user) when Ryan made it, or (agent call) when the coord
 ## Verification plan
 
 - **Seams (fewest, highest).**
-  1. The three new machines: table tests through their `step/3`, one per row of the state tables, plus a test per rule (R1–R9, P1, P2 where the machine can show it).
+  1. The three new machines: table tests through their `step/3`, one per row of the state tables, plus a test per rule (R1–R9 where the machine can show it). `Foreman.CardAsk` gets one test per row (amended (Ryan, 2026-11-04, cards 602ad7c1 and 8ff81918); P1 and P2 went with the footer panels).
   2. The context parser: unit tests with real card texts from `foreman_dev` (bold labels, plain labels, labels in any case, no labels, From missing, a value over two lines).
   3. The source view function: one test per row of the fallback table, and one per Sessions row once that work ships.
   4. LiveView tests through the existing files for Needs you, the request drawer, card questions, card lifecycle and Answers, using the element ids in Decision 43. Update the selectors of existing tests where elements moved; keep what they assert.
