@@ -293,6 +293,47 @@ defmodule Foreman.AgentSessionsTest do
       assert AgentSessions.live_by_name("b1").id == build.id
     end
 
+    test "one tmux server for the board and builds: a window build keeps one row with its pane" do
+      for key <- [:planning_tmux_socket, :external_tmux_socket] do
+        old = Application.get_env(:foreman, key)
+        Application.put_env(:foreman, key, "shared")
+
+        on_exit(fn ->
+          if old,
+            do: Application.put_env(:foreman, key, old),
+            else: Application.delete_env(:foreman, key)
+        end)
+      end
+
+      socket = "/private/tmp/tmux-1/shared"
+      assert AgentSessions.server_for_socket(socket) == "default"
+      register("coord", "%1", "claude")
+      build = register("b1", "%5", "pi", %{"parent" => "coord"})
+
+      # pi-window's window mode: --window carries the window name, not the pane.
+      {:ok, %{request: dispatch}} =
+        Foreman.CLI.parse(
+          ~w(dispatch s-1 --name b1 --pi-session p-1 --coordinator coord --window b1 --harness pi),
+          session: "coord",
+          tmux_pane: "%1",
+          tmux: socket <> ",1,0"
+        )
+
+      assert {200, _} = Foreman.Agent.event("sample", "s-1", dispatch)
+      row = AgentSessions.live_by_name("b1")
+      assert row.id == build.id
+      assert {row.tmux_server, row.pane_id, row.conversation_id} == {"default", "%5", "p-1"}
+
+      # A board-launched coordinator on that server is still found by its pane.
+      board =
+        agent_session(name: "epic", kind: "epic_coordinator", tmux_server: "board", pane_id: "%9")
+
+      assert AgentSessions.coordinator_on_pane("%9", "default").id == board.id
+
+      {:ok, card} = ask(%{"session" => board.id, "tmux_pane" => "%9", "tmux_socket" => socket})
+      assert card.agent_session_id == board.id
+    end
+
     test "a dispatch that names a live coordinator never takes over its row" do
       coord = register("coord", "%1", "claude")
 

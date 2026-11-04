@@ -145,6 +145,13 @@ defmodule Foreman.CoordinatorIntegrationTest do
     assert ["--session-id", fresh, "--settings", _, "/orient"] = argv(c)
     refute fresh == id
     assert Sessions.coordinator().session_id == fresh
+    # Spec Decision 3: the server writes the coordinator's own row on $TMUX_PANE, named
+    # like its window (`coord` names it "coordinator"); the CLI makes no second call.
+    assert %{id: ^fresh, kind: "main_coordinator", pane_id: pane} =
+             Foreman.AgentSessions.live_by_name("coordinator")
+
+    assert pane == c.pane
+    assert Foreman.AgentSessions.get(id).ended_at
 
     Sessions.reconcile(idle_timeout: 0)
     assert Sessions.coordinator().state == :ended
