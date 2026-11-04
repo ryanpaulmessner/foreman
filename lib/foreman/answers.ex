@@ -42,6 +42,7 @@ defmodule Foreman.Answers do
     )
   end
 
+  @doc "Lists repo-wide rules. A ticket filter matches none: rules have no ticket association."
   def standing(filters \\ %{}) do
     query = from a in StandingAnswer, order_by: [desc: a.updated_at, asc: a.id]
 
@@ -50,6 +51,24 @@ defmodule Foreman.Answers do
         do: where(query, [a], a.repo_key == ^filters["repo"]),
         else: query
 
+    query =
+      if filters["search"] in [nil, ""] do
+        query
+      else
+        where(
+          query,
+          [a],
+          fragment(
+            "strpos(lower(? || ' ' || ? || ' ' || coalesce(?, '')), lower(?)) > 0",
+            a.question,
+            a.answer,
+            a.note,
+            ^filters["search"]
+          )
+        )
+      end
+
+    query = if filters["ticket"] in [nil, ""], do: query, else: where(query, false)
     Repo.all(query)
   end
 
@@ -167,6 +186,47 @@ defmodule Foreman.Answers do
       end
 
     query |> Repo.all() |> Repo.preload(versions: from(v in Version, order_by: [desc: v.id]))
+  end
+
+  def yours(filters \\ %{}, limit \\ 50) do
+    query = yours_query(filters)
+    rows = Repo.all(from r in query, order_by: [desc: r.updated_at, desc: r.id], limit: ^limit)
+    {rows, Repo.aggregate(query, :count)}
+  end
+
+  defp yours_query(filters) do
+    query =
+      from r in Foreman.Requests.Request,
+        where: r.state == "answered" and r.kind in ["decision", "review_ui", "batch"]
+
+    query =
+      Enum.reduce([{"repo", :repo_key}, {"ticket", :bead_id}], query, fn {key, field}, query ->
+        if filters[key] in [nil, ""],
+          do: query,
+          else: where(query, [r], field(r, ^field) == ^filters[key])
+      end)
+
+    if filters["search"] in [nil, ""] do
+      query
+    else
+      where(
+        query,
+        [r],
+        fragment(
+          "strpos(lower(coalesce(?->>'question', '') || ' ' || coalesce(?->>'answer', '') || ' ' || coalesce(?, '')), lower(?)) > 0",
+          r.facts,
+          r.outcome,
+          r.note,
+          ^filters["search"]
+        ) or
+          fragment(
+            "EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(?->'items', '[]'::jsonb)) AS item WHERE (?->'answer') @> jsonb_build_array(item->>'id') AND strpos(lower(item->>'label'), lower(?)) > 0)",
+            r.facts,
+            r.outcome,
+            ^filters["search"]
+          )
+      )
+    end
   end
 
   def get(id) do

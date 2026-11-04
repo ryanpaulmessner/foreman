@@ -56,10 +56,10 @@ defmodule ForemanWeb.CardLifecycleLiveTest do
     [answer] = Foreman.Answers.standing()
     assert answer.answer == "Friday"
     assert {:error, %{standing_answer: %{answer: "Friday"}}} = ask(r.facts["question"])
-    {:ok, answers, _} = live(conn, "/answers")
-    assert has_element?(answers, "#standing-#{answer.id}", "Friday")
+    {:ok, answers, _} = live(conn, "/answers?tab=rules")
+    assert has_element?(answers, "#always-rule-#{answer.id}", "Friday")
     answers |> element("#remove-standing-#{answer.id}") |> render_click()
-    refute has_element?(answers, "#standing-#{answer.id}")
+    refute has_element?(answers, "#always-rule-#{answer.id}")
     assert Foreman.Answers.standing() == []
     assert {:ok, _} = ask(r.facts["question"])
   end

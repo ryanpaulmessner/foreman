@@ -31,6 +31,9 @@ defmodule Foreman.FsmDocsTest do
   for {name, module} <- [
         {"state", Foreman.Answers.State},
         {"expansion", Foreman.Answers.Expansion},
+        {"tab", Foreman.Answers.Tab},
+        {"load", Foreman.Answers.Load},
+        {"notice", Foreman.Answers.Notice},
         {"stage", Foreman.Stage},
         {"request", Foreman.Request},
         {"request_wait", Foreman.RequestWait},

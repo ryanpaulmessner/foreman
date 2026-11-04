@@ -28,6 +28,38 @@ body { margin: 0; background: var(--background-base); }
 .bb-drawer-open::after { content: ""; position: absolute; inset: 0; }
 .bb-drawer-open:focus-visible { outline: none; }
 .bb-drawer-open:focus-visible::after { outline: 2px solid var(--focus); outline-offset: -2px; }
+.bb-answers { width: 100%; max-width: 832px; padding: 32px; display: flex; flex-direction: column; gap: 20px; overflow-wrap: anywhere; }
+.bb-answers .fm-markdown { --lumis-light: inherit; --lumis-light-font-style: normal; --lumis-light-font-weight: normal; --lumis-light-text-decoration: none; --lumis-dark: inherit; --lumis-dark-font-style: normal; --lumis-dark-font-weight: normal; --lumis-dark-text-decoration: none; }
+.bb-answer-tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--border-base); }
+.bb-answer-tabs a { display: inline-flex; align-items: center; gap: 6px; padding: 0 0 12px; border-bottom: 2px solid transparent; font-size: 13px; white-space: nowrap; }
+.bb-answer-tabs a[aria-current="page"] { border-bottom-color: var(--primary); font-weight: 600; }
+.bb-answer-count { border-radius: 6px; padding: 0 5px; background: var(--background-sunken); font-size: 11px; }
+.bb-answer-filters { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.bb-answer-filters label { font-size: 12px; }
+.bb-answer-filters .fieldset { margin-bottom: 0; }
+.bb-answer-search { position: relative; }
+.bb-answer-search > span { position: absolute; left: 10px; bottom: 10px; pointer-events: none; color: var(--foreground-softer); }
+.bb-answer-search .bb-filter-control { padding-left: 32px; }
+.bb-answer-archive { margin-top: 12px; }
+.bb-answer-archive .label { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+.bb-answer-archive .bb-switch { flex-shrink: 0; }
+.bb-answer-list { border: 1px solid var(--border-base); border-radius: 10px; background: var(--surface); }
+.bb-answer-list:empty { display: none; }
+.bb-answer-row { padding: 14px 16px; font-size: 13px; }
+.bb-answer-row + .bb-answer-row { border-top: 1px solid var(--border-base); }
+.bb-answer-row > * + * { margin-top: 8px; }
+.bb-answer-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; color: var(--foreground-softer); font-size: 11px; }
+.bb-answer-actions { display: flex; flex-shrink: 0; align-items: start; gap: 4px; }
+.bb-answer-actions > span { position: relative; display: flex; }
+.bb-answer-actions [data-copy-status]:not(:empty) { position: absolute; right: 0; top: 32px; width: max-content; max-width: 240px; padding: 4px 8px; background: var(--surface); border: 1px solid var(--border-base); border-radius: 6px; z-index: 1; }
+.bb-answer-actions [data-copy-status].bb-answer-copy-failed { position: fixed; top: auto; right: 24px; bottom: 24px; max-width: 460px; padding: 12px 16px; }
+.bb-answer-actions .bb-iconbtn { width: 30px; height: 30px; }
+.bb-answer-empty { padding: 24px; border: 1px dashed var(--border-base); border-radius: 10px; font-size: 13px; }
+.bb-answer-empty > * + * { margin-top: 8px; }
+.bb-answer-skeleton { height: 78px; border-radius: 10px; background: var(--border-base); }
+.bb-answer-toast { position: fixed; bottom: 24px; right: 24px; max-width: 460px; z-index: 40; }
+.bb-answers > button { align-self: flex-start; }
+
 .bb-session-page { min-width: 0; overflow-wrap: anywhere; }
 .bb-session-page .bb-session-offline { display: none; }
 .phx-disconnected .bb-session-page .bb-session-offline { display: flex; }
