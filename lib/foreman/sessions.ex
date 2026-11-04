@@ -1,7 +1,7 @@
 defmodule Foreman.Sessions do
   @moduledoc "Board-owned planning sessions, separate from dispatched build sessions."
   import Ecto.Query
-  alias Foreman.{Repo, PlanningSession, SessionMachine, SessionTmux}
+  alias Foreman.{AgentSessions, Repo, PlanningSession, SessionMachine, SessionTmux}
 
   @coordinator_key {"__foreman__", "coordinator"}
   def coordinator_key, do: @coordinator_key
@@ -84,6 +84,12 @@ defmodule Foreman.Sessions do
                   |> Repo.insert!()
                 end
 
+              # A new conversation is a new session; the old row ends with it.
+              if current && identity != :keep,
+                do: AgentSessions.end_session(AgentSessions.get(current.session_id))
+
+              AgentSessions.sync_planning(session, pane: opts[:pane])
+
               launch = %{new: :fresh, keep: :resume, adopt: :adopt}[identity]
               {:ok, session, launch}
           end
@@ -128,7 +134,10 @@ defmodule Foreman.Sessions do
     coordinator_transaction(fn ->
       with {:ok, window} <- SessionTmux.coordinator_pane(request),
            {:ok, session, launch} <-
-             prepare_coordinator(if(mode == "fresh", do: :fresh, else: :resume), window: window),
+             prepare_coordinator(if(mode == "fresh", do: :fresh, else: :resume),
+               window: window,
+               pane: request["pane"]
+             ),
            :ok <- SessionTmux.respawn_coordinator(session, launch, request["pane"]) do
         {:ok, %{session_id: session.session_id}}
       end
@@ -199,17 +208,23 @@ defmodule Foreman.Sessions do
       {state, [open: :window]} = SessionMachine.step(:new, :launch, %{})
       # Reserve identity before external IO. A crash can retry with this UUID;
       # tmux's exact-name lookup recovers a window created before a DB update.
-      Repo.insert!(
-        %PlanningSession{
-          project: project,
-          ticket: ticket,
-          workdir: workdir,
-          state: state,
-          launched_at: DateTime.utc_now()
-        },
-        on_conflict: :nothing,
-        conflict_target: [:project, :ticket]
-      )
+      # The identity row is written in the same transaction (Decision 3).
+      {:ok, _} =
+        Repo.transaction(fn ->
+          Repo.insert!(
+            %PlanningSession{
+              project: project,
+              ticket: ticket,
+              workdir: workdir,
+              state: state,
+              launched_at: DateTime.utc_now()
+            },
+            on_conflict: :nothing,
+            conflict_target: [:project, :ticket]
+          )
+
+          key |> get() |> AgentSessions.sync_planning()
+        end)
 
       {:ok, result} =
         Repo.transaction(fn ->
@@ -452,6 +467,7 @@ defmodule Foreman.Sessions do
 
     if state != session.state do
       result = save(session, %{state: state, observed_at: DateTime.utc_now()})
+      AgentSessions.sync_planning(result)
 
       Foreman.Events.broadcast(:sessions_changed, session.project)
       result

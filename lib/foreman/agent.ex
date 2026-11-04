@@ -22,14 +22,9 @@ defmodule Foreman.Agent do
 
       true ->
         payload =
-          if params["session"],
-            do:
-              payload
-              |> Map.put_new("window", params["session"])
-              |> Map.put("session", params["session"]),
-            else: payload
-
-        payload = if event == :dispatch, do: put_dispatching_coordinator(payload), else: payload
+          if event == :dispatch,
+            do: dispatch_payload(payload, params),
+            else: put_session(payload, params["session"])
 
         with :ok <- validate_target(repo, event, payload) do
           unless event == :create, do: ensure_entity({repo, id})
@@ -40,25 +35,43 @@ defmodule Foreman.Agent do
     end
   end
 
+  defp put_session(payload, session) when is_binary(session),
+    do: payload |> Map.put_new("window", session) |> Map.put("session", session)
+
+  defp put_session(payload, _), do: payload
+
+  # `--name` is the build's own name; the caller's FOREMAN_SESSION is then its parent.
+  # Older callers pass the build name as --session and no --name.
+  defp dispatch_payload(payload, params) do
+    build = payload["name"]
+    caller = params["session"]
+
+    payload =
+      if is_binary(build) and build != "" do
+        payload = put_session(payload, build)
+
+        if is_binary(caller) and caller != "" and caller != build,
+          do: Map.put_new(payload, "coordinator", caller),
+          else: payload
+      else
+        put_session(payload, caller)
+      end
+
+    payload
+    |> Map.put("tmux_server", Foreman.AgentSessions.server_for_socket(params["tmux_socket"]))
+    |> put_dispatching_coordinator()
+  end
+
   defp put_dispatching_coordinator(%{"coordinator" => name} = payload)
        when is_binary(name) and name != "",
        do: payload
 
   defp put_dispatching_coordinator(%{"coordinator_pane" => pane} = payload)
        when is_binary(pane) do
-    name =
-      Repo.one(
-        from s in "sessions",
-          where:
-            s.repo_key == "__foreman__" and s.bead_id == "registered" and s.window == ^pane and
-              is_nil(s.ended_at),
-          order_by: [desc: s.last_seen_at],
-          limit: 1,
-          select: fragment("?->>'session'", s.details)
-      )
+    row = Foreman.AgentSessions.coordinator_on_pane(pane, payload["tmux_server"] || "default")
 
-    if name && name != payload["session"],
-      do: Map.put(payload, "coordinator", name),
+    if row && row.name != payload["session"],
+      do: Map.put(payload, "coordinator", row.name),
       else: payload
   end
 

@@ -196,16 +196,10 @@ defmodule ForemanWeb.CardQuestionsTest do
   end
 
   defp register(r) do
-    Foreman.Repo.insert_all("sessions", [
-      %{
-        repo_key: "sample",
-        bead_id: "s-1",
-        window: "%42",
-        details: %{"session" => "build", "harness" => "pi"},
-        last_seen_at: r.inserted_at,
-        started_at: DateTime.add(r.inserted_at, -1)
-      }
-    ])
+    Foreman.AgentSessionFixtures.asked_by(
+      r,
+      Foreman.AgentSessionFixtures.agent_session(name: "build", pane_id: "%42")
+    )
   end
 
   test "unknown source shows a fallback instead of a send button", %{conn: conn, request: r} do

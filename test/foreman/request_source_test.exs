@@ -1,33 +1,78 @@
 defmodule Foreman.RequestSourceTest do
-  use ExUnit.Case, async: false
+  use Foreman.DataCase, async: false
   alias Foreman.RequestSource
 
-  test "dispatch window and pane targets retain build identity for any caller" do
-    request = %{session: "relay-build", actor: "pi"}
+  import Foreman.AgentSessionFixtures
 
-    for target <- ["relay-build", "%464"] do
-      source =
-        RequestSource.resolve(request, [
-          %{window: target, details: %{"session" => "relay-build", "harness" => "pi"}}
-        ])
+  test "a card's source is its own row: pane target, or window name before a pane is known" do
+    for {pane, target} <- [{"%464", "%464"}, {nil, "relay-build"}] do
+      row = agent_session(name: "relay-build", pane_id: pane)
+      request = %{session: "coordinator", actor: "claude", agent_session_id: row.id}
 
-      assert source == %{name: "relay-build", harness: "pi", target: target, server: :default}
+      assert RequestSource.for_request(request) == %{
+               name: "relay-build",
+               harness: "pi",
+               target: target,
+               server: :default,
+               agent_session_id: row.id,
+               kind: "build"
+             }
+
+      Foreman.AgentSessions.end_session(row)
     end
   end
 
-  test "unnamed legacy dispatches never borrow the request's identity" do
-    source =
-      RequestSource.resolve(%{session: "build", actor: "pi"}, [
-        %{window: "%464", details: %{"harness" => "pi"}}
-      ])
+  test "an ended row keeps its source and says when it ended" do
+    row = agent_session(name: "build", pane_id: "%9") |> Foreman.AgentSessions.end_session()
 
-    assert source == nil
+    assert %{name: "build", ended_at: %DateTime{}} =
+             RequestSource.for_request(%{session: "build", agent_session_id: row.id})
   end
 
-  test "legacy pane dispatch does not borrow another actor's session" do
-    assert RequestSource.resolve(%{session: "coordinator", actor: "claude"}, [
-             %{window: "%464", details: %{"harness" => "pi"}}
-           ]) == nil
+  test "a card asked since identity rows existed never matches by name at render" do
+    agent_session(name: "build", pane_id: "%9")
+
+    assert RequestSource.for_request(%{
+             session: "build",
+             agent_session_id: nil,
+             inserted_at: DateTime.utc_now()
+           }) == nil
+  end
+
+  test "a card from before identity rows uses the row live under its name when it was asked" do
+    asked = ~U[2020-01-01 12:00:00Z]
+
+    agent_session(
+      name: "build",
+      pane_id: "%8",
+      started_at: ~U[2020-01-01 11:00:00Z],
+      ended_at: ~U[2020-01-01 13:00:00Z]
+    )
+
+    agent_session(name: "build", pane_id: "%9", started_at: ~U[2020-01-02 00:00:00Z])
+
+    assert %{target: "%8"} =
+             RequestSource.for_request(%{session: "build", inserted_at: asked})
+
+    assert RequestSource.for_request(%{session: "other", inserted_at: asked}) == nil
+    assert RequestSource.for_request(%{session: nil, inserted_at: asked}) == nil
+  end
+
+  test "board rows target their planning window on the board server" do
+    planning =
+      Foreman.Repo.insert!(%Foreman.PlanningSession{
+        project: "sample",
+        ticket: "s-1",
+        window: "@12",
+        workdir: "/tmp",
+        state: :running,
+        launched_at: DateTime.utc_now()
+      })
+
+    row = Foreman.AgentSessions.sync_planning(planning)
+
+    assert %{name: "s-1", harness: "claude", target: "@12", server: :board} =
+             RequestSource.for_request(%{session: planning.session_id, agent_session_id: row.id})
   end
 
   test "configured sockets are used internally but copied commands use the default server" do
@@ -62,25 +107,6 @@ defmodule Foreman.RequestSourceTest do
                {"", 0}
              end
            ) == {:error, :window_gone}
-  end
-
-  test "old waiting facts are not a substitute for named session resolution" do
-    request = %{
-      session: "external",
-      actor: "pi",
-      kind: "session_waiting",
-      facts: %{"target" => "external", "pane" => "%464"}
-    }
-
-    assert RequestSource.resolve(request, []) == nil
-  end
-
-  test "unknown and unrelated sessions do not guess a target" do
-    assert RequestSource.resolve(%{session: nil, actor: "pi"}, []) == nil
-
-    assert RequestSource.resolve(%{session: "old", actor: "pi"}, [
-             %{window: "%3", details: %{"session" => "new"}}
-           ]) == nil
   end
 
   test "focus uses only read and focus commands on the selected server" do
@@ -144,16 +170,5 @@ defmodule Foreman.RequestSourceTest do
     end
 
     assert RequestSource.focus(source, runner: runner) == {:error, :no_client}
-  end
-
-  test "board sessions use the board server" do
-    source =
-      RequestSource.resolve(%{session: "uuid", actor: "claude"}, [], %{
-        session_id: "uuid",
-        window: "@12",
-        ticket: "s-1"
-      })
-
-    assert source == %{name: "s-1", harness: "claude", target: "@12", server: :board}
   end
 end

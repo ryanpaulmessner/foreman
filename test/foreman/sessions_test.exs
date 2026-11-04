@@ -238,6 +238,24 @@ defmodule Foreman.SessionsTest do
     assert {:error, :not_launchable} = Sessions.launch({"sample", "x-3"}, c.opts)
   end
 
+  test "launch writes the session's identity row with the planning row; a closed window ends it",
+       c do
+    # A portable no-op harness, so this check runs where /bin/true does not exist.
+    opts = Keyword.put(c.opts, :executable, System.find_executable("true"))
+    assert {:ok, session} = Sessions.launch({"sample", "x-1"}, opts)
+    planning = Foreman.Repo.get(Foreman.PlanningSession, session.session_id)
+    row = Foreman.AgentSessions.get(session.session_id)
+    assert planning.agent_session_id == row.id
+
+    assert %{kind: "epic_coordinator", name: "x-1", tmux_server: "board", ended_at: nil} = row
+    assert row.conversation_id == session.session_id
+
+    System.cmd("tmux", ["-L", c.socket, "kill-window", "-t", planning.window])
+    assert :ok = Sessions.reconcile(opts)
+    assert Sessions.get({"sample", "x-1"}).state == :parked
+    assert Foreman.AgentSessions.get(session.session_id).ended_at
+  end
+
   test "recovers a window created before the launch response was persisted", c do
     reserved =
       Foreman.Repo.insert!(%Foreman.PlanningSession{

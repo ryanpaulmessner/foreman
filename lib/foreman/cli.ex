@@ -20,6 +20,8 @@ defmodule Foreman.CLI do
   }
   @switches [
     name: :string,
+    parent: :string,
+    pi_session: :string,
     all_coordinators: :boolean,
     pane: :string,
     reason: :string,
@@ -153,6 +155,10 @@ defmodule Foreman.CLI do
             IO.puts(format(body))
         end
 
+        # Accepted without a known session (Decision 5): stdout stays the request ID.
+        if request["action"] == "ask" and is_binary(body["session_warning"]),
+          do: IO.puts(:stderr, body["session_warning"])
+
         if request["action"] in ["ask", "wait"], do: 0, else: code
 
       {:error, message} when is_binary(message) ->
@@ -243,6 +249,19 @@ defmodule Foreman.CLI do
       "session" => opts[:session] || defaults[:session] || System.get_env("FOREMAN_SESSION"),
       "project" => opts[:project] || opts[:repo],
       "cwd" => defaults[:cwd] || File.cwd!()
+    }
+  end
+
+  defp tmux_pane(defaults), do: defaults[:tmux_pane] || System.get_env("TMUX_PANE")
+
+  # The asking (or dispatching) pane and its tmux server, so the board can find the
+  # session row behind it. `$TMUX` is "<socket path>,<pid>,<session>".
+  defp tmux_identity(defaults) do
+    tmux = Keyword.get_lazy(defaults, :tmux, fn -> System.get_env("TMUX") end)
+
+    %{
+      "tmux_pane" => tmux_pane(defaults),
+      "tmux_socket" => if(is_binary(tmux) and tmux != "", do: hd(String.split(tmux, ",")))
     }
   end
 
@@ -404,6 +423,7 @@ defmodule Foreman.CLI do
       end
 
     session = opts[:session]
+    build_name = opts[:name]
 
     case {invalid, args} do
       {[], ["note", text]} when opts != [] ->
@@ -429,9 +449,10 @@ defmodule Foreman.CLI do
 
       {[], ["session", "register"]} ->
         request =
-          Map.new(Keyword.take(opts, [:name, :pane, :workdir, :harness]), fn {k, v} ->
+          Map.new(Keyword.take(opts, [:name, :pane, :workdir, :harness, :parent]), fn {k, v} ->
             {to_string(k), v}
           end)
+          |> Map.put_new_lazy("pane", fn -> tmux_pane(defaults) end)
 
         if Foreman.SessionRegistry.valid?(request) do
           {:ok,
@@ -441,7 +462,7 @@ defmodule Foreman.CLI do
            }}
         else
           {:error,
-           "session register requires --name <name> --pane <%id> --workdir <absolute-path> --harness claude|pi"}
+           "session register requires --name <name> --workdir <absolute-path> --harness claude|pi, and --pane <%id> outside tmux"}
         end
 
       {[], ["ask", "update", id]} when kind == "ticket" ->
@@ -475,6 +496,7 @@ defmodule Foreman.CLI do
             "request_kind" => request_kind,
             "facts" => ask_facts(request_kind, opts, defaults[:cwd] || File.cwd!())
           })
+          |> Map.merge(tmux_identity(defaults))
           # A waiting ask replayed after an outage would outlive the session's resume
           # (clears are never spooled), so it is not queued either.
           |> Map.put("transient", request_kind == "session_waiting")
@@ -519,8 +541,10 @@ defmodule Foreman.CLI do
           {:error, :usage}
         end
 
-      {[], ["dispatch" | _]} when not is_binary(session) or session == "" ->
-        {:error, "dispatch requires --session <build-name>"}
+      {[], ["dispatch" | _]}
+      when (not is_binary(session) or session == "") and
+             (not is_binary(build_name) or build_name == "") ->
+        {:error, "dispatch requires --name <build-name> (or the older --session <build-name>)"}
 
       {[], [verb | rest]} ->
         event = if(kind == "epic", do: @epic, else: @ticket)[verb]
@@ -553,7 +577,9 @@ defmodule Foreman.CLI do
                 :path,
                 :sha,
                 :title,
-                :beads_epic_id
+                :beads_epic_id,
+                :name,
+                :pi_session
               ]),
               fn {k, v} -> {to_string(k), v} end
             )
@@ -562,7 +588,7 @@ defmodule Foreman.CLI do
 
           # The dispatching coordinator owns close-out. pi-window runs in its pane, so
           # without --coordinator the board resolves the registered session in TMUX_PANE.
-          pane = defaults[:tmux_pane] || System.get_env("TMUX_PANE")
+          pane = tmux_pane(defaults)
 
           payload =
             if verb == "dispatch" and is_nil(opts[:coordinator]) and is_binary(pane) and
@@ -592,6 +618,9 @@ defmodule Foreman.CLI do
             "epic_project" => opts[:epic_project],
             "stage" => opts[:stage]
           }
+
+          request =
+            if verb == "dispatch", do: Map.merge(request, tmux_identity(defaults)), else: request
 
           {:ok, %{request: request, json: opts[:json] || false}}
         else

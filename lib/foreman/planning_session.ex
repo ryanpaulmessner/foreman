@@ -13,5 +13,6 @@ defmodule Foreman.PlanningSession do
     field :observed_at, :utc_datetime_usec
     field :last_activity_at, :utc_datetime_usec
     field :previous_windows, {:array, :map}, default: []
+    field :agent_session_id, :binary_id
   end
 end

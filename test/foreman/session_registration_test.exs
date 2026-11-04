@@ -1,23 +1,20 @@
 defmodule Foreman.SessionRegistrationTest do
   use Foreman.DataCase, async: true
 
-  test "cards without rows fall back to a live name, but unknown names stay unknown" do
+  test "a card without a row stays unknown and never reads tmux for a live name" do
     request = %{
       session: "build",
       actor: "pi",
       repo_key: "sample",
       bead_id: "s-1",
       kind: "session_waiting",
-      facts: %{"target" => "external", "pane" => "%49"}
+      facts: %{"target" => "external", "pane" => "%49"},
+      agent_session_id: nil,
+      inserted_at: DateTime.utc_now()
     }
 
-    runner = fn _, _, _ -> {"%50\t@2\tcoordinator\tother-name\t0\tbuild\t\n", 0} end
-
-    assert %{target: "%50", name: "build"} =
-             Foreman.RequestSource.for_request(request, runner: runner)
-
-    assert nil ==
-             Foreman.RequestSource.for_request(%{request | session: "unknown"}, runner: runner)
+    runner = fn _, _, _ -> flunk("no tmux read for a card source") end
+    assert nil == Foreman.RequestSource.for_request(request, runner: runner)
   end
 
   test "a registration during a liveness check cannot be ended by the old listing" do
@@ -94,7 +91,7 @@ defmodule Foreman.SessionRegistrationTest do
                runner: fn _, _, _ -> {"%42\t@1\tcoordinator\tcoord\t1\t\t\n", 0} end
              )
 
-    assert %{ended_at: %NaiveDateTime{}} = Foreman.RequestSource.for_request(build_card)
+    assert %{ended_at: %DateTime{}} = Foreman.RequestSource.for_request(build_card)
     refute Map.has_key?(Foreman.RequestSource.for_request(card), :ended_at)
 
     assert Repo.aggregate(
