@@ -6,7 +6,9 @@ config :foreman,
   session_prompt_directory: Path.expand("../test/fixtures/session-launch", __DIR__),
   config_directory: "/tmp/bb-exec/test-config",
   # Session pages never read a real tmux pane in tests; tmux tests pass their own runner.
-  pane_capture_runner: &Foreman.TestTmux.no_capture/3
+  pane_capture_runner: &Foreman.TestTmux.no_capture/3,
+  # The session page's tmux check and controls: a tmux with no panes, never a real server.
+  session_controls_tmux: [runner: &Foreman.TestTmux.no_panes/3]
 
 # Jobs are inserted into the SQL sandbox and explicitly executed by tests.
 config :foreman, Oban, testing: :manual, queues: false, plugins: false

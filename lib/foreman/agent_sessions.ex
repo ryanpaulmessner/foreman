@@ -102,8 +102,11 @@ defmodule Foreman.AgentSessions do
   `[]`), `{:error, {:invalid, state, event}}` for a refused claim, `{:error, :name_taken}`
   when another live row holds the name (R7), or `{:error, :not_found}`.
 
-  The caller runs the effects. Options: `:at` (when the new state began, default now) and
-  `:data` (extra guard data, such as `resumable`).
+  The caller runs the effects. Options: `:at` (when the new state began, default now),
+  `:data` (extra guard data, such as `resumable`) and `:run`, a function of the stepped
+  row and its effects that runs them inside the same transaction and row lock: when it
+  returns `{:error, reason}` the state change rolls back and `fire/3` returns that error
+  (Stop and Park save the capture and close the pane before the row is dead).
   """
   def fire(row_or_id, event, opts \\ [])
 
@@ -111,12 +114,23 @@ defmodule Foreman.AgentSessions do
 
   def fire(id, event, opts) when is_binary(id) do
     transaction(fn ->
-      with %AgentSession{} = row <- locked(id) do
-        step(row, event, opts)
+      with %AgentSession{} = row <- locked(id),
+           {:ok, row, effects} <- step(row, event, opts) do
+        run_effects(Keyword.get(opts, :run), row, effects)
       else
         nil -> {:error, :not_found}
+        error -> error
       end
     end)
+  end
+
+  defp run_effects(nil, row, effects), do: {:ok, row, effects}
+
+  defp run_effects(run, row, effects) do
+    case run.(row, effects) do
+      :ok -> {:ok, row, effects}
+      {:error, reason} -> Repo.rollback(reason)
+    end
   end
 
   defp locked(id) do

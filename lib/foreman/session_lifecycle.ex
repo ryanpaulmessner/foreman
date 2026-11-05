@@ -5,7 +5,8 @@ defmodule Foreman.SessionLifecycle do
   Live states: starting, working, idle and the three waiting reasons. Dead states: parked
   and ended. `none` is the row before a writer creates it. Claimed events outside the table
   are refused; observed events outside it are ignored. Effects are data: the caller runs
-  them (the controls tickets run park, stop, resume, start fresh and relaunch build).
+  them (`Foreman.SessionControls` runs focus, message, continue, park and stop; later
+  tickets run resume, start fresh and relaunch build).
 
   Data for the guards: `kind` (`main_coordinator`, `epic_coordinator`, `build`),
   `harness` (`claude`, `pi`) and `resumable` (see `Foreman.AgentSessions.resumable?/1`).
@@ -39,6 +40,8 @@ defmodule Foreman.SessionLifecycle do
   event(:launch)
   event(:register)
   event(:continue)
+  event(:focus)
+  event(:message)
   event(:resume_on_model)
   event(:park)
   event(:stop)
@@ -62,6 +65,7 @@ defmodule Foreman.SessionLifecycle do
     :request,
     :clear,
     :send,
+    :show,
     :save,
     :stop,
     :close,
@@ -97,6 +101,10 @@ defmodule Foreman.SessionLifecycle do
   transition(:prompt_cleared, from: :waiting_permission, to: :working, do: [clear: :request])
 
   transition(:continue, from: :waiting_usage_limit, to: :stay, do: [send: :continue])
+  # The page's live controls (Decision 17): Focus in every live state; Send message only
+  # where typing does not interrupt the agent.
+  transition(:focus, from: :live, to: :stay, do: [show: :pane])
+  transition(:message, from: [:idle, :waiting_question], to: :stay, do: [send: :message])
 
   transition(:resume_on_model,
     from: :waiting_usage_limit,
@@ -136,6 +144,8 @@ defmodule Foreman.SessionLifecycle do
       :launch,
       :register,
       :continue,
+      :focus,
+      :message,
       :resume_on_model,
       :park,
       :stop,

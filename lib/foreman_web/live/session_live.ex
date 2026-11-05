@@ -1,14 +1,17 @@
 defmodule ForemanWeb.SessionLive do
   use ForemanWeb, :live_view
   alias Foreman.{AgentSessions, PaneCapture, PaneReader, RequestSource, SessionPage}
-  alias Foreman.{SessionCaptures, SessionHistory}
-  alias ForemanWeb.{AnsiHtml, SessionState}
+  alias Foreman.{SessionCaptures, SessionControlPanel, SessionControls, SessionHistory}
+  alias Foreman.{SessionPane, SessionsConnection}
+  alias ForemanWeb.{AnsiHtml, RelativeTime, SessionState}
+  alias Fluxon.Components.Button
   import ForemanWeb.TicketDetail, only: [timestamp: 1]
 
   def mount(_, _, socket) do
     if connected?(socket) do
       Foreman.Events.subscribe()
       Process.send_after(self(), :reconcile, 3_000)
+      send(self(), :check_tmux)
     end
 
     {:ok,
@@ -16,7 +19,9 @@ defmodule ForemanWeb.SessionLive do
      |> assign(disclosures: %{}, connected: connected?(socket), visible: true)
      |> assign(reader: PaneReader.__fsm__(:initial), reader_data: PaneReader.data())
      |> assign(timer: nil, capturing: false, captured: nil, shown: nil, retry_result: nil)
-     |> assign(saved: nil)
+     |> assign(saved: nil, tmux: SessionsConnection.__fsm__(:initial), tmux_at: nil)
+     |> assign(panel: SessionControlPanel.__fsm__(:initial), result: nil, panel_key: nil)
+     |> assign(message_form: message_form(), sent: 0)
      |> stream_configure(:rounds, dom_id: &"session-round-#{&1.id}")}
   end
 
@@ -27,8 +32,10 @@ defmodule ForemanWeb.SessionLive do
 
   def handle_info(:reconcile, socket) do
     Process.send_after(self(), :reconcile, 3_000)
-    {:noreply, refresh(socket)}
+    {:noreply, socket |> check_tmux() |> refresh()}
   end
+
+  def handle_info(:check_tmux, socket), do: {:noreply, socket |> check_tmux() |> refresh()}
 
   def handle_info(:pane_tick, socket),
     do: {:noreply, socket |> assign(timer: nil) |> read(:tick)}
@@ -55,6 +62,41 @@ defmodule ForemanWeb.SessionLive do
 
   def handle_event("retry-output", _, socket),
     do: {:noreply, read(socket, :retry)}
+
+  # Try again now (Decision 17): one tmux read; the output reader retries with it.
+  def handle_event("retry-tmux", _, socket) do
+    socket = socket |> check_tmux() |> refresh() |> read(:retry)
+
+    if socket.assigns.tmux == :tmux_error,
+      do: {:noreply, show_result(socket, {:error, "tmux still does not answer."})},
+      else: {:noreply, panel(socket, :act)}
+  end
+
+  @controls %{"focus" => :focus, "continue" => :continue, "park" => :park}
+
+  def handle_event("control", %{"control" => name}, socket) when is_map_key(@controls, name),
+    do: {:noreply, run_control(socket, @controls[name], %{})}
+
+  def handle_event("ask-stop", _, socket), do: {:noreply, panel(socket, :ask_stop)}
+  def handle_event("keep-running", _, socket), do: {:noreply, panel(socket, :keep)}
+  def handle_event("stop", _, socket), do: {:noreply, run_control(socket, :stop, %{})}
+
+  def handle_event("send-message", %{"message" => %{"text" => text}}, socket) do
+    case Foreman.ChatPrompt.typed(text) do
+      {:ok, _} ->
+        socket = run_control(socket, :message, %{"text" => text})
+
+        if socket.assigns.result && elem(socket.assigns.result, 0) == :success,
+          # A new input element: the browser keeps typed text in an input LiveView did not change.
+          do:
+            {:noreply,
+             socket |> assign(:message_form, message_form()) |> update(:sent, &(&1 + 1))},
+          else: {:noreply, assign(socket, :message_form, message_form(text))}
+
+      _ ->
+        {:noreply, assign(socket, :message_form, message_form(text, "Enter a message."))}
+    end
+  end
 
   def handle_event("toggle-round", %{"round" => round}, socket) do
     case Integer.parse(round) do
@@ -150,9 +192,128 @@ defmodule ForemanWeb.SessionLive do
       repos: Foreman.RuntimeState.repos(),
       saved: if(row && row.ended_at && tab == :output, do: SessionCaptures.get(row.id))
     )
+    |> assign_controls(
+      row && SessionControls.controls(row, cards: length(cards), tmux: tmux(socket, row))
+    )
     |> stream(:rounds, rounds, reset: true)
     |> view_pane()
+    |> changed()
   end
+
+  # Decision 10: the panel's one filled button, the other controls that work now, then
+  # the one line for the controls that are off.
+  defp assign_controls(socket, nil),
+    do:
+      assign(socket,
+        controls: [],
+        primary: nil,
+        tmux_down: false,
+        stop: false,
+        row_controls: [],
+        unavailable: ""
+      )
+
+  defp assign_controls(socket, controls) do
+    primary = primary(socket.assigns.row, controls, socket.assigns.card)
+
+    assign(socket,
+      controls: controls,
+      primary: primary,
+      tmux_down: on?(controls, :retry),
+      stop: on?(controls, :stop),
+      unavailable: unavailable(controls),
+      row_controls:
+        Enum.filter([:answer, :continue, :focus, :park], &(&1 != primary and on?(controls, &1)))
+    )
+  end
+
+  # The confirm and the result line close when the session changes under them.
+  defp changed(%{assigns: %{row: row, panel_key: key}} = socket) do
+    if key != nil and panel_key(row) != key, do: panel(socket, :changed), else: socket
+  end
+
+  defp panel_key(nil), do: nil
+  defp panel_key(row), do: {row.state, row.ended_at}
+
+  defp tmux(socket, row), do: if(is_nil(row.ended_at), do: socket.assigns.tmux, else: :live)
+
+  defp panel(socket, event) do
+    case SessionControlPanel.step(socket.assigns.panel, event, %{}) do
+      {:error, _} ->
+        socket
+
+      {state, effects} ->
+        socket =
+          assign(socket,
+            panel: state,
+            panel_key: if(state == :ready, do: nil, else: panel_key(socket.assigns.row))
+          )
+
+        if {:clear, :result} in effects, do: assign(socket, :result, nil), else: socket
+    end
+  end
+
+  defp show_result(socket, result),
+    do: socket |> panel(:done) |> assign(:result, result)
+
+  defp run_control(%{assigns: %{row: row}} = socket, control, params) when not is_nil(row) do
+    outcome = SessionControls.run(row, control, params, tmux_opts())
+    socket = refresh(socket)
+    show_result(socket, result_line(control, outcome, row))
+  end
+
+  defp run_control(socket, _, _), do: socket
+
+  defp check_tmux(%{assigns: %{row: %{ended_at: nil} = row}} = socket) do
+    opts = Keyword.put(tmux_opts(), :socket, SessionPane.socket(row.tmux_server))
+    ok? = match?({:ok, _}, Foreman.SessionTargets.list(opts))
+
+    {next, []} =
+      SessionsConnection.step(socket.assigns.tmux, if(ok?, do: :read_ok, else: :read_failed), %{})
+
+    assign(socket,
+      tmux: next,
+      tmux_at: if(ok?, do: DateTime.utc_now(), else: socket.assigns.tmux_at)
+    )
+  end
+
+  defp check_tmux(socket), do: socket
+
+  defp tmux_opts, do: Application.get_env(:foreman, :session_controls_tmux, [])
+
+  defp message_form(text \\ "", error \\ nil) do
+    errors = if error, do: [text: {error, []}], else: []
+    to_form(%{"text" => text}, as: :message, errors: errors)
+  end
+
+  @verbs %{focus: "focus", continue: "continue", message: "send to", park: "park", stop: "stop"}
+
+  # Result lines (Decision 17): the exact copy for each control, then the shared failure line.
+  defp result_line(:focus, :ok, row), do: {:success, "Brought #{row.name} to the front."}
+
+  defp result_line(:focus, {:ok, :no_client}, _),
+    do: {:info, "No terminal is attached. Copy the attach command from Details."}
+
+  defp result_line(:continue, :ok, row), do: {:success, ~s(Sent "continue" to #{row.name}.)}
+  defp result_line(:message, :ok, row), do: {:success, "Sent to #{row.name}."}
+
+  defp result_line(:park, :ok, row),
+    do: {:success, "Parked #{row.name}. Its builds keep running."}
+
+  defp result_line(:stop, :ok, row),
+    do: {:success, "Stopped #{row.name}. The worktree and branch stay."}
+
+  defp result_line(control, {:error, reason}, row),
+    do: {:error, "Could not #{@verbs[control]} #{row.name}: #{failure(reason)}. Nothing changed."}
+
+  defp failure(:tmux_unavailable), do: "tmux does not answer"
+  defp failure(:window_gone), do: "the pane is closed"
+  defp failure(:pane_changed), do: "the pane no longer runs this session"
+  defp failure(:prompt_busy), do: "the agent is busy"
+  defp failure(:invalid), do: "it is not available now"
+  defp failure(:answer_required), do: "the message is empty"
+  defp failure("refused in preview"), do: "this preview does not write to tmux"
+  defp failure(_), do: "the board could not do it"
 
   def terminate(_reason, socket), do: read(socket, :closed)
 
@@ -242,24 +403,89 @@ defmodule ForemanWeb.SessionLive do
       else: "The worktree was removed."
   end
 
-  defp unavailable(%{ended_at: at, kind: kind}) when not is_nil(at),
-    do:
-      "Focus terminal, Send message, Continue" <>
-        if(kind == "build", do: " and Stop", else: ", Park and Stop") <> " (The pane is closed.)"
+  @buttons %{
+    answer: {"Answer on the card", "hero-inbox", nil},
+    continue: {"Continue", "hero-play", "Continuing…"},
+    focus: {"Focus terminal", "hero-command-line", "Focusing…"},
+    park: {"Park", "hero-pause", "Parking…"},
+    retry: {"Try again now", "hero-arrow-path", "Trying…"},
+    message: {"Send message", "hero-paper-airplane", "Sending…"},
+    stop: {"Stop", "hero-stop", "Stopping…"}
+  }
 
-  defp unavailable(%{kind: "main_coordinator"} = row),
-    do:
-      unavailable(%{row | kind: "epic_coordinator"}) <>
-        " · Park (The main coordinator does not park.)"
+  # The one "Not available now:" line: off controls in page order, those with one reason
+  # named together ("Focus terminal, Send message and Stop (The pane is closed.)").
+  defp unavailable(controls) do
+    controls
+    |> Enum.flat_map(fn
+      {control, {:off, reason}} -> [{elem(@buttons[control], 0), reason}]
+      _ -> []
+    end)
+    |> Enum.chunk_by(&elem(&1, 1))
+    |> Enum.map_join(" · ", fn [{_, reason} | _] = group ->
+      names = Enum.map(group, &elem(&1, 0))
 
-  defp unavailable(%{state: state}) when state in ["starting", "working"],
-    do:
-      "Send message (The agent is working. A message now interrupts it.) · Continue (Only after a usage limit.)"
+      case Enum.split(names, -1) do
+        {[], [one]} -> one
+        {rest, [last]} -> Enum.join(rest, ", ") <> " and " <> last
+      end <> " (" <> reason <> ")"
+    end)
+  end
 
-  defp unavailable(%{state: "waiting.usage_limit"}),
-    do: "Send message (Use Continue at a usage limit.)"
+  defp on?(controls, control), do: List.keyfind(controls, control, 0) == {control, :on}
 
-  defp unavailable(_), do: "Continue (Only after a usage limit.)"
+  # The next-step panel's one filled button (Decision 10).
+  defp primary(row, controls, card) do
+    cond do
+      on?(controls, :retry) -> :retry
+      row.state == "waiting.usage_limit" and on?(controls, :continue) -> :continue
+      row.state == "waiting.permission" and on?(controls, :focus) -> :focus
+      card -> :answer
+      true -> nil
+    end
+  end
+
+  attr :control, :atom, required: true
+  attr :card, :map, default: nil
+  attr :filled, :boolean, default: false
+
+  # One control button; buttons size to their labels (Decision 17).
+  defp control(assigns) do
+    {label, icon, busy} = @buttons[assigns.control]
+    assigns = assign(assigns, label: label, icon: icon, busy: busy)
+
+    ~H"""
+    <Button.button
+      :if={@control == :answer}
+      id={if(@filled, do: "session-answer", else: "session-control-answer")}
+      size="sm"
+      variant={if(@filled, do: "solid", else: "outline")}
+      navigate={"/needs-you#request-#{@card.id}"}
+      class="bb-session-control"
+    >
+      <.icon name={@icon} class="size-4" /> {@label}
+    </Button.button>
+    <Button.button
+      :if={@control != :answer}
+      id={"session-control-#{@control}"}
+      type="button"
+      size="sm"
+      variant={if(@filled, do: "solid", else: "outline")}
+      class="bb-session-control"
+      phx-click={if(@control == :retry, do: "retry-tmux", else: "control")}
+      phx-value-control={@control}
+      phx-disable-with={@busy}
+    >
+      <.icon name={@icon} class="size-4" /> {@label}
+    </Button.button>
+    """
+  end
+
+  # tmux does not answer: the last label, with when it was last read.
+  defp not_checked(view, nil), do: view
+
+  defp not_checked(view, at),
+    do: %{view | second: "not checked since " <> RelativeTime.format(at), at: at}
 
   @saved_lines %{
     "exit" => ", when the pane closed",
@@ -407,7 +633,17 @@ defmodule ForemanWeb.SessionLive do
           <header class="space-y-3">
             <h1 id="session-heading" class="text-xl font-semibold">{@title}</h1>
             <div class="flex flex-wrap items-center gap-3 text-xs text-foreground-softer">
-              <SessionState.badge id="session-state" view={@state} />
+              <SessionState.badge
+                :if={!@tmux_down}
+                id="session-state"
+                view={@state}
+              />
+              <span :if={@tmux_down} class="bb-session-stale">
+                <SessionState.badge
+                  id="session-state"
+                  view={not_checked(@state, @tmux_at || @row.last_seen_at || @row.started_at)}
+                />
+              </span>
               <span class="font-mono">{@row.name}</span><span>{@source.role}</span>
               <span :if={is_nil(@row.ended_at)} id="session-live-line" class="bb-session-live">
                 <%= if @connected do %>
@@ -421,6 +657,12 @@ defmodule ForemanWeb.SessionLive do
           </header>
           <section id="session-next-step" class="bb-panel space-y-2">
             <%= cond do %>
+              <% @tmux_down -> %>
+                <h2 class="font-semibold">The board cannot reach tmux.</h2>
+                <p>
+                  The session can still run. The label and output are from
+                  <.timestamp at={@tmux_at || @row.last_seen_at || @row.started_at} />.
+                </p>
               <% @row.ended_at && @card -> %>
                 <h2 class="font-semibold">Its question is still open.</h2>
                 <p>{@card.facts["question"]}</p>
@@ -468,17 +710,115 @@ defmodule ForemanWeb.SessionLive do
                 <h2 class="font-semibold">Working on round {@round}.</h2>
                 <p>Nothing waits on you.</p>
             <% end %>
-            <.link
-              :if={@card}
-              id="session-answer"
-              navigate={"/needs-you#request-#{@card.id}"}
-              class="inline-flex rounded-md bg-primary px-3 py-2 text-sm font-medium text-foreground-primary hover:opacity-90 transition-opacity"
-            >
-              Answer on the card
-            </.link>
+            <.control
+              :if={@primary}
+              control={@primary}
+              card={@card}
+              filled
+            />
           </section>
-          <p id="session-unavailable" class="text-xs text-foreground-softer">
-            Not available now: {unavailable(@row)}
+          <div :if={@row_controls != [] or @stop} id="session-controls" class="bb-session-controls">
+            <.control :for={control <- @row_controls} control={control} card={@card} />
+            <Button.button
+              :if={@stop}
+              id="session-stop"
+              type="button"
+              size="sm"
+              variant="outline"
+              class="bb-session-stop"
+              phx-click="ask-stop"
+              aria-expanded={to_string(@panel == :confirming)}
+              aria-controls="session-stop-confirm"
+            >
+              <.icon name="hero-stop" class="size-4" /> Stop
+            </Button.button>
+          </div>
+          <section
+            :if={@panel == :confirming}
+            id="session-stop-confirm"
+            role="alertdialog"
+            aria-labelledby="session-stop-question"
+            class="bb-panel bb-session-confirm space-y-3"
+          >
+            <h2 id="session-stop-question" class="font-semibold">Stop {@row.name}?</h2>
+            <p class="text-sm">
+              The agent stops now and loses work it has not saved.
+              <%= cond do %>
+                <% @row.workdir && @row.branch -> %>
+                  The worktree <span class="font-mono">{@row.workdir}</span>
+                  and the branch <span class="font-mono">{@row.branch}</span>
+                  stay.
+                <% @row.workdir -> %>
+                  The worktree <span class="font-mono">{@row.workdir}</span> stays.
+                <% @row.branch -> %>
+                  The branch <span class="font-mono">{@row.branch}</span> stays.
+                <% true -> %>
+              <% end %>
+              {if @row.kind != "build", do: "Its builds keep running."}
+            </p>
+            <div class="bb-session-controls">
+              <Button.button
+                id="session-stop-confirm-yes"
+                type="button"
+                size="sm"
+                variant="solid"
+                color="danger"
+                phx-click="stop"
+                phx-disable-with="Stopping…"
+              >
+                Stop session
+              </Button.button>
+              <Button.button
+                id="session-stop-keep"
+                type="button"
+                size="sm"
+                variant="outline"
+                phx-click="keep-running"
+                phx-mounted={JS.focus()}
+              >
+                Keep it running
+              </Button.button>
+            </div>
+          </section>
+          <ForemanWeb.StatusLine.status_line
+            :if={@result}
+            id="session-result"
+            kind={elem(@result, 0)}
+          >
+            {elem(@result, 1)}
+          </ForemanWeb.StatusLine.status_line>
+          <.form
+            :if={on?(@controls, :message)}
+            for={@message_form}
+            id="session-message-form"
+            phx-submit="send-message"
+            class="bb-session-message"
+          >
+            <div class="min-w-0 flex-1">
+              <.input
+                field={@message_form[:text]}
+                id={"session-message-text-#{@sent}"}
+                label={"Message to #{@row.name}"}
+                autocomplete="off"
+                class="w-full rounded-md border border-base bg-base px-3 py-2 text-sm focus:outline-primary"
+              />
+            </div>
+            <Button.button
+              id="session-message-send"
+              type="submit"
+              size="sm"
+              variant="outline"
+              phx-disable-with="Sending…"
+            >
+              <.icon name="hero-paper-airplane" class="size-4" /> Send
+            </Button.button>
+          </.form>
+          <p
+            :if={@unavailable != ""}
+            id="session-unavailable"
+            class="text-xs text-foreground-softer"
+          >
+            Not available now: {@unavailable}
           </p>
           <nav aria-label="Session tabs" class="flex gap-5 border-b border-base">
             <.link
