@@ -2,7 +2,7 @@
 id: fm-9mm.18
 title: "One-click Launch coordinator on epics"
 type: task
-status: open
+status: in_progress
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.12","fm-9mm.9"]

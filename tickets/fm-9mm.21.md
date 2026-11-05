@@ -2,7 +2,7 @@
 id: fm-9mm.21
 title: "Session page says 'round 1' for coordinators"
 type: bug
-status: open
+status: in_progress
 priority: 2
 parent: fm-9mm
 blocked_by: []

@@ -2,7 +2,7 @@
 id: fm-9mm.17
 title: "Sessions page: the Tree with the Waiting on you strip"
 type: task
-status: open
+status: in_progress
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.10","fm-9mm.12"]
