@@ -142,6 +142,9 @@ defmodule Foreman.AgentSessions do
               true -> at
             end
 
+          # A dead session that lives again (Resume): its old save describes the last run.
+          if live? and not is_nil(row.ended_at), do: Foreman.SessionCaptures.clear(row.id)
+
           row =
             row
             |> Ecto.Changeset.change(
