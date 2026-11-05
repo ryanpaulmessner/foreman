@@ -1,5 +1,5 @@
 defmodule Foreman.SessionTmux do
-  @moduledoc "Dedicated-server adapter. Parking closes only an identified, unattached window; other operations preserve windows."
+  @moduledoc "Dedicated-server adapter. Parking closes only an identified, unattached session pane."
 
   def respawn_coordinator(session, mode, pane, opts \\ []) do
     with :ok <- Foreman.Preview.allow_external_write(),
@@ -412,22 +412,34 @@ defmodule Foreman.SessionTmux do
   def park(session, opts \\ []) do
     with :ok <- Foreman.Preview.allow_external_write(),
          true <- is_binary(session.window) and Regex.match?(~r/\A@\d+\z/, session.window),
-         {:ok, output} <-
-           cmd(
-             [
-               "if-shell",
-               "-F",
-               "-t",
-               session.window,
-               "\#{&&:\#{==:\#{@foreman-session},#{session.session_id}},\#{==:\#{window_active_clients},0}}",
-               "kill-window -t #{session.window}",
-               "display-message -p parking-refused"
-             ],
-             opts
+         {:ok, pane} <- parking_pane(session, opts),
+         :ok <-
+           Foreman.SessionPane.close(
+             %{socket: socket(opts), pane: pane, board: true},
+             Keyword.put(opts, :park_guard, {session.window, session.session_id})
            ) do
-      if String.trim(output) == "", do: :ok, else: {:error, :parking_refused}
+      :ok
     else
       _ -> {:error, :parking_refused}
+    end
+  end
+
+  # Never fall back to the active pane in a shared window. Older windows without a
+  # recorded pane can be closed only when they contain exactly one pane.
+  defp parking_pane(session, opts) do
+    with {:ok, output} <- cmd(["list-panes", "-t", session.window, "-F", ~S(#{pane_id})], opts) do
+      panes = String.split(output)
+
+      case {opts[:pane], panes} do
+        {nil, [pane]} ->
+          {:ok, pane}
+
+        {pane, panes} when is_binary(pane) ->
+          if pane in panes, do: {:ok, pane}, else: {:error, :parking_refused}
+
+        _ ->
+          {:error, :parking_refused}
+      end
     end
   end
 

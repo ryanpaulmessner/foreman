@@ -89,6 +89,8 @@ defmodule Foreman.SessionPane do
   @doc """
   Closes only `pane`. A board row's window loses its `@foreman-session` tag first, so the
   board stops treating the window (and the builds left in it) as the coordinator.
+  Idle parking supplies `park_guard: {window_id, session_id}` to check window identity
+  and absence of attached clients in the same tmux command queue as the close.
   """
   def close(%{socket: socket, pane: pane} = target, opts \\ []) do
     untag =
@@ -96,7 +98,33 @@ defmodule Foreman.SessionPane do
         do: ["set-option", "-w", "-u", "-t", pane, "@foreman-session", ";"],
         else: []
 
-    with {:ok, _} <- run(socket, untag ++ ["kill-pane", "-t", pane], opts), do: :ok
+    commands = untag ++ ["kill-pane", "-t", pane]
+
+    case Keyword.get(opts, :park_guard) do
+      nil ->
+        with {:ok, _} <- run(socket, commands, opts), do: :ok
+
+      {window, id} ->
+        guard =
+          "\#{&&:\#{==:\#{window_id},#{window}},\#{&&:\#{==:\#{@foreman-session},#{id}},\#{==:\#{window_active_clients},0}}}"
+
+        with {:ok, output} <-
+               run(
+                 socket,
+                 [
+                   "if-shell",
+                   "-F",
+                   "-t",
+                   pane,
+                   guard,
+                   Enum.join(commands, " "),
+                   "display-message -p parking-refused"
+                 ],
+                 opts
+               ) do
+          if String.trim(output) == "", do: :ok, else: {:error, :parking_refused}
+        end
+    end
   end
 
   @doc "Types exactly `continue`, then Enter, into `pane` (fm-3c3.9)."
