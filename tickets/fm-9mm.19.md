@@ -2,7 +2,7 @@
 id: fm-9mm.19
 title: "Sessions page: Grid view and the Tree · Grid switch"
 type: task
-status: open
+status: in_progress
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.13","fm-9mm.17"]

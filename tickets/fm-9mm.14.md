@@ -2,7 +2,7 @@
 id: fm-9mm.14
 title: "Session page: live controls (Focus, Send message, Continue, Park, Stop)"
 type: task
-status: open
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.13"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-05
+close_reason: "PR #20 merged; deployed 2026-11-05, live session page shows the controls"
 ---
 
 Spec: `docs/specs/sessions-view.md` (approved 2026-11-03, card cfb2bce5). Design pack: `docs/specs/sessions-view.design.md`. The spec's Non-goals, Ask-first boundaries and copy tables apply to every ticket.
