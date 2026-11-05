@@ -314,7 +314,8 @@ defmodule Foreman.CoordinatorNoteTest do
     Foreman.AgentSessionFixtures.agent_session(name: "dispatch-only", pane_id: "%30")
 
     # The broadcast reaches the live pane once; the moved name's old pane is not a recipient.
-    assert {:ok, %{delivered: [%{name: "owner", pane: "%2"}], skipped: []}} =
+    assert {:ok,
+            %{delivered: [%{name: "owner", pane: "%2"}, %{name: "s-9", pane: "@12"}], skipped: []}} =
              Foreman.CoordinatorNote.send("claude", "source", "Note")
   end
 end

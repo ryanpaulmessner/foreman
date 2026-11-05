@@ -43,6 +43,14 @@ defmodule ForemanWeb.Layouts do
             </button>
           </div>
           <.link
+            id="sessions-link"
+            navigate={~p"/sessions"}
+            class={["bb-nav", @active == :sessions && "bb-nav-active"]}
+            aria-current={@active == :sessions && "page"}
+          >
+            <.icon name="hero-rectangle-stack" class="size-4" /> Sessions
+          </.link>
+          <.link
             id="answers-link"
             navigate={~p"/answers"}
             class={["bb-nav", @active == :answers && "bb-nav-active"]}
