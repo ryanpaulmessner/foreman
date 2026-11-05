@@ -37,10 +37,10 @@ defmodule ForemanWeb.SessionLaunchTest do
     refute has_element?(child, "#ticket-launch")
   end
 
-  test "draft Launch appears in the list and detail, not for ticketed epics", %{conn: conn} do
+  test "Launch coordinator appears for draft and ticketed epics", %{conn: conn} do
     {:ok, view, _} = live(conn, "/")
     assert has_element?(view, "#drafts [phx-click=launch-session][phx-value-ticket='draft:plan']")
-    refute has_element?(view, "#kind-unsorted [phx-click=launch-session]")
+    assert has_element?(view, "#kind-unsorted [phx-click=launch-session]", "Launch coordinator")
 
     Foreman.Repo.query!(
       "UPDATE epics SET stage = 'idea' WHERE repo_key = 'sample' AND bead_id = 'x-2'"
@@ -52,7 +52,7 @@ defmodule ForemanWeb.SessionLaunchTest do
     assert has_element?(detail, "#epic-launch")
     Foreman.Overlay.apply_event({"sample", "draft:plan"}, :start_spec)
     send(detail.pid, :reconcile)
-    refute has_element?(detail, "#epic-launch")
+    assert has_element?(detail, "#epic-launch", "Launch coordinator")
   end
 
   test "file status does not depend on acceptance checkboxes, while beads keeps its prefix", %{
@@ -86,6 +86,7 @@ defmodule ForemanWeb.SessionLaunchTest do
       })
     end
 
+    Enum.each(Foreman.Repo.all(Foreman.PlanningSession), &Foreman.AgentSessions.sync_planning/1)
     Foreman.Repo.query!("UPDATE epics SET stage = 'idea' WHERE bead_id = 'x-2'")
     {:ok, sheet, _} = live(conn, "/?ticket=sample:x-1")
     assert has_element?(sheet, "#ticket-launch", "Focus")
@@ -94,15 +95,17 @@ defmodule ForemanWeb.SessionLaunchTest do
     {:ok, detail, _} = live(conn, "/epics/sample/draft:plan")
     assert has_element?(detail, "#epic-launch", "Focus")
     Foreman.Repo.query!("UPDATE planning_sessions SET state = 'ended'")
+    Enum.each(Foreman.Repo.all(Foreman.PlanningSession), &Foreman.AgentSessions.sync_planning/1)
     send(sheet.pid, :reconcile)
     assert has_element?(sheet, "#ticket-launch", "Relaunch")
     Foreman.Repo.query!("UPDATE planning_sessions SET state = 'parked'")
+    Enum.each(Foreman.Repo.all(Foreman.PlanningSession), &Foreman.AgentSessions.sync_planning/1)
     send(sheet.pid, :reconcile)
     send(detail.pid, :reconcile)
     assert has_element?(sheet, "#ticket-launch[phx-value-action=relaunch]", "Relaunch")
-    assert has_element?(sheet, "#drafts [phx-click=launch-session]", "Relaunch")
-    assert has_element?(sheet, "#kind-unsorted [phx-click=launch-session]", "Relaunch")
-    assert has_element?(detail, "#epic-launch", "Relaunch")
+    assert has_element?(sheet, "#drafts [phx-click=launch-session]", "Resume")
+    assert has_element?(sheet, "#kind-unsorted [phx-click=launch-session]", "Resume")
+    assert has_element?(detail, "#epic-launch", "Resume")
   end
 
   test "session state links to Details instead of showing an attach command", %{conn: conn} do

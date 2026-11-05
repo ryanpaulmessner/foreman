@@ -2,11 +2,9 @@ defmodule ForemanWeb.PlanningSession do
   use ForemanWeb, :html
 
   def launch(socket, %{"project" => project, "ticket" => ticket} = params) do
-    session = Foreman.Sessions.get({project, ticket})
-
     result =
       case params["action"] do
-        "focus" when not is_nil(session) -> Foreman.SessionTmux.focus(session)
+        "focus" -> Foreman.Sessions.focus({project, ticket})
         "relaunch" -> Foreman.Sessions.relaunch({project, ticket})
         _ -> Foreman.Sessions.launch({project, ticket})
       end
@@ -16,7 +14,7 @@ defmodule ForemanWeb.PlanningSession do
         Phoenix.LiveView.put_flash(
           socket,
           :info,
-          "No terminal is attached. Run: " <> Foreman.SessionTmux.attach_command(session)
+          "No terminal is attached. Copy the attach command from Details."
         )
 
       :ok ->
@@ -34,26 +32,58 @@ defmodule ForemanWeb.PlanningSession do
   attr :key, :any, required: true
   attr :allowed, :boolean, required: true
   attr :session, :any, required: true
+  attr :coordinator, :boolean, default: false
+  attr :name_link, :boolean, default: false
 
   def launch_button(assigns) do
+    identity =
+      if assigns.coordinator,
+        do: Foreman.Sessions.epic_coordinator(assigns.key),
+        else: assigns.session && Foreman.AgentSessions.get(assigns.session.agent_session_id)
+
+    retry? =
+      assigns.session && assigns.session.state == :starting && is_nil(assigns.session.window)
+
     focus? =
-      assigns.session && assigns.session.window != nil &&
-        assigns.session.state in [:starting, :running, :waiting, :ended]
+      if identity,
+        do: is_nil(identity.ended_at) && !retry?,
+        else:
+          assigns.session && assigns.session.window != nil &&
+            assigns.session.state in [:starting, :running, :waiting]
 
-    relaunch? = assigns.session && assigns.session.state in [:parked, :ended]
+    relaunch? =
+      assigns.session && assigns.session.state in [:parked, :ended] &&
+        (not assigns.coordinator ||
+           (identity && identity.id == assigns.session.agent_session_id &&
+              identity.conversation_id == assigns.session.session_id &&
+              Foreman.AgentSessions.resumable?(identity)))
 
-    label =
+    {label, busy} =
       cond do
-        relaunch? -> "Relaunch"
-        focus? -> "Focus"
-        true -> "Launch"
+        relaunch? -> {if(assigns.coordinator, do: "Resume", else: "Relaunch"), "Resuming…"}
+        focus? -> {"Focus", "Focusing…"}
+        assigns.coordinator -> {"Launch coordinator", "Launching…"}
+        true -> {"Launch", "Launching…"}
       end
 
-    assigns = assign(assigns, label: label, relaunch?: !!relaunch?, focus?: !!focus?)
+    show? =
+      if assigns.coordinator,
+        do: assigns.allowed && (is_nil(identity) || retry? || focus? || relaunch?),
+        else: assigns.allowed || relaunch?
+
+    assigns =
+      assign(assigns,
+        label: label,
+        busy: busy,
+        show?: show?,
+        identity: identity,
+        relaunch?: !!relaunch?,
+        focus?: !!focus?
+      )
 
     ~H"""
     <button
-      :if={@allowed || @relaunch?}
+      :if={@show?}
       id={@id}
       type="button"
       phx-click="launch-session"
@@ -66,11 +96,20 @@ defmodule ForemanWeb.PlanningSession do
           true -> "launch"
         end
       }
-      phx-disable-with={@label <> "…"}
-      class="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-base bg-base px-3 py-1.5 text-xs font-medium transition-colors hover:bg-sunken focus-visible:outline-2 focus-visible:outline-offset-2"
+      phx-disable-with={@busy}
+      class="bb-launch-control inline-flex shrink-0 items-center gap-1.5 rounded-md border border-base bg-base px-3 py-1.5 text-xs font-medium transition-colors hover:bg-sunken focus-visible:outline-2 focus-visible:outline-offset-2"
     >
       {@label}
     </button>
+    <.link
+      :if={@name_link && @identity}
+      id={@id <> "-session"}
+      navigate={~p"/sessions/#{@identity.id}"}
+      class="block truncate font-mono text-xs hover:underline"
+      title={@identity.name}
+    >
+      {@identity.name}
+    </.link>
     """
   end
 
