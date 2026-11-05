@@ -320,7 +320,7 @@ defmodule Foreman.SessionsTest do
     assert {"", 0} = System.cmd("tmux", ["-L", c.socket, "list-sessions"], stderr_to_stdout: true)
   end
 
-  test "only unplanned tickets and idea/draft epics can launch" do
+  test "unplanned tickets and active epics can launch" do
     assert Sessions.launchable?(%{type: "task", status: "open", parent: nil})
     assert Sessions.launchable?(%{type: "decision", status: "open", parent: nil})
     assert Sessions.launchable?(%{type: "chore", status: "open", parent: nil})
@@ -328,9 +328,11 @@ defmodule Foreman.SessionsTest do
     assert Sessions.launchable?(%{type: "feature", status: "open", parent: nil})
     refute Sessions.launchable?(%{type: "task", status: "open", parent: "epic"})
     refute Sessions.launchable?(%{type: "task", status: "closed", parent: nil})
-    for stage <- [:idea, :draft], do: assert(Sessions.launchable?(%{type: "epic", stage: stage}))
 
-    for stage <- [:speccing, :spec_approved, :ticketed, :done, :abandoned],
+    for stage <- [:idea, :draft, :speccing, :spec_approved, :ticketed, :building, :shipping],
+        do: assert(Sessions.launchable?(%{type: "epic", stage: stage}))
+
+    for stage <- [:done, :abandoned],
         do: refute(Sessions.launchable?(%{type: "epic", stage: stage}))
 
     refute Sessions.launchable?(nil)

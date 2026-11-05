@@ -2,6 +2,8 @@ defmodule Foreman.SessionPrompt do
   @moduledoc "Loads skill-owned templates from templates/session-launch. Built-in fallback is enabled only by test configuration."
   @workflows %{
     "epic" => "/tight-spec",
+    "epic-coordinator" =>
+      "orient on this epic, then dispatch its frontier in pane mode and close out under the usual rules. Touch no other epic",
     "bug" => "diagnosing-bugs",
     "feature" => "flow",
     "task" => "flow"
@@ -15,7 +17,11 @@ defmodule Foreman.SessionPrompt do
       Keyword.get(
         opts,
         :directory,
-        Path.expand("~/.agents/skills/foreman/templates/session-launch")
+        Application.get_env(
+          :foreman,
+          :session_prompt_directory,
+          Path.expand("~/.agents/skills/foreman/templates/session-launch")
+        )
       )
 
     fallback = """

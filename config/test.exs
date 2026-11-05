@@ -3,6 +3,7 @@ import Config
 config :foreman,
   runtime_enabled: false,
   session_prompt_fallback: true,
+  session_prompt_directory: Path.expand("../test/fixtures/session-launch", __DIR__),
   config_directory: "/tmp/bb-exec/test-config"
 
 # Jobs are inserted into the SQL sandbox and explicitly executed by tests.

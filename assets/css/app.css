@@ -13,6 +13,7 @@
 html[data-theme=light] { color-scheme: light; }
 html[data-theme=dark] { color-scheme: dark; }
 body { margin: 0; background: var(--background-base); }
+.bb-launch-control { white-space: nowrap; }
 .bb-panel { border: 1px solid var(--border-base); border-radius: 10px; background: var(--surface); padding: 16px; box-shadow: var(--shadow-base); }
 .bb-drawer-list { border: 1px solid var(--border-base); border-radius: 10px; overflow: hidden; }
 .bb-drawer-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 24px; padding: 12px 14px; border-bottom: 1px solid var(--border-base); transition: background .15s; }
