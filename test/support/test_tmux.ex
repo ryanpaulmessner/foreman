@@ -1,6 +1,9 @@
 defmodule Foreman.TestTmux do
   @moduledoc "Owns uniquely named test servers and their socket files."
 
+  @doc "The default pane capture runner in tests: tmux does not answer."
+  def no_capture(_command, _args, _opts), do: {"no tmux in tests", 1}
+
   def socket(prefix) do
     name = prefix <> "-" <> Ecto.UUID.generate()
     ExUnit.Callbacks.on_exit(fn -> cleanup(name) end)
