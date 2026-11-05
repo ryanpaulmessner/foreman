@@ -23,6 +23,7 @@ defmodule ForemanWeb.Router do
     live_session :foreman, on_mount: ForemanWeb.RequestCount do
       live "/needs-you", NeedsYouLive, :index
       live "/answers", AnswersLive, :index
+      live "/sessions", SessionsLive, :index
       live "/sessions/:id", SessionLive, :show
       live "/", InitiativesLive, :index
       live "/settings", SettingsLive, :index
