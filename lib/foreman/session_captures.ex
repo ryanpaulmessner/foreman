@@ -70,10 +70,13 @@ defmodule Foreman.SessionCaptures do
   Captures `row`'s pane now and saves it with `reason` (`:stop` or `:park`): the save Stop
   and Park run before they close the pane. Returns `{:ok, capture}` or
   `{:error, :tmux_unavailable}`; the caller decides whether to close the pane anyway.
-  Options go to `Foreman.PaneCapture.read/2`.
+  `:target` reads that `%{socket, target}` instead of the row's stored target (the
+  controls pass the pane they checked); other options go to `Foreman.PaneCapture.read/2`.
   """
   def capture(%AgentSession{} = row, reason, opts \\ []) when reason in [:stop, :park] do
-    with {:ok, output} <- PaneCapture.read(PaneCapture.target(row), opts),
+    target = Keyword.get_lazy(opts, :target, fn -> PaneCapture.target(row) end)
+
+    with {:ok, output} <- PaneCapture.read(target, opts),
          do: save(row.id, output, reason)
   end
 

@@ -16,6 +16,15 @@ body { margin: 0; background: var(--background-base); }
 .bb-launch-control { white-space: nowrap; }
 .bb-panel { border: 1px solid var(--border-base); border-radius: 10px; background: var(--surface); padding: 16px; box-shadow: var(--shadow-base); }
 .bb-session-panel { padding: 0; overflow: hidden; }
+/* Session page controls (spec Decision 17): buttons size to their labels and never wrap; Stop sits apart at the right end. */
+.bb-session-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.bb-session-controls > *, .bb-session-control { flex: none; white-space: nowrap; }
+.bb-session-stop { margin-left: auto; }
+.bb-session-confirm { border-left: 3px solid var(--danger); }
+.bb-session-message { display: flex; align-items: flex-end; gap: 8px; }
+.bb-session-message .fieldset { margin-bottom: 0; }
+.bb-session-message button { flex: none; white-space: nowrap; margin-bottom: 4px; }
+.bb-session-stale { opacity: .55; }
 .bb-session-filter .label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .bb-session-filter .fieldset { margin: 0; }
 @media (min-width: 1101px) { .bb-sessions .bb-session-show-all-narrow { display: none; } }
