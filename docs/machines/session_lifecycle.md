@@ -33,6 +33,8 @@ stateDiagram-v2
 | none | launch | -> starting | write(row), open(window) |
 | none | register | -> starting | write(row) |
 | none | continue | invalid |  |
+| none | focus | invalid |  |
+| none | message | invalid |  |
 | none | resume_on_model | invalid |  |
 | none | park | invalid |  |
 | none | stop | invalid |  |
@@ -52,6 +54,8 @@ stateDiagram-v2
 | starting | launch | invalid |  |
 | starting | register | invalid |  |
 | starting | continue | invalid |  |
+| starting | focus | stay | show(pane) |
+| starting | message | invalid |  |
 | starting | resume_on_model | invalid |  |
 | starting | park [parkable?] | -> parked | save(capture), close(pane) |
 | starting | park | invalid |  |
@@ -73,6 +77,8 @@ stateDiagram-v2
 | working | launch | invalid |  |
 | working | register | invalid |  |
 | working | continue | invalid |  |
+| working | focus | stay | show(pane) |
+| working | message | invalid |  |
 | working | resume_on_model | invalid |  |
 | working | park [parkable?] | -> parked | save(capture), close(pane) |
 | working | park | invalid |  |
@@ -94,6 +100,8 @@ stateDiagram-v2
 | idle | launch | invalid |  |
 | idle | register | invalid |  |
 | idle | continue | invalid |  |
+| idle | focus | stay | show(pane) |
+| idle | message | stay | send(message) |
 | idle | resume_on_model | invalid |  |
 | idle | park [parkable?] | -> parked | save(capture), close(pane) |
 | idle | park | invalid |  |
@@ -115,6 +123,8 @@ stateDiagram-v2
 | waiting_question | launch | invalid |  |
 | waiting_question | register | invalid |  |
 | waiting_question | continue | invalid |  |
+| waiting_question | focus | stay | show(pane) |
+| waiting_question | message | stay | send(message) |
 | waiting_question | resume_on_model | invalid |  |
 | waiting_question | park [parkable?] | -> parked | save(capture), close(pane) |
 | waiting_question | park | invalid |  |
@@ -136,6 +146,8 @@ stateDiagram-v2
 | waiting_permission | launch | invalid |  |
 | waiting_permission | register | invalid |  |
 | waiting_permission | continue | invalid |  |
+| waiting_permission | focus | stay | show(pane) |
+| waiting_permission | message | invalid |  |
 | waiting_permission | resume_on_model | invalid |  |
 | waiting_permission | park [parkable?] | -> parked | save(capture), close(pane) |
 | waiting_permission | park | invalid |  |
@@ -157,6 +169,8 @@ stateDiagram-v2
 | waiting_usage_limit | launch | invalid |  |
 | waiting_usage_limit | register | invalid |  |
 | waiting_usage_limit | continue | stay | send(continue) |
+| waiting_usage_limit | focus | stay | show(pane) |
+| waiting_usage_limit | message | invalid |  |
 | waiting_usage_limit | resume_on_model [pi_build?] | -> starting | save(capture), stop(process), resume(model) |
 | waiting_usage_limit | resume_on_model | invalid |  |
 | waiting_usage_limit | park [parkable?] | -> parked | save(capture), close(pane) |
@@ -179,6 +193,8 @@ stateDiagram-v2
 | parked | launch | invalid |  |
 | parked | register | invalid |  |
 | parked | continue | invalid |  |
+| parked | focus | invalid |  |
+| parked | message | invalid |  |
 | parked | resume_on_model | invalid |  |
 | parked | park | invalid |  |
 | parked | stop | invalid |  |
@@ -200,6 +216,8 @@ stateDiagram-v2
 | ended | launch | invalid |  |
 | ended | register | invalid |  |
 | ended | continue | invalid |  |
+| ended | focus | invalid |  |
+| ended | message | invalid |  |
 | ended | resume_on_model | invalid |  |
 | ended | park | invalid |  |
 | ended | stop | invalid |  |
