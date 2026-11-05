@@ -2,7 +2,7 @@
 id: fm-9mm.22
 title: "Idle-timeout park closes the whole coordinator window, builds included"
 type: bug
-status: open
+status: in_progress
 priority: 2
 parent: fm-9mm
 blocked_by: []

@@ -2,7 +2,7 @@
 id: fm-9mm.15
 title: "Session page: ended-session controls (Resume, Relaunch build, Start fresh) and answers to ended sessions"
 type: task
-status: open
+status: in_progress
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.14"]
