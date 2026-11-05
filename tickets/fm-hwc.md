@@ -23,3 +23,6 @@ Suspects, not checked: the code reloader recompiling after merges into ~/dev/for
 - [ ] Root cause found and named (board log, Postgres stats).
 - [ ] "event not saved" is only printed when the request is really not saved (test).
 - [ ] No CLI request fails during a normal hour with 10 working sessions (measured).
+
+## Notes
+- 2026-11-05 claude: 2026-11-05 18:29: ask review_ui printed 'foreman and spool unavailable; event not saved' but request 687c8bbb was saved and pending in approval_requests. The warning is wrong in this case too; the board answered 200 at the same time.
