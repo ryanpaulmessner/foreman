@@ -2,7 +2,7 @@
 id: fm-9mm.17
 title: "Sessions page: the Tree with the Waiting on you strip"
 type: task
-status: open
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.10","fm-9mm.12"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-05
+close_reason: "PR #19 merged; deployed 2026-11-05, /sessions 200 with the nav link"
 ---
 
 Spec: `docs/specs/sessions-view.md` (approved 2026-11-03, card cfb2bce5). Design pack: `docs/specs/sessions-view.design.md`. The spec's Non-goals, Ask-first boundaries and copy tables apply to every ticket.

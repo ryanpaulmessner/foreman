@@ -4,6 +4,9 @@ defmodule Foreman.TestTmux do
   @doc "The default pane capture runner in tests: tmux does not answer."
   def no_capture(_command, _args, _opts), do: {"no tmux in tests", 1}
 
+  @doc "The session page's default tmux in tests: it answers, and has no panes."
+  def no_panes(_command, _args, _opts), do: {"", 0}
+
   def socket(prefix) do
     name = prefix <> "-" <> Ecto.UUID.generate()
     ExUnit.Callbacks.on_exit(fn -> cleanup(name) end)

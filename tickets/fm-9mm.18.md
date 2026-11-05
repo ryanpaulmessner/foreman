@@ -2,7 +2,7 @@
 id: fm-9mm.18
 title: "One-click Launch coordinator on epics"
 type: task
-status: open
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.12","fm-9mm.9"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-05
+close_reason: "PR #18 merged (42ef2dc); skills template in skills PR #2; deployed 2026-11-05, epic page shows the controls"
 ---
 
 Spec: `docs/specs/sessions-view.md` (approved 2026-11-03, card cfb2bce5). Design pack: `docs/specs/sessions-view.design.md`. The spec's Non-goals, Ask-first boundaries and copy tables apply to every ticket.

@@ -18,6 +18,8 @@ defmodule Foreman.SessionLifecycleTest do
     :launch,
     :register,
     :continue,
+    :focus,
+    :message,
     :resume_on_model,
     :park,
     :stop,
@@ -84,6 +86,24 @@ defmodule Foreman.SessionLifecycleTest do
 
     test "waiting.permission prompt_cleared -> working, clearing the request" do
       assert M.step(:waiting_permission, :prompt_cleared, %{}) == {:working, [clear: :request]}
+    end
+
+    test "any live focus stays and shows this pane (Decision 17)" do
+      for state <- @live,
+          kind <- @kinds,
+          do: assert(M.step(state, :focus, data(kind)) == {state, [show: :pane]})
+    end
+
+    test "idle, waiting.question message stays and types into this pane (Decision 17)" do
+      for state <- [:idle, :waiting_question],
+          kind <- @kinds,
+          do: assert(M.step(state, :message, data(kind)) == {state, [send: :message]})
+
+      for state <- [:starting, :working, :waiting_permission, :waiting_usage_limit],
+          do:
+            assert(
+              M.step(state, :message, data("build")) == {:error, {:invalid, state, :message}}
+            )
     end
 
     test "waiting.usage_limit continue stays and sends continue to this pane" do
@@ -186,10 +206,12 @@ defmodule Foreman.SessionLifecycleTest do
         {:waiting_question, :last_card_closed},
         {:waiting_permission, :prompt_cleared},
         {:waiting_usage_limit, :continue},
-        {:waiting_usage_limit, :output_changed}
+        {:waiting_usage_limit, :output_changed},
+        {:idle, :message},
+        {:waiting_question, :message}
       ]
       |> Kernel.++(for s <- @active, e <- [:asked, :permission_prompt, :usage_limit], do: {s, e})
-      |> Kernel.++(for s <- @live, e <- [:stop, :pane_gone, :exited], do: {s, e})
+      |> Kernel.++(for s <- @live, e <- [:stop, :focus, :pane_gone, :exited], do: {s, e})
       |> Kernel.++(
         if kind == "epic_coordinator",
           do: for(s <- @live, e <- [:park, :idle_timeout], do: {s, e}),
@@ -213,8 +235,8 @@ defmodule Foreman.SessionLifecycleTest do
   end
 
   describe "rules the machine owns (Decision 8)" do
-    test "R3: a dead session refuses Continue, Park and Stop" do
-      for state <- @dead, event <- [:continue, :park, :stop], kind <- @kinds do
+    test "R3: a dead session refuses Focus, Send message, Continue, Park and Stop" do
+      for state <- @dead, event <- [:focus, :message, :continue, :park, :stop], kind <- @kinds do
         assert M.step(state, event, data(kind)) == {:error, {:invalid, state, event}}
       end
     end

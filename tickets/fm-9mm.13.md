@@ -2,7 +2,7 @@
 id: fm-9mm.13
 title: "Session page: recent output and saved output"
 type: task
-status: open
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.12"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-05
+close_reason: "PR #17 merged (72a31dd); deployed 2026-11-05 with session_captures migration; live session page 200"
 ---
 
 Spec: `docs/specs/sessions-view.md` (approved 2026-11-03, card cfb2bce5). Design pack: `docs/specs/sessions-view.design.md`. The spec's Non-goals, Ask-first boundaries and copy tables apply to every ticket.

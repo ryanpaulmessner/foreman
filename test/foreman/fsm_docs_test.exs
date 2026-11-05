@@ -61,7 +61,8 @@ defmodule Foreman.FsmDocsTest do
         {"priority_override", Foreman.PriorityOverride},
         {"close_out_nag", Foreman.CloseOutNag},
         {"card_list", Foreman.CardList},
-        {"pane_reader", Foreman.PaneReader}
+        {"pane_reader", Foreman.PaneReader},
+        {"session_control_panel", Foreman.SessionControlPanel}
       ] do
     test "#{name} documentation matches the committed golden" do
       module = unquote(module)
