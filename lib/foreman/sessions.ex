@@ -485,6 +485,9 @@ defmodule Foreman.Sessions do
   end
 
   defp park_if_idle(%{state: state} = session, opts) when state in [:running, :waiting, :ended] do
+    identity = AgentSessions.get(session.session_id)
+    opts = Keyword.put(opts, :pane, identity && identity.pane_id)
+
     case idle_result(session, opts) do
       :parked -> transition(session, :idle_timeout)
       {:active, now} -> save(session, %{last_activity_at: now})
