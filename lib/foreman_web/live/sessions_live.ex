@@ -315,7 +315,7 @@ defmodule ForemanWeb.SessionsLive do
           <%= case @result do %>
             <% {:note, count, skipped} -> %>
               <ForemanWeb.StatusLine.status_line id="note-result" kind={:success} class="mb-3">
-                Sent to {count} coordinators.
+                Sent to {count} {if count == 1, do: "coordinator", else: "coordinators"}.
               </ForemanWeb.StatusLine.status_line>
               <ForemanWeb.StatusLine.status_line
                 :if={skipped != []}

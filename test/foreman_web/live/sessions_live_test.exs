@@ -122,7 +122,7 @@ defmodule ForemanWeb.SessionsLiveTest do
     {:ok, view, _} = live(conn, "/sessions")
     view |> element("#note-coordinators") |> render_click()
     view |> form("#coordinator-note-form", note: %{text: "Check reports"}) |> render_submit()
-    assert has_element?(view, "#note-result", "Sent to 1 coordinators.")
+    assert has_element?(view, "#note-result", "Sent to 1 coordinator.")
 
     assert_receive {:keys,
                     [
