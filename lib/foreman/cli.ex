@@ -145,6 +145,9 @@ defmodule Foreman.CLI do
           end
 
         cond do
+          request["action"] == "session_capture" and code == 0 and is_nil(body["warning"]) ->
+            :ok
+
           request["action"] == "wait" or json? ->
             IO.puts(Jason.encode!(body))
 
@@ -253,6 +256,42 @@ defmodule Foreman.CLI do
   end
 
   defp tmux_pane(defaults), do: defaults[:tmux_pane] || System.get_env("TMUX_PANE")
+
+  # The exit save (spec Decision 15): the launch command runs this in the agent's own pane
+  # after the agent ends. tmux finds its server from `$TMUX`.
+  defp session_capture(opts, defaults) do
+    pane = opts[:pane] || tmux_pane(defaults)
+    capture = Keyword.get(defaults, :capture_pane, &capture_pane/1)
+
+    with true <- is_binary(pane) and Regex.match?(~r/\A%\d+\z/, pane),
+         {:ok, output} <- capture.(pane) do
+      identity = tmux_identity(Keyword.put(defaults, :tmux_pane, pane))
+
+      {:ok,
+       %{
+         request:
+           Map.merge(identity, %{
+             "action" => "session_capture",
+             "session" => opts[:name] || System.get_env("FOREMAN_SESSION"),
+             "output" => output,
+             "transient" => true
+           }),
+         json: opts[:json] || false
+       }}
+    else
+      false -> {:error, "session capture needs --pane <%id> outside tmux"}
+      _ -> {:error, "Cannot read pane #{pane}. Nothing was saved."}
+    end
+  end
+
+  defp capture_pane(pane) do
+    case System.cmd("tmux", Foreman.PaneCapture.args(pane)) do
+      {output, 0} -> {:ok, String.replace_invalid(output)}
+      _ -> :error
+    end
+  rescue
+    ErlangError -> :error
+  end
 
   # The asking (or dispatching) pane and its tmux server, so the board can find the
   # session row behind it. `$TMUX` is "<socket path>,<pid>,<session>".
@@ -464,6 +503,9 @@ defmodule Foreman.CLI do
           {:error,
            "session register requires --name <name> --workdir <absolute-path> --harness claude|pi, and --pane <%id> outside tmux"}
         end
+
+      {[], ["session", "capture"]} ->
+        session_capture(opts, defaults)
 
       {[], ["ask", "update", id]} when kind == "ticket" ->
         fields =

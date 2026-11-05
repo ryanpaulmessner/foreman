@@ -2,7 +2,7 @@
 id: fm-zgd.17.4
 title: "Question cards: request drawer shows rows that open the card on Needs you"
 type: task
-status: in_progress
+status: closed
 priority: 2
 parent: fm-zgd.17
 blocked_by: ["fm-zgd.17.3"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-04
+close_reason: "Merged in PR #15 (ff4129a); live 2026-11-04; screenshots approved on card 1f0738f3"
 ---
 
 Spec: `docs/specs/question-cards.md` (approved 2026-11-03, card 63a4319f). Design pack: `docs/specs/question-cards.design.md`. Mockup: https://claude.ai/artifact/KkSwALbmBHC1TZg1vJf3jW (option C). The spec's Non-goals, Ask-first boundaries and copy apply to every ticket. Desktop only: 1440 and 820, light and dark.

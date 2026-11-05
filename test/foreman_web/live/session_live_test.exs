@@ -153,6 +153,51 @@ defmodule ForemanWeb.SessionLiveTest do
     assert has_element?(view, "#session-state-label", "Ended")
   end
 
+  describe "coordinators have no review rounds (fm-9mm.21)" do
+    for kind <- ~w(main_coordinator epic_coordinator) do
+      test "a working #{kind} shows no round", %{conn: conn} do
+        row =
+          agent_session(name: "coord-#{unquote(kind)}", kind: unquote(kind), harness: "claude")
+
+        {:ok, row, _} = Foreman.AgentSessions.fire(row, :output_changed)
+        {:ok, view, _} = live(conn, "/sessions/#{row.id}")
+        assert has_element?(view, "#session-state-label", "Working")
+        assert has_element?(view, "#session-next-step", "Working.")
+        refute has_element?(view, "#session-next-step", "round")
+        refute has_element?(view, "#session-state-second", "Round")
+      end
+    end
+
+    test "a coordinator's timeline lists its events without rounds", %{conn: conn} do
+      row = agent_session(name: "coord-timeline", kind: "epic_coordinator", harness: "claude")
+
+      card =
+        Foreman.Repo.insert!(%Foreman.Requests.Request{
+          repo_key: "sample",
+          bead_id: "s-1",
+          kind: "decision",
+          actor: "claude",
+          state: "pending",
+          agent_session_id: row.id,
+          facts: %{"question" => "Which epic first?"}
+        })
+
+      {:ok, view, _} = live(conn, "/sessions/#{row.id}?tab=timeline")
+      assert has_element?(view, "#session-round-1-events")
+      assert has_element?(view, "#session-round-1-events a[href*='#{card.id}']")
+      refute has_element?(view, "#session-round-1-toggle")
+      refute has_element?(view, "#session-timeline", "Round")
+    end
+
+    test "a working build keeps its round", %{conn: conn} do
+      row = agent_session()
+      {:ok, row, _} = Foreman.AgentSessions.fire(row, :output_changed)
+      {:ok, view, _} = live(conn, "/sessions/#{row.id}")
+      assert has_element?(view, "#session-next-step", "Working on round 1.")
+      assert has_element?(view, "#session-state-second", "Round 1")
+    end
+  end
+
   test "unknown id shows the breadcrumb and plain text", %{conn: conn} do
     {:ok, view, _} = live(conn, "/sessions/not-an-id")
     assert has_element?(view, "#session-breadcrumb")

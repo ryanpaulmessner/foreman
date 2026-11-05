@@ -1,7 +1,8 @@
 defmodule ForemanWeb.SessionLive do
   use ForemanWeb, :live_view
-  alias Foreman.{AgentSessions, RequestSource, SessionPage, SessionHistory}
-  alias ForemanWeb.SessionState
+  alias Foreman.{AgentSessions, PaneCapture, PaneReader, RequestSource, SessionPage}
+  alias Foreman.{SessionCaptures, SessionHistory}
+  alias ForemanWeb.{AnsiHtml, SessionState}
   import ForemanWeb.TicketDetail, only: [timestamp: 1]
 
   def mount(_, _, socket) do
@@ -12,7 +13,10 @@ defmodule ForemanWeb.SessionLive do
 
     {:ok,
      socket
-     |> assign(disclosures: %{})
+     |> assign(disclosures: %{}, connected: connected?(socket), visible: true)
+     |> assign(reader: PaneReader.__fsm__(:initial), reader_data: PaneReader.data())
+     |> assign(timer: nil, capturing: false, captured: nil, shown: nil, retry_result: nil)
+     |> assign(saved: nil)
      |> stream_configure(:rounds, dom_id: &"session-round-#{&1.id}")}
   end
 
@@ -25,6 +29,32 @@ defmodule ForemanWeb.SessionLive do
     Process.send_after(self(), :reconcile, 3_000)
     {:noreply, refresh(socket)}
   end
+
+  def handle_info(:pane_tick, socket),
+    do: {:noreply, socket |> assign(timer: nil) |> read(:tick)}
+
+  # The pane reader (spec Decision 14): the capture runs outside the page process.
+  def handle_async(:pane_capture, {:ok, {:ok, text}}, socket) do
+    hash = PaneCapture.hash(text)
+
+    socket
+    |> assign(capturing: false, captured: {text, hash})
+    |> read({:captured, %{hash: hash, at: DateTime.utc_now()}})
+    |> then(&{:noreply, &1})
+  end
+
+  def handle_async(:pane_capture, _failed, socket) do
+    socket
+    |> assign(capturing: false)
+    |> read(:failed)
+    |> then(&{:noreply, &1})
+  end
+
+  def handle_event("output-visibility", %{"visible" => visible}, socket),
+    do: {:noreply, socket |> assign(visible: visible == true) |> view_pane()}
+
+  def handle_event("retry-output", _, socket),
+    do: {:noreply, read(socket, :retry)}
 
   def handle_event("toggle-round", %{"round" => round}, socket) do
     case Integer.parse(round) do
@@ -51,6 +81,14 @@ defmodule ForemanWeb.SessionLive do
   defp refresh(socket) do
     row = AgentSessions.get(socket.assigns.session_id)
     rounds = if row, do: SessionHistory.rounds(row), else: []
+    # Coordinators have no review rounds (fm-9mm.21): one ungrouped list.
+    grouped = not is_nil(row) and row.kind == "build"
+
+    rounds =
+      if grouped or rounds == [],
+        do: rounds,
+        else: [%{id: 1, events: Enum.flat_map(rounds, & &1.events)}]
+
     number = max(length(rounds), 1)
     parent = row && AgentSessions.get(row.parent_id)
     resumable = row && AgentSessions.resumable?(row)
@@ -61,7 +99,8 @@ defmodule ForemanWeb.SessionLive do
           row
           |> AgentSessions.label_facts()
           |> Map.merge(%{
-            round: number,
+            # Coordinators have no review rounds (fm-9mm.21).
+            round: if(row.kind == "build", do: number),
             coordinator: parent && parent.name,
             resumable: resumable,
             output_at: row.output_at
@@ -85,15 +124,15 @@ defmodule ForemanWeb.SessionLive do
     rounds =
       Enum.map(
         rounds,
-        &Map.put(
-          &1,
-          :open,
-          Map.get(
-            socket.assigns.disclosures,
-            &1.id,
-            if(&1.id == number, do: :expanded, else: :collapsed)
-          ) == :expanded
-        )
+        &Map.merge(&1, %{
+          grouped: grouped,
+          open:
+            Map.get(
+              socket.assigns.disclosures,
+              &1.id,
+              if(&1.id == number, do: :expanded, else: :collapsed)
+            ) == :expanded
+        })
       )
 
     socket
@@ -108,10 +147,84 @@ defmodule ForemanWeb.SessionLive do
       card: List.first(cards),
       provider: provider(cards),
       resumable: resumable,
-      repos: Foreman.RuntimeState.repos()
+      repos: Foreman.RuntimeState.repos(),
+      saved: if(row && row.ended_at && tab == :output, do: SessionCaptures.get(row.id))
     )
     |> stream(:rounds, rounds, reset: true)
+    |> view_pane()
   end
+
+  def terminate(_reason, socket), do: read(socket, :closed)
+
+  # What the page shows decides whether the pane is read (spec Decision 14).
+  defp view_pane(%{assigns: %{row: row}} = socket) do
+    if socket.assigns.connected and row do
+      read(
+        socket,
+        {:view,
+         %{
+           live: is_nil(row.ended_at),
+           shown: socket.assigns.tab == :output,
+           visible: socket.assigns.visible
+         }}
+      )
+    else
+      socket
+    end
+  end
+
+  defp view_pane(socket), do: socket
+
+  defp read(socket, event) do
+    case PaneReader.step(socket.assigns.reader, event, socket.assigns.reader_data) do
+      {:error, _} -> socket
+      {state, effects} -> Enum.reduce(effects, assign(socket, :reader, state), &reader_effect/2)
+    end
+  end
+
+  defp reader_effect({:capture, :pane}, %{assigns: %{capturing: true}} = socket), do: socket
+
+  defp reader_effect({:capture, :pane}, socket) do
+    target = PaneCapture.target(socket.assigns.row)
+
+    socket
+    |> assign(:capturing, true)
+    |> start_async(:pane_capture, fn -> PaneCapture.read(target) end)
+  end
+
+  defp reader_effect({:timer, kind}, socket) do
+    socket = reader_effect({:cancel, :timer}, socket)
+    delay = if kind == :retry, do: 5_000, else: 1_000
+    assign(socket, :timer, Process.send_after(self(), :pane_tick, delay))
+  end
+
+  defp reader_effect({:cancel, :timer}, socket) do
+    if socket.assigns.timer, do: Process.cancel_timer(socket.assigns.timer)
+    assign(socket, :timer, nil)
+  end
+
+  defp reader_effect({:push, :output}, %{assigns: %{captured: {text, hash}}} = socket) do
+    socket
+    |> assign(shown: text, retry_result: nil)
+    |> update(:reader_data, &%{&1 | hash: hash})
+  end
+
+  defp reader_effect({:push, :error}, socket), do: assign(socket, :retry_result, nil)
+
+  defp reader_effect({:push, :still_down}, socket),
+    do: assign(socket, :retry_result, "tmux still does not answer.")
+
+  defp reader_effect({:save, :capture}, %{assigns: %{shown: text, row: row}} = socket)
+       when is_binary(text) do
+    at = DateTime.utc_now()
+
+    case SessionCaptures.save(row.id, text, :poll, at) do
+      {:ok, _} -> update(socket, :reader_data, &%{&1 | saved_hash: &1.hash, saved_at: at})
+      _ -> socket
+    end
+  end
+
+  defp reader_effect(_, socket), do: socket
 
   defp provider(cards) do
     case Enum.find(cards, &(&1.facts["reason"] == "usage_limit")) do
@@ -147,6 +260,117 @@ defmodule ForemanWeb.SessionLive do
     do: "Send message (Use Continue at a usage limit.)"
 
   defp unavailable(_), do: "Continue (Only after a usage limit.)"
+
+  @saved_lines %{
+    "exit" => ", when the pane closed",
+    "poll" => " from the last check",
+    "stop" => ", when you pressed Stop",
+    "park" => ", when the session was parked"
+  }
+
+  attr :row, :map, required: true
+  attr :reader, :atom, required: true
+  attr :shown, :string, doc: "the last capture shown, raw"
+  attr :saved, :map, doc: "the session_captures row of a dead session"
+  attr :retry_result, :string
+
+  # Recent output (spec Decisions 14-15): live while the pane exists, saved after.
+  defp output(%{row: %{ended_at: nil}} = assigns) do
+    ~H"""
+    <section
+      id="session-output"
+      phx-hook=".PaneOutput"
+      class={["bb-term", @reader in [:tmux_error, :retrying] && "bb-term-stale"]}
+    >
+      <div :if={@reader in [:tmux_error, :retrying]} id="session-output-head" class="bb-term-head">
+        <span class="bb-dot bb-term-warn" aria-hidden="true"></span>
+        <span id="session-output-error">Cannot read the terminal: tmux does not answer.</span>
+        <span :if={@retry_result} id="session-output-retry-result">{@retry_result}</span>
+        <button
+          id="session-output-retry"
+          type="button"
+          phx-click="retry-output"
+          phx-disable-with="Trying…"
+          class="bb-term-btn"
+        >
+          Try again now
+        </button>
+      </div>
+      <%= cond do %>
+        <% is_nil(@shown) and @reader not in [:tmux_error, :retrying] -> %>
+          <div id="session-output-loading" class="bb-term-pad" aria-busy="true">
+            <p class="bb-term-note">Reading the terminal…</p>
+            <span
+              :for={width <- [80, 64, 72, 40, 90, 55]}
+              class="bb-skel bb-term-skel"
+              style={"width: #{width}%"}
+            >
+            </span>
+          </div>
+        <% is_nil(@shown) -> %>
+        <% AnsiHtml.blank?(@shown) -> %>
+          <p id="session-output-empty" class="bb-term-pad bb-term-note">No output yet.</p>
+        <% true -> %>
+          <pre
+            id="session-output-body"
+            class="bb-term-body"
+            tabindex="0"
+            aria-label="Recent output"
+            data-scroll-end
+          >{AnsiHtml.to_html(@shown)}</pre>
+      <% end %>
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".PaneOutput">
+        export default {
+          mounted() {
+            this.onVisibility = () =>
+              this.pushEvent("output-visibility", {visible: document.visibilityState === "visible"})
+            document.addEventListener("visibilitychange", this.onVisibility)
+            this.onVisibility()
+            this.pin()
+          },
+          reconnected() { this.onVisibility() },
+          beforeUpdate() {
+            const body = this.body()
+            this.atEnd = !body || body.scrollHeight - body.scrollTop - body.clientHeight < 24
+          },
+          updated() { if (this.atEnd) this.pin() },
+          destroyed() { document.removeEventListener("visibilitychange", this.onVisibility) },
+          body() { return this.el.querySelector("[data-scroll-end]") },
+          pin() {
+            const body = this.body()
+            if (body) body.scrollTop = body.scrollHeight
+          }
+        }
+      </script>
+    </section>
+    """
+  end
+
+  defp output(assigns) do
+    assigns = assign(assigns, :saved_line, assigns.saved && @saved_lines[assigns.saved.reason])
+
+    ~H"""
+    <section id="session-output" phx-hook=".PaneOutput" class="bb-term">
+      <%= if @saved && !AnsiHtml.blank?(@saved.output) do %>
+        <div id="session-output-head" class="bb-term-head">
+          <span class="bb-dot bb-dot-off" aria-hidden="true"></span>
+          <span>Saved <.timestamp at={@saved.captured_at} />{@saved_line}</span>
+        </div>
+        <pre
+          id="session-output-body"
+          class="bb-term-body"
+          tabindex="0"
+          aria-label="Recent output"
+          data-scroll-end
+        >{AnsiHtml.to_html(@saved.output)}</pre>
+      <% else %>
+        <p id="session-output-empty" class="bb-term-pad bb-term-note">
+          No output was saved for this session.
+        </p>
+      <% end %>
+    </section>
+    """
+  end
 
   def render(assigns) do
     ~H"""
@@ -186,8 +410,12 @@ defmodule ForemanWeb.SessionLive do
               <SessionState.badge id="session-state" view={@state} />
               <span class="font-mono">{@row.name}</span><span>{@source.role}</span>
               <span :if={is_nil(@row.ended_at)} id="session-live-line" class="bb-session-live">
-                <span class="bb-dot mr-1" aria-hidden="true"></span>Live · updated
-                <.timestamp at={@row.last_seen_at || @row.started_at} />
+                <%= if @connected do %>
+                  <span class="bb-dot mr-1" aria-hidden="true"></span>Live · updated
+                  <.timestamp at={@row.last_seen_at || @row.started_at} />
+                <% else %>
+                  <span class="bb-dot bb-dot-grey mr-1" aria-hidden="true"></span>Connecting…
+                <% end %>
               </span>
             </div>
           </header>
@@ -233,6 +461,9 @@ defmodule ForemanWeb.SessionLive do
               <% @state.label == "Idle" -> %>
                 <h2 class="font-semibold">Idle.</h2>
                 <p>Nothing waits on you.</p>
+              <% @row.kind != "build" -> %>
+                <h2 class="font-semibold">Working.</h2>
+                <p>Nothing waits on you.</p>
               <% true -> %>
                 <h2 class="font-semibold">Working on round {@round}.</h2>
                 <p>Nothing waits on you.</p>
@@ -266,9 +497,14 @@ defmodule ForemanWeb.SessionLive do
               {label}
             </.link>
           </nav>
-          <section :if={@tab == :output} id="session-output" class="bb-panel text-foreground-softer">
-            Recent output is not available yet.
-          </section>
+          <.output
+            :if={@tab == :output}
+            row={@row}
+            reader={@reader}
+            shown={@shown}
+            saved={@saved}
+            retry_result={@retry_result}
+          />
           <section :if={@tab == :timeline} id="session-timeline">
             <div id="session-rounds" phx-update="stream" class="space-y-3">
               <p id="session-no-events" class="hidden only:block text-foreground-softer">
@@ -276,6 +512,7 @@ defmodule ForemanWeb.SessionLive do
               </p>
               <section :for={{id, round} <- @streams.rounds} id={id} class="bb-panel">
                 <button
+                  :if={round.grouped}
                   id={"session-round-#{round.id}-toggle"}
                   type="button"
                   phx-click="toggle-round"
@@ -290,9 +527,9 @@ defmodule ForemanWeb.SessionLive do
                   /> Round {round.id}
                 </button>
                 <ol
-                  :if={round.open}
+                  :if={round.open or not round.grouped}
                   id={"session-round-#{round.id}-events"}
-                  class="mt-4 space-y-4 border-l border-base pl-5"
+                  class={["space-y-4 border-l border-base pl-5", round.grouped && "mt-4"]}
                 >
                   <li :for={event <- round.events} id={"session-event-#{event.id}"} class="space-y-1">
                     <div class="flex flex-wrap items-center gap-3">
