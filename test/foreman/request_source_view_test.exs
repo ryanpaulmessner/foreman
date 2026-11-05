@@ -40,7 +40,7 @@ defmodule Foreman.RequestSourceViewTest do
         do: assert(RequestSource.view(request(row)).link == "/sessions/#{row.id}")
   end
 
-  test "ended: the end time, Focus off, and no receiver or resume until those ship" do
+  test "ended with no coordinator and no resume: the end time, Focus off, no receiver" do
     row = agent_session(name: "sb-notify", pane_id: "%9") |> Foreman.AgentSessions.end_session()
 
     assert %{

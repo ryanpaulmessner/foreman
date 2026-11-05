@@ -84,6 +84,26 @@ defmodule ForemanWeb.CardLinesTest do
       assert %{before: nil, after: "The board starts it now."} =
                CardLines.result_info("approve", request(kind: "push"), %{}, @unknown)
     end
+
+    test "an answer to an ended session names where it went (R9); other actions do not" do
+      req = request([])
+      note = %{state: :ended, name: "b", receiver: "fm-epic", resumes: false}
+      resumes = %{state: :ended, name: "b", receiver: nil, resumes: true}
+
+      for action <- ~w(answer batch-answer) do
+        assert %{before: "Sent to fm-epic ", after: ", as a note with the question."} =
+                 CardLines.result_info(action, req, %{}, note)
+
+        assert %{before: "Sent to b ", after: ". The board resumed it first."} =
+                 CardLines.result_info(action, req, %{}, resumes)
+      end
+
+      for action <- ~w(decline wrong-question complete),
+          view <- [note, resumes] do
+        assert %{before: "Saved ", after: ". The session that asked has ended" <> _} =
+                 CardLines.result_info(action, req, %{}, view)
+      end
+    end
   end
 
   test "error line sentences (Decision 32)" do
@@ -95,5 +115,31 @@ defmodule ForemanWeb.CardLinesTest do
 
     assert %{lead: "Done was not saved.", reason: "The board could not save it.", kept: nil} =
              CardLines.error_info("r-1", "complete", :boom, "chore", %{})
+  end
+
+  test "an answer that could not reach an ended session's receiver (R9)" do
+    for {why, words} <- [
+          {:prompt_busy, "fm-epic is busy"},
+          {:window_gone, "the pane of fm-epic is closed"},
+          {:tmux_unavailable, "tmux does not answer"},
+          {:coordinator_not_resumable, "fm-epic cannot resume"},
+          {"refused in preview", "this preview does not write to tmux"},
+          {:boom, "the board could not reach fm-epic"}
+        ] do
+      assert %{
+               lead: "Your answer was not sent.",
+               reason: reason,
+               kept: "Your choice and note are still here."
+             } =
+               CardLines.error_info(
+                 "r-1",
+                 "answer",
+                 {:not_delivered, "fm-epic", why},
+                 "decision",
+                 %{}
+               )
+
+      assert reason == "The board could not send it: #{words}. The card stays open."
+    end
   end
 end

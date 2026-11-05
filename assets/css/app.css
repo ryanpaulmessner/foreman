@@ -21,6 +21,7 @@ body { margin: 0; background: var(--background-base); }
 .bb-session-controls > *, .bb-session-control { flex: none; white-space: nowrap; }
 .bb-session-stop { margin-left: auto; }
 .bb-session-confirm { border-left: 3px solid var(--danger); }
+.bb-session-confirm-fresh { border-left: 3px solid var(--primary); }
 .bb-session-message { display: flex; align-items: flex-end; gap: 8px; }
 .bb-session-message .fieldset { margin-bottom: 0; }
 .bb-session-message button { flex: none; white-space: nowrap; margin-bottom: 4px; }

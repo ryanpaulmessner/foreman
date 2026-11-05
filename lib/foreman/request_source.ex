@@ -16,8 +16,9 @@ defmodule Foreman.RequestSource do
   The card's source row view (question cards spec, Decision 14), the one place a
   card reads who asked it: `state` (`:live`, `:ended` or `:unknown`), the session
   `name`, its `role` in the Sessions words, `ended_at`, and `focus` (the Focus
-  terminal icon is on), and `link` to the session page. `receiver` (where an
-  answer goes, fm-9mm.15) and `resumes` stay empty until that work ships.
+  terminal icon is on), and `link` to the session page. While the card is open and its
+  session has ended (R9, `Foreman.SessionResume.answer_route/1`), `receiver` names the
+  coordinator that gets the answer as a note, or `resumes` says the answer resumes it.
   """
   def view(request) do
     case row(request) do
@@ -35,6 +36,10 @@ defmodule Foreman.RequestSource do
         }
 
       row ->
+        route =
+          if row.ended_at && Map.get(request, :state, "pending") == "pending",
+            do: Foreman.SessionResume.answer_route(request)
+
         %{
           state: if(row.ended_at, do: :ended, else: :live),
           name: row.name,
@@ -42,14 +47,15 @@ defmodule Foreman.RequestSource do
           ended_at: row.ended_at,
           focus: is_nil(row.ended_at),
           link: "/sessions/#{row.id}",
-          receiver: nil,
-          resumes: false,
+          receiver: with({:note, coordinator} <- route, do: coordinator.name, else: (_ -> nil)),
+          resumes: match?({:resume, _}, route),
           source: source(row)
         }
     end
   end
 
-  defp row(request) do
+  @doc "The card's session row: its `agent_session_id`, else the legacy name match (D3)."
+  def row(request) do
     case Map.get(request, :agent_session_id) do
       nil -> Foreman.AgentSessions.legacy(request)
       id -> Foreman.AgentSessions.get(id)

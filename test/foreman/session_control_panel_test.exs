@@ -26,4 +26,22 @@ defmodule Foreman.SessionControlPanelTest do
     assert M.step(:ready, :keep, %{}) == {:error, {:invalid, :ready, :keep}}
     assert M.step(:confirming, :ask_stop, %{}) == {:error, {:invalid, :confirming, :ask_stop}}
   end
+
+  test "Start fresh opens its own confirm with the focus on Cancel; Cancel closes it" do
+    for state <- [:ready, :result],
+        do:
+          assert(
+            M.step(state, :ask_fresh, %{}) ==
+              {:confirming_fresh, [clear: :result, focus: :cancel]}
+          )
+
+    assert M.step(:confirming_fresh, :keep, %{}) == {:ready, []}
+    assert M.step(:confirming_fresh, :done, %{}) == {:result, [show: :result]}
+    assert M.step(:confirming_fresh, :changed, %{}) == {:ready, [clear: :result]}
+
+    assert M.step(:confirming_fresh, :ask_stop, %{}) ==
+             {:error, {:invalid, :confirming_fresh, :ask_stop}}
+
+    assert M.step(:confirming, :ask_fresh, %{}) == {:error, {:invalid, :confirming, :ask_fresh}}
+  end
 end

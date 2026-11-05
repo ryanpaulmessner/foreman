@@ -187,6 +187,65 @@ defmodule Foreman.AgentSessions do
     end
   end
 
+  @doc "Whether the lifecycle accepts `event` for `row` now, with the same guard data as `fire/3`."
+  def allowed?(%AgentSession{} = row, event) do
+    state = SessionLifecycle.load(row.state)
+    not match?({:error, _}, SessionLifecycle.step(state, event, guard_data(row, event)))
+  end
+
+  @doc """
+  A resumed or new session's pane (Decision 20): the row keeps its id, `pane_id` changes.
+  `last_seen_at` moves too, so a monitor listing read before the pane opened never ends it.
+  """
+  def opened_pane(%AgentSession{} = row, pane) do
+    row
+    |> Ecto.Changeset.change(
+      pane_id: pane,
+      last_seen_at: now(),
+      output_mark: nil,
+      output_at: nil
+    )
+    |> Repo.update!()
+  end
+
+  @doc """
+  The coordinator a session reports to now: its parent while that is live, else the live
+  coordinator that took the parent's name (Start fresh), else the dead parent. Nil when
+  the row has no parent.
+  """
+  def coordinator(%AgentSession{parent_id: nil}), do: nil
+
+  def coordinator(%AgentSession{parent_id: parent_id}) do
+    case get(parent_id) do
+      nil ->
+        nil
+
+      %AgentSession{ended_at: nil} = parent ->
+        parent
+
+      parent ->
+        case live_by_name(parent.name) do
+          %AgentSession{kind: kind} = successor when kind in @coordinators -> successor
+          _ -> parent
+        end
+    end
+  end
+
+  @doc """
+  Start fresh (Decision 7): the live sessions under `old` move to `new`, so its builds
+  stay under the coordinator's name. Returns how many moved.
+  """
+  def move_children(%AgentSession{id: old}, %AgentSession{id: new} = row) do
+    {count, _} =
+      Repo.update_all(
+        from(s in AgentSession, where: s.parent_id == ^old and is_nil(s.ended_at)),
+        set: [parent_id: new]
+      )
+
+    changed(row)
+    count
+  end
+
   defp taken?(row) do
     case live_by_name(row.name) do
       %AgentSession{id: id} when id != row.id -> true
