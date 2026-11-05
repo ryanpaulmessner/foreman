@@ -1,7 +1,8 @@
 defmodule ForemanWeb.SessionsLive do
   use ForemanWeb, :live_view
   alias Foreman.{AgentSession, AgentSessions, Repo}
-  alias ForemanWeb.{SessionState, SessionTree}
+  alias ForemanWeb.{SessionState, SessionTree, SessionGrid}
+  alias Foreman.{GridReader, GridOutput, PaneCapture}
   import Ecto.Query
 
   def mount(_, _, socket) do
@@ -14,6 +15,15 @@ defmodule ForemanWeb.SessionsLive do
      socket
      |> assign(
        connection: :connecting,
+       sessions_view: :tree,
+       grid_reader: :off,
+       check_timer: nil,
+       check_token: nil,
+       page_visible: true,
+       visible_ids: MapSet.new(),
+       grid_read_at: %{},
+       grid_hashes: %{},
+       grid_rows: %{},
        updated_at: DateTime.utc_now(),
        disclosures: %{},
        ended: :collapsed,
@@ -23,6 +33,7 @@ defmodule ForemanWeb.SessionsLive do
        note_form: note_form(),
        repos: Foreman.RuntimeState.repos()
      )
+     |> stream_configure(:grid_items, dom_id: &"grid-item-#{&1.id}")
      |> stream_configure(:rows, dom_id: &"tree-row-#{&1.id}")
      |> stream_configure(:waiting_rows, dom_id: &"waiting-#{&1.id}")
      |> refresh()}
@@ -30,12 +41,44 @@ defmodule ForemanWeb.SessionsLive do
 
   def handle_info({:notification, :foreman_events, _}, socket), do: {:noreply, refresh(socket)}
 
+  def handle_info({:check_connection, token}, %{assigns: %{check_token: token}} = socket),
+    do: handle_info(:check_connection, socket)
+
+  def handle_info({:check_connection, _}, socket), do: {:noreply, socket}
+
   def handle_info(:check_connection, socket) do
-    Process.send_after(self(), :check_connection, 3_000)
-    {:noreply, check_connection(socket)}
+    socket = cancel_check(socket)
+
+    socket =
+      cond do
+        socket.assigns.sessions_view == :grid -> read_grid(socket)
+        not socket.assigns.page_visible -> schedule_check(socket)
+        true -> socket |> check_connection() |> schedule_check()
+      end
+
+    {:noreply, socket}
   end
 
-  def handle_event("retry", _, socket), do: {:noreply, check_connection(socket)}
+  def handle_event("retry", _, socket) do
+    if socket.assigns.sessions_view == :tree do
+      {:noreply, check_connection(socket)}
+    else
+      {state, effects} = GridReader.step(socket.assigns.grid_reader, :retry, %{})
+      {:noreply, socket |> assign(:grid_reader, state) |> reader_effects(effects)}
+    end
+  end
+
+  def handle_event("sessions-view", %{"view" => view}, socket),
+    do: change_view(socket, view, true)
+
+  def handle_event("restore-sessions-view", %{"view" => view}, socket),
+    do: change_view(socket, view, false)
+
+  def handle_event("grid_visibility", %{"ids" => ids, "visible" => visible}, socket)
+      when is_list(ids) and is_boolean(visible) do
+    ids = ids |> Enum.filter(&Map.has_key?(socket.assigns.grid_rows, &1)) |> MapSet.new()
+    {:noreply, socket |> assign(visible_ids: ids, page_visible: visible) |> reader_view()}
+  end
 
   def handle_event("toggle-ended", _, socket),
     do: {:noreply, socket |> toggle(:ended) |> refresh()}
@@ -103,6 +146,165 @@ defmodule ForemanWeb.SessionsLive do
       {:error, _} ->
         {:noreply,
          assign(socket, note_form: note_form(text), result: {:error, "Enter a note to send."})}
+    end
+  end
+
+  defp change_view(socket, view, save?) when view in ["tree", "grid"] do
+    event = if view == "grid", do: :grid, else: :tree
+    {next, []} = Foreman.SessionsView.step(socket.assigns.sessions_view, event, %{})
+
+    socket =
+      socket
+      |> assign(sessions_view: next, visible_ids: MapSet.new(), grid_hashes: %{})
+      |> reader_view()
+      |> refresh()
+
+    {:noreply,
+     if(save?, do: push_event(socket, "save-sessions-view", %{view: view}), else: socket)}
+  end
+
+  defp change_view(socket, _, _), do: {:noreply, socket}
+
+  defp reader_view(socket) do
+    {next, effects} =
+      GridReader.step(
+        socket.assigns.grid_reader,
+        {:view,
+         %{shown: socket.assigns.sessions_view == :grid, visible: socket.assigns.page_visible}},
+        %{}
+      )
+
+    socket |> assign(:grid_reader, next) |> reader_effects(effects)
+  end
+
+  defp reader_effects(socket, effects) do
+    Enum.reduce(effects, socket, fn
+      {:cancel, :capture}, acc ->
+        cancel_async(acc, :grid_capture)
+
+      {:timer, :check}, acc ->
+        schedule_check(acc)
+
+      {:retry, :visible}, acc ->
+        assign(
+          acc,
+          :grid_read_at,
+          Map.drop(acc.assigns.grid_read_at, MapSet.to_list(acc.assigns.visible_ids))
+        )
+    end)
+  end
+
+  defp cancel_check(socket) do
+    if socket.assigns.check_timer, do: Process.cancel_timer(socket.assigns.check_timer)
+    assign(socket, check_timer: nil, check_token: nil)
+  end
+
+  defp schedule_check(socket) do
+    socket = cancel_check(socket)
+    token = make_ref()
+    timer = Process.send_after(self(), {:check_connection, token}, 3_000)
+    assign(socket, check_timer: timer, check_token: token)
+  end
+
+  defp read_grid(socket) do
+    clock =
+      Application.get_env(:foreman, :grid_clock, fn -> System.monotonic_time(:millisecond) end)
+
+    now = clock.()
+
+    rows =
+      GridReader.due(
+        Map.values(socket.assigns.grid_rows),
+        socket.assigns.visible_ids,
+        socket.assigns.grid_read_at,
+        now
+      )
+
+    {state, effects} =
+      GridReader.step(socket.assigns.grid_reader, {:tick, %{due: rows != []}}, %{})
+
+    socket = assign(socket, :grid_reader, state)
+
+    if effects == [capture: :visible] do
+      targets = Enum.map(rows, &Map.put(PaneCapture.target(&1), :id, &1.id))
+      read_at = Enum.reduce(rows, socket.assigns.grid_read_at, &Map.put(&2, &1.id, now))
+
+      socket
+      |> assign(:grid_read_at, read_at)
+      |> start_async(:grid_capture, fn -> {rows, PaneCapture.read_batch(targets)} end)
+    else
+      reader_effects(socket, effects)
+    end
+  end
+
+  def handle_async(:grid_capture, result, socket) do
+    if socket.assigns.grid_reader != :capturing do
+      {:noreply, socket}
+    else
+      {rows, results} =
+        case result do
+          {:ok, batch} -> batch
+          {:exit, _} -> {[], %{failed: {:error, :tmux_unavailable}}}
+        end
+
+      rows =
+        Enum.filter(rows, fn row ->
+          current = socket.assigns.grid_rows[row.id]
+
+          current && is_nil(current.ended_at) &&
+            PaneCapture.target(current) == PaneCapture.target(row) &&
+            MapSet.member?(socket.assigns.visible_ids, row.id)
+        end)
+
+      socket =
+        Enum.reduce(rows, socket, fn row, acc ->
+          case results[row.id] do
+            {:ok, text} ->
+              excerpt = GridOutput.excerpt(text, row.harness)
+              hash = PaneCapture.hash(excerpt)
+
+              if acc.assigns.grid_hashes[row.id] == hash do
+                acc
+              else
+                {:safe, html} = ForemanWeb.AnsiHtml.to_html(excerpt)
+
+                acc
+                |> assign(:grid_hashes, Map.put(acc.assigns.grid_hashes, row.id, hash))
+                |> push_event("grid_output", %{
+                  id: row.id,
+                  html: IO.iodata_to_binary(html),
+                  empty: ForemanWeb.AnsiHtml.blank?(excerpt)
+                })
+              end
+
+            _ ->
+              acc
+          end
+        end)
+
+      ok? = Enum.all?(results, fn {_, result} -> match?({:ok, _}, result) end)
+
+      {reader, effects} =
+        GridReader.step(socket.assigns.grid_reader, if(ok?, do: :captured, else: :failed), %{})
+
+      {connection, []} =
+        Foreman.SessionsConnection.step(
+          socket.assigns.connection,
+          if(ok?, do: :read_ok, else: :read_failed),
+          %{}
+        )
+
+      changed? = connection != socket.assigns.connection
+
+      socket =
+        assign(socket,
+          grid_reader: reader,
+          connection: connection,
+          updated_at: if(ok?, do: DateTime.utc_now(), else: socket.assigns.updated_at)
+        )
+
+      socket = reader_effects(socket, effects)
+      {:noreply, if(changed?, do: refresh(socket), else: socket)}
     end
   end
 
@@ -202,8 +404,26 @@ defmodule ForemanWeb.SessionsLive do
             })
       end)
 
+    grid =
+      if socket.assigns.sessions_view == :grid do
+        rows
+        |> SessionGrid.build()
+        |> Enum.map(fn item ->
+          if item.group,
+            do: item,
+            else: Map.put(item, :title, Foreman.SessionHistory.title(item.row))
+        end)
+      else
+        []
+      end
+
+    grid_rows = rows |> Enum.reject(& &1.group) |> Map.new(&{&1.id, &1.row})
+
     socket
     |> assign(
+      grid_rows: grid_rows,
+      grid_read_at: Map.take(socket.assigns.grid_read_at, Map.keys(grid_rows)),
+      grid_hashes: Map.take(socket.assigns.grid_hashes, Map.keys(grid_rows)),
       total: Enum.count(rows, &(not &1.group)),
       working: Enum.count(rows, &(not &1.group and &1.view.label == "Working")),
       review: Enum.count(rows, &(not &1.group and &1.view.label == "In review")),
@@ -215,6 +435,7 @@ defmodule ForemanWeb.SessionsLive do
       waiting_count: length(tree.waiting),
       coordinator_ids: entries |> Enum.reject(&(&1.row.kind == "build")) |> Enum.map(& &1.row.id)
     )
+    |> stream(:grid_items, grid, reset: true)
     |> stream(:rows, rows, reset: true)
     |> stream(:waiting_rows, tree.waiting, reset: true)
   end
@@ -331,6 +552,23 @@ defmodule ForemanWeb.SessionsLive do
               </ForemanWeb.StatusLine.status_line>
             <% _ -> %>
           <% end %>
+          <div
+            id="sessions-view-switch"
+            class="bb-view-switch mb-3"
+            role="group"
+            aria-label="Sessions view"
+          >
+            <button
+              :for={view <- [:tree, :grid]}
+              id={"sessions-view-#{view}"}
+              phx-click="sessions-view"
+              phx-value-view={view}
+              aria-pressed={to_string(@sessions_view == view)}
+              class="bb-tbtn"
+            >
+              {if view == :tree, do: "Tree", else: "Grid"}
+            </button>
+          </div>
           <section :if={@waiting_count > 0} id="waiting-strip" class="mb-4">
             <h2 class="font-semibold mb-2">
               Waiting on you <span class="text-foreground-softer">{@waiting_count}</span>
@@ -389,11 +627,18 @@ defmodule ForemanWeb.SessionsLive do
             </div>
             <div :if={@connection == :connecting} id="sessions-loading" class="p-4">
               <p>Loading sessions…</p>
-              <div
-                :for={n <- 1..5}
-                class="h-8 my-2 bg-sunken rounded"
-                style={"margin-left: #{rem(n, 3) * 28}px"}
-              >
+              <div id="sessions-grid-loading" hidden={@sessions_view != :grid}>
+                <div :for={n <- 1..3} id={"grid-skeleton-#{n}"} class="bb-grid-skeleton">
+                  <div :for={_ <- 1..4} class="h-32 bg-sunken rounded"></div>
+                </div>
+              </div>
+              <div hidden={@sessions_view != :tree}>
+                <div
+                  :for={n <- 1..5}
+                  class="h-8 my-2 bg-sunken rounded"
+                  style={"margin-left: #{rem(n, 3) * 28}px"}
+                >
+                </div>
               </div>
             </div>
             <div
@@ -416,7 +661,29 @@ defmodule ForemanWeb.SessionsLive do
                 Start main coordinator
               </button>
             </div>
-            <div id="session-tree" phx-update="stream" hidden={@connection == :connecting}>
+            <div
+              id="session-grid"
+              phx-update="stream"
+              hidden={@sessions_view != :grid or @connection == :connecting}
+              class={["bb-session-grid", @connection == :tmux_error && "bb-grid-stale"]}
+            >
+              <div
+                :for={{id, item} <- @streams.grid_items}
+                id={id}
+                class={if item.group, do: "bb-grid-heading", else: "bb-grid-cell"}
+              >
+                <%= if item.group do %>
+                  <h3 class="text-sm font-semibold">{item.name}</h3>
+                <% else %>
+                  <SessionGrid.card item={item} connection={@connection} />
+                <% end %>
+              </div>
+            </div>
+            <div
+              id="session-tree"
+              phx-update="stream"
+              hidden={@connection == :connecting or @sessions_view != :tree}
+            >
               <div :for={{id, item} <- @streams.rows} id={id} hidden={!item.group && item.hidden}>
                 <%= if item.group do %>
                   <div id="sessions-unassigned" class="bb-session-unassigned">
@@ -510,6 +777,7 @@ defmodule ForemanWeb.SessionsLive do
             </div>
           </section>
         </div>
+        <SessionGrid.observer />
         <div
           id="session-collapse-storage"
           phx-hook=".SessionCollapse"
