@@ -2,7 +2,7 @@
 id: fm-9mm.14
 title: "Session page: live controls (Focus, Send message, Continue, Park, Stop)"
 type: task
-status: open
+status: in_progress
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.13"]
