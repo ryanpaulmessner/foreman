@@ -533,6 +533,8 @@ defmodule ForemanWeb.InitiativesLive do
               key={draft.key}
               allowed={Foreman.Sessions.launchable?(draft)}
               session={draft.planning_session}
+              coordinator
+              name_link
             />
           </div>
         </div>
@@ -716,16 +718,20 @@ defmodule ForemanWeb.InitiativesLive do
                     changed={Map.get(row, :priority_changed, false)}
                   />
                   <Badge.badge :if={row.stale} color="warning" class="ml-2">stale</Badge.badge>
+                  <div class="mt-1">
+                    <ForemanWeb.PlanningSession.launch_button
+                      id={"launch-" <> id}
+                      key={row.key}
+                      allowed={Foreman.Sessions.launchable?(row)}
+                      session={row.planning_session}
+                      coordinator
+                      name_link
+                    />
+                  </div>
                 </div>
               </div>
               <div>
                 <Badge.badge color={stage_color(row.stage)}>{row.stage}</Badge.badge>
-                <ForemanWeb.PlanningSession.launch_button
-                  id={"launch-" <> id}
-                  key={row.key}
-                  allowed={Foreman.Sessions.launchable?(row)}
-                  session={row.planning_session}
-                />
               </div>
               <div class="bb-epic-progress space-y-1.5">
                 <span

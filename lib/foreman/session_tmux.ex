@@ -253,7 +253,7 @@ defmodule Foreman.SessionTmux do
     end
   end
 
-  defp session_pane(session, opts) do
+  def session_pane(session, opts \\ []) do
     with {:ok, %{window: window}} when window == session.window <- observe(session, opts),
          {:ok, identity} <-
            cmd(["display-message", "-p", "-t", window, ~S(#{@foreman-session} #{pane_id})], opts),
@@ -481,6 +481,8 @@ defmodule Foreman.SessionTmux do
     tmux = "tmux -L " <> quote_arg(socket(opts))
     claude = Keyword.get(opts, :executable, "claude")
 
+    model_args = if opts[:model], do: ["--model", opts[:model]], else: []
+
     args =
       if Keyword.get(opts, :resume, false),
         do: [
@@ -499,6 +501,8 @@ defmodule Foreman.SessionTmux do
           prompt
         ]
 
+    args = [hd(args)] ++ model_args ++ tl(args)
+
     args =
       if Foreman.Sessions.coordinator?(s) and Keyword.get(opts, :resume, false),
         do: args ++ ["/orient"],
@@ -513,6 +517,7 @@ defmodule Foreman.SessionTmux do
     # All variable text becomes a single shell argument, including multiline prompts.
     command =
       scrub <>
+        "export FOREMAN_SESSION=#{quote_arg(s.ticket)}; " <>
         "#{tmux} set-option -w -t \"$TMUX_PANE\" @foreman-session #{quote_arg(s.session_id)}; " <>
         "#{tmux} set-option -w -t \"$TMUX_PANE\" automatic-rename off; " <>
         "#{tmux} set-option -w -t \"$TMUX_PANE\" @foreman-state running; " <>

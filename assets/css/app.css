@@ -13,6 +13,7 @@
 html[data-theme=light] { color-scheme: light; }
 html[data-theme=dark] { color-scheme: dark; }
 body { margin: 0; background: var(--background-base); }
+.bb-launch-control { white-space: nowrap; }
 .bb-panel { border: 1px solid var(--border-base); border-radius: 10px; background: var(--surface); padding: 16px; box-shadow: var(--shadow-base); }
 /* Session output (spec Decision 14): a terminal panel, dark in both themes. color-scheme makes the theme tokens resolve to their dark values here. */
 .bb-term { color-scheme: dark; display: flex; flex-direction: column; max-height: 560px; border: 1px solid var(--border-base); border-radius: 10px; background: var(--background-sunken); color: var(--foreground); box-shadow: var(--shadow-base); overflow: hidden; }
