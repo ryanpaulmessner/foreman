@@ -176,12 +176,23 @@ defmodule Foreman.Sessions do
 
   defp coordinator_id(_), do: {:ok, nil}
 
-  def launchable?(%{type: "epic", stage: stage}), do: stage in [:idea, :draft]
+  def launchable?(%{type: "epic", stage: stage}),
+    do: stage in [:idea, :draft, :speccing, :spec_approved, :ticketed, :building, :shipping]
 
   def launchable?(%{type: type, status: status, parent: nil}) when is_binary(type),
     do: type != "epic" and status not in ["closed", "tombstone"]
 
   def launchable?(_), do: false
+
+  def epic_coordinator(key), do: AgentSessions.epic_coordinator(key)
+
+  defp coordinator_for?(
+         %{kind: "epic_coordinator", project: project, ticket: ticket},
+         {repo, id}
+       ),
+       do: project in [nil, repo] and ticket in [nil, id]
+
+  defp coordinator_for?(_, _), do: false
 
   def target(key) do
     snapshot = Foreman.Initiatives.snapshot(%{"view" => ""})
@@ -200,43 +211,108 @@ defmodule Foreman.Sessions do
   def launch({project, ticket} = key, opts \\ []) do
     with :ok <- Foreman.Preview.allow_external_write(),
          target when not is_nil(target) <- target(key),
-         true <- launchable?(target),
-         repo when not is_nil(repo) <-
+         true <- launchable?(target) do
+      {:ok, result} =
+        Repo.transaction(fn ->
+          Foreman.SessionWaiting.lock(project)
+          AgentSessions.lock(ticket)
+
+          row = AgentSessions.live_by_name(ticket)
+
+          cond do
+            is_nil(row) ->
+              prepare_launch(key, target)
+
+            coordinator_for?(row, key) ->
+              case get(key) do
+                %{agent_session_id: id} when id == row.id -> prepare_launch(key, target)
+                _ -> {:focus, row}
+              end
+
+            true ->
+              {:error, :session_name_taken}
+          end
+        end)
+
+      case result do
+        {:prepared, prompt} -> launch_window(key, prompt, opts)
+        {:focus, row} -> focus_identity(row, opts)
+        error -> error
+      end
+    else
+      false -> {:error, :not_launchable}
+      nil -> {:error, :not_launchable}
+      error -> error
+    end
+  end
+
+  def focus(key, opts \\ []) do
+    case epic_coordinator(key) do
+      nil ->
+        case get(key) do
+          nil -> {:error, :window_gone}
+          session -> SessionTmux.focus(session, opts)
+        end
+
+      row ->
+        focus_identity(row, opts)
+    end
+  end
+
+  defp focus_identity(row, opts) do
+    case Foreman.RequestSource.focus(Foreman.RequestSource.source(row), opts) do
+      {:error, :no_client} -> {:ok, :no_client}
+      result -> result
+    end
+  end
+
+  defp prepare_launch({project, ticket} = key, target) do
+    with repo when not is_nil(repo) <-
            Enum.find(Foreman.RuntimeState.repos(), &(&1["key"] == project)),
          {:ok, workdir} <- main_checkout(repo["path"]),
          prompt when is_binary(prompt) <- opening_prompt(target, project, ticket) do
       {state, [open: :window]} = SessionMachine.step(:new, :launch, %{})
-      # Reserve identity before external IO. A crash can retry with this UUID;
-      # tmux's exact-name lookup recovers a window created before a DB update.
-      # The identity row is written in the same transaction (Decision 3).
-      {:ok, _} =
-        Repo.transaction(fn ->
-          Repo.insert!(
-            %PlanningSession{
-              project: project,
-              ticket: ticket,
-              workdir: workdir,
-              state: state,
-              launched_at: DateTime.utc_now()
-            },
-            on_conflict: :nothing,
-            conflict_target: [:project, :ticket]
-          )
 
-          key |> get() |> AgentSessions.sync_planning()
-        end)
+      Repo.insert!(
+        %PlanningSession{
+          project: project,
+          ticket: ticket,
+          workdir: workdir,
+          state: state,
+          launched_at: DateTime.utc_now()
+        },
+        on_conflict: :nothing,
+        conflict_target: [:project, :ticket]
+      )
 
-      {:ok, result} =
-        Repo.transaction(fn ->
-          Foreman.SessionWaiting.lock(project)
-          session = locked(key) |> observe(opts)
+      key |> get() |> AgentSessions.sync_planning()
+      {:prepared, prompt}
+    else
+      nil -> {:error, :not_launchable}
+      error -> error
+    end
+  end
+
+  defp launch_window({project, ticket} = key, prompt, opts) do
+    {:ok, result} =
+      Repo.transaction(fn ->
+        Foreman.SessionWaiting.lock(project)
+        AgentSessions.lock(ticket)
+        session = locked(key)
+        owner = AgentSessions.live_by_name(ticket)
+
+        if owner && owner.id != session.agent_session_id do
+          {:error, :session_name_taken}
+        else
+          session = observe(session, opts)
 
           if session.state == :parked do
             {:error, :session_parked}
           else
-            case SessionTmux.launch(session, prompt, opts) do
+            case SessionTmux.launch(session, prompt, model_options(session, opts)) do
               {:ok, window} ->
                 session = save(session, %{window: window, error: nil}) |> observe(opts)
+                sync_pane(session, opts)
                 {:ok, session}
 
               {:error, reason} ->
@@ -244,15 +320,11 @@ defmodule Foreman.Sessions do
                 {:error, reason}
             end
           end
-        end)
+        end
+      end)
 
-      Foreman.Events.broadcast(:sessions_changed, project)
-      result
-    else
-      false -> {:error, :not_launchable}
-      nil -> {:error, :not_launchable}
-      error -> error
-    end
+    Foreman.Events.broadcast(:sessions_changed, project)
+    result
   end
 
   def relaunch({project, _} = key, opts \\ []) do
@@ -270,7 +342,7 @@ defmodule Foreman.Sessions do
 
               case SessionMachine.step(session.state, :relaunch, %{}) do
                 {:starting, [open: :resume]} ->
-                  case SessionTmux.resume(session, opts) do
+                  case SessionTmux.resume(session, model_options(session, opts)) do
                     {:ok, window} ->
                       previous =
                         if session.state == :ended do
@@ -290,13 +362,16 @@ defmodule Foreman.Sessions do
 
                       session = transition(session, :relaunch)
 
-                      {:ok,
-                       save(session, %{
-                         window: window,
-                         previous_windows: previous,
-                         error: nil,
-                         last_activity_at: DateTime.utc_now()
-                       })}
+                      session =
+                        save(session, %{
+                          window: window,
+                          previous_windows: previous,
+                          error: nil,
+                          last_activity_at: DateTime.utc_now()
+                        })
+
+                      sync_pane(session, opts)
+                      {:ok, session}
 
                     {:error, reason} ->
                       save(session, %{error: error_message(reason)})
@@ -337,6 +412,18 @@ defmodule Foreman.Sessions do
     |> case do
       {:ok, result} -> result
       error -> error
+    end
+  end
+
+  defp model_options(session, opts) do
+    identity = AgentSessions.get(session.session_id)
+    Keyword.put(opts, :model, identity && identity.model)
+  end
+
+  defp sync_pane(session, opts) do
+    case SessionTmux.session_pane(session, opts) do
+      {:ok, pane} -> AgentSessions.sync_planning(session, pane: pane)
+      _ -> :ok
     end
   end
 
@@ -509,7 +596,12 @@ defmodule Foreman.Sessions do
             if(target.spec_link, do: " and #{target.spec_link}", else: ""),
         else: "tickets/#{ticket}.md"
 
-    Foreman.SessionPrompt.render(target.type, %{ticket: ticket, project: project, source: source})
+    kind =
+      if target.type == "epic" and target.stage in [:ticketed, :building, :shipping],
+        do: "epic-coordinator",
+        else: target.type
+
+    Foreman.SessionPrompt.render(kind, %{ticket: ticket, project: project, source: source})
   end
 
   defp main_checkout(path) do
@@ -523,6 +615,7 @@ defmodule Foreman.Sessions do
     ErlangError -> {:error, :main_checkout_unavailable}
   end
 
+  def error_message(:session_name_taken), do: "A session already uses this name"
   def error_message(:coordinator_active), do: "Coordinator is still running; focus its window"
   def error_message("refused in preview"), do: "refused in preview"
   def error_message(:not_launchable), do: "Ticket cannot be launched"

@@ -83,7 +83,7 @@ defmodule ForemanWeb.PriorityLiveTest do
     assert ids(view, "#kind-unsorted > [data-kind=epic]") == ~w(e2 e1)
     assert has_element?(view, "#kind-unsorted [data-bead=e2] [data-priority='0']")
 
-    view |> element("#kind-unsorted [data-bead=e1] button") |> render_click()
+    view |> element("#kind-unsorted [data-bead=e1] button[phx-click=toggle]") |> render_click()
     assert ids(view, "#kind-unsorted [data-kind=ticket]") == ~w(e1.2 e1.1 e1.3)
     refute has_element?(view, "#kind-unsorted [data-bead='e1.3'] [data-priority]")
 

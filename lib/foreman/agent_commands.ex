@@ -3,8 +3,11 @@ defmodule Foreman.AgentCommands do
   import Ecto.Query
   alias Foreman.{Agent, AgentCatalog, Overlay, Repo}
 
+  # A session capture is an idempotent upsert of up to 1 MB of pane text: it keeps no receipt.
   def execute(request) do
-    if request["action"] in ["show", "ls", "wait"], do: command(request), else: write(request)
+    if request["action"] in ["show", "ls", "wait", "session_capture"],
+      do: command(request),
+      else: write(request)
   end
 
   defp write(%{"request_id" => id} = request) do
@@ -103,6 +106,14 @@ defmodule Foreman.AgentCommands do
   defp command(%{"action" => "session_register"} = request) do
     case Foreman.SessionRegistry.register(request) do
       {:ok, body} -> {200, body}
+      {:error, reason} -> {422, %{error: reason}}
+    end
+  end
+
+  defp command(%{"action" => "session_capture"} = request) do
+    case Foreman.SessionCaptures.record_exit(request) do
+      {:ok, _} -> {200, %{saved: true}}
+      {:unknown, warning} -> {422, %{error: "unknown_session", message: warning}}
       {:error, reason} -> {422, %{error: reason}}
     end
   end

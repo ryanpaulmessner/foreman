@@ -59,8 +59,7 @@ defmodule ForemanWeb.EpicLive do
       planning_session: Foreman.Sessions.get(socket.assigns.epic_key),
       agent_session:
         socket.assigns.epic_key
-        |> Foreman.AgentSessions.for_ticket()
-        |> Enum.find(&(&1.kind in ["main_coordinator", "epic_coordinator"]))
+        |> Foreman.Sessions.epic_coordinator()
         |> then(fn row -> if row, do: ForemanWeb.SessionLink.view(row) end),
       launchable: Foreman.Sessions.launchable?(epic),
       repos: Foreman.RuntimeState.repos()
@@ -162,6 +161,7 @@ defmodule ForemanWeb.EpicLive do
             key={@epic_key}
             allowed={@launchable}
             session={@planning_session}
+            coordinator
           />
           <div :if={@epic.total > 0} class="w-64 space-y-2">
             <p class="flex justify-between text-xs">

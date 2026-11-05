@@ -17,6 +17,18 @@ defmodule ForemanWeb.SessionStateTest do
     assert result.at == ~U[2026-11-04 14:00:00Z]
   end
 
+  test "detail second line: a working build names its round; a coordinator has none (fm-9mm.21)" do
+    detail = %{state: "working", round: 2, output_at: @five_ago}
+    assert view(detail).second == "Round 2 · output 5 min ago"
+
+    for kind <- ~w(main_coordinator epic_coordinator) do
+      coordinator = view(%{detail | round: nil} |> Map.put(:kind, kind))
+      assert coordinator.second == "output 5 min ago"
+      assert coordinator.at == @five_ago
+      assert view(%{state: "working", round: nil, kind: kind}).second == nil
+    end
+  end
+
   @waiting %{label: "Waiting on you", color: "primary", variant: "solid", icon: "hero-inbox"}
 
   # {case, facts, label row, second line, time named by the second line}

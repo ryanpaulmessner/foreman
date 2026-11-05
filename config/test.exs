@@ -3,7 +3,10 @@ import Config
 config :foreman,
   runtime_enabled: false,
   session_prompt_fallback: true,
-  config_directory: "/tmp/bb-exec/test-config"
+  session_prompt_directory: Path.expand("../test/fixtures/session-launch", __DIR__),
+  config_directory: "/tmp/bb-exec/test-config",
+  # Session pages never read a real tmux pane in tests; tmux tests pass their own runner.
+  pane_capture_runner: &Foreman.TestTmux.no_capture/3
 
 # Jobs are inserted into the SQL sandbox and explicitly executed by tests.
 config :foreman, Oban, testing: :manual, queues: false, plugins: false

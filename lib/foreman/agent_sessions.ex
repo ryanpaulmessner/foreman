@@ -34,6 +34,19 @@ defmodule Foreman.AgentSessions do
     )
   end
 
+  @doc "The epic's live coordinator, else its latest; includes named registrations without ticket metadata."
+  def epic_coordinator({project, ticket}) do
+    Repo.one(
+      from s in AgentSession,
+        where:
+          s.kind == "epic_coordinator" and
+            ((s.project == ^project and s.ticket == ^ticket) or
+               (s.name == ^ticket and is_nil(s.project) and is_nil(s.ticket))),
+        order_by: [desc: is_nil(s.ended_at), desc: s.started_at, desc: s.id],
+        limit: 1
+    )
+  end
+
   def live_by_name(name) when is_binary(name),
     do: Repo.one(from s in AgentSession, where: s.name == ^name and is_nil(s.ended_at))
 
@@ -141,6 +154,9 @@ defmodule Foreman.AgentSessions do
               row.ended_at -> row.ended_at
               true -> at
             end
+
+          # A dead session that lives again (Resume): its old save describes the last run.
+          if live? and not is_nil(row.ended_at), do: Foreman.SessionCaptures.clear(row.id)
 
           row =
             row
@@ -691,6 +707,7 @@ defmodule Foreman.AgentSessions do
       kind: if(main?, do: "main_coordinator", else: "epic_coordinator"),
       parent_id: parent && parent.id,
       harness: "claude",
+      model: parent && parent.model,
       conversation_id: planning.session_id,
       tmux_server: "board",
       pane_id: opts[:pane],

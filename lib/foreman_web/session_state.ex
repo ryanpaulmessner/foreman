@@ -10,7 +10,8 @@ defmodule ForemanWeb.SessionState do
   `open_cards` (count), `card_at` (oldest open card), `stage` (ticket stage atom),
   `state_at`, `ended_at`, `reset_at` (usage-limit reset, text or time) and
   `parent_ended_at` (a live build's ended coordinator, R8). Detail callers also pass
-  `round`, `coordinator`, `resumable` and `output_at` for Decision 10's second lines.
+  `round` (nil for coordinators, which have no review rounds), `coordinator`, `resumable`
+  and `output_at` for Decision 10's second lines.
   """
   use ForemanWeb, :html
   alias Foreman.SessionLifecycle
@@ -71,6 +72,10 @@ defmodule ForemanWeb.SessionState do
 
       view.label == "Ended" and not facts[:resumable] ->
         second(view, {(view.second || "Ended") <> " · cannot resume", view.at})
+
+      # Coordinators have no review rounds (fm-9mm.21): the detail page passes nil.
+      view.label == "Working" and is_nil(round) ->
+        second(view, since("output ", facts[:output_at], now))
 
       view.label == "Working" ->
         case since("Round #{round} · output ", facts[:output_at], now) do
