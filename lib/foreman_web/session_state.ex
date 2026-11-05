@@ -102,6 +102,9 @@ defmodule ForemanWeb.SessionState do
         not live? ->
           since("ended ", facts[:ended_at] || facts[:state_at], now)
 
+        facts[:parent_ended_at] ->
+          parent_line(facts, now)
+
         state == :waiting_permission ->
           since("Permission prompt · ", facts[:state_at], now)
 

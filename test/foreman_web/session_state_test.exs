@@ -69,6 +69,9 @@ defmodule ForemanWeb.SessionStateTest do
     {"ended", %{state: "ended", ended_at: @hour_ago},
      %{label: "Ended", color: "neutral", variant: "outline", icon: nil}, "ended 1 h ago",
      @hour_ago},
+    {"R8: waiting build whose coordinator ended",
+     %{state: "waiting.permission", parent_ended_at: @hour_ago}, @waiting, "Parent ended 1 h ago",
+     @hour_ago},
     {"R8: live build whose coordinator ended", %{state: "working", parent_ended_at: @hour_ago},
      %{label: "Working", color: "info", variant: "soft", icon: nil}, "Parent ended 1 h ago",
      @hour_ago}

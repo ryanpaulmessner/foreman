@@ -15,6 +15,42 @@ html[data-theme=dark] { color-scheme: dark; }
 body { margin: 0; background: var(--background-base); }
 .bb-launch-control { white-space: nowrap; }
 .bb-panel { border: 1px solid var(--border-base); border-radius: 10px; background: var(--surface); padding: 16px; box-shadow: var(--shadow-base); }
+.bb-session-panel { padding: 0; overflow: hidden; }
+.bb-session-filter .label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
+.bb-session-filter .fieldset { margin: 0; }
+@media (min-width: 1101px) { .bb-sessions .bb-session-show-all-narrow { display: none; } }
+.bb-session-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; }
+.bb-sessions .bb-sessions-offline { display: none; }
+.phx-loading .bb-sessions .bb-sessions-offline { display: flex; }
+.phx-loading .bb-sessions-online { display: none; }
+.phx-loading .bb-sessions-content { opacity: .5; pointer-events: none; }
+.bb-session-waiting { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.bb-session-waiting-capped > :nth-child(n+7) { display: none; }
+.bb-session-wait { display: flex; flex-direction: column; gap: 3px; padding: 9px 12px; border: 1px solid var(--border-base); border-left: 3px solid var(--primary); border-radius: 8px; background: var(--surface); min-width: 0; transition: background .15s; }
+.bb-session-wait:hover { background: var(--background-sunken); }
+.bb-session-row { --session-depth: 0; position: relative; display: grid; grid-template-columns: minmax(180px, 1.1fr) minmax(120px, 1fr) minmax(90px, .6fr) minmax(180px, 1fr) 32px; align-items: center; gap: 12px; min-height: 43px; padding: 4px 12px; border-bottom: 1px solid var(--border-base); }
+.bb-session-row:hover { background: var(--background-sunken); }
+.bb-session-row-link { position: absolute; inset: 0; z-index: 1; }
+.bb-session-row-link:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.bb-session-name { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: calc(var(--session-depth) * 28px); }
+.bb-session-name::before { content: ''; position: absolute; top: 0; bottom: 0; left: calc(12px + var(--session-depth) * 28px); border-left: 1px solid var(--border-base); opacity: .5; }
+.bb-session-collapse { position: relative; z-index: 2; display: inline-flex; padding: 3px; cursor: pointer; }
+.bb-session-kind { font-size: 10px; padding: 1px 4px; border: 1px solid var(--border-base); border-radius: 4px; color: var(--foreground-soft); }
+.bb-session-state { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.bb-session-state > span:first-child { align-items: flex-start; flex-direction: column; gap: 1px; max-width: 100%; }
+.bb-sessions .bb-session-focus { position: relative; z-index: 2; width: 32px; height: 32px; }
+.bb-session-ended { opacity: .65; }
+.bb-session-unassigned { display: flex; gap: 10px; flex-wrap: wrap; padding: 9px 16px; font-size: 11px; background: var(--background-sunken); color: var(--foreground-soft); }
+@media (max-width: 1100px) {
+  .bb-session-waiting { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bb-session-waiting-capped > :nth-child(n+5) { display: none; }
+  .bb-session-row { grid-template-columns: minmax(160px, 1fr) minmax(150px, 1fr) 32px; gap: 3px 8px; padding: 7px 10px; }
+  .bb-session-harness { display: none; }
+  .bb-session-name { grid-column: 1; grid-row: 1; }
+  .bb-session-ticket { grid-column: 1 / 3; grid-row: 2; padding-left: calc(var(--session-depth) * 28px); }
+  .bb-session-state { grid-column: 2; grid-row: 1; }
+  .bb-session-focus { grid-column: 3; grid-row: 1 / 3; }
+}
 /* Session output (spec Decision 14): a terminal panel, dark in both themes. color-scheme makes the theme tokens resolve to their dark values here. */
 .bb-term { color-scheme: dark; display: flex; flex-direction: column; max-height: 560px; border: 1px solid var(--border-base); border-radius: 10px; background: var(--background-sunken); color: var(--foreground); box-shadow: var(--shadow-base); overflow: hidden; }
 .bb-term-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 12px; border-bottom: 1px solid var(--border-base); font-size: 12px; color: var(--foreground-softer); }

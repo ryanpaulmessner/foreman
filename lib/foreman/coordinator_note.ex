@@ -72,8 +72,6 @@ defmodule Foreman.CoordinatorNote do
 
   defp deliver(target, message, opts), do: Foreman.SessionTmux.reply_source(target, message, opts)
 
-  # Registered sessions, by their rows: each name once (its latest row), ended ones
-  # reported as skipped. Dispatch-only rows were never recipients.
   defp recipients do
     registered =
       from r in "sessions",
@@ -84,7 +82,7 @@ defmodule Foreman.CoordinatorNote do
 
     Repo.all(
       from s in AgentSession,
-        where: s.id in subquery(registered),
+        where: s.id in subquery(registered) or s.kind in ["main_coordinator", "epic_coordinator"],
         distinct: s.name,
         order_by: [asc: s.name, desc: is_nil(s.ended_at), desc: s.started_at]
     )
