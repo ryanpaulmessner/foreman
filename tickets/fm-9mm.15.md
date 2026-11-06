@@ -2,7 +2,7 @@
 id: fm-9mm.15
 title: "Session page: ended-session controls (Resume, Relaunch build, Start fresh) and answers to ended sessions"
 type: task
-status: in_progress
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.14"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-06
+close_reason: "PR #23 merged (merged on GitHub; board merge stuck on fm-9i7); deployed"
 ---
 
 Spec: `docs/specs/sessions-view.md` (approved 2026-11-03, card cfb2bce5). Design pack: `docs/specs/sessions-view.design.md`. The spec's Non-goals, Ask-first boundaries and copy tables apply to every ticket.

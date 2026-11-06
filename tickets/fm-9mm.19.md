@@ -2,7 +2,7 @@
 id: fm-9mm.19
 title: "Sessions page: Grid view and the Tree · Grid switch"
 type: task
-status: in_progress
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: ["fm-9mm.13","fm-9mm.17"]
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-03
-closed: null
-close_reason: null
+closed: 2026-11-06
+close_reason: "PR #22 merged; lost to a force push to main, restored by PR #24 (c5a78a1); deployed"
 ---
 
 Spec: `docs/specs/sessions-view.md` (approved 2026-11-03, card cfb2bce5). Design pack: `docs/specs/sessions-view.design.md`. The spec's Non-goals, Ask-first boundaries and copy tables apply to every ticket.
