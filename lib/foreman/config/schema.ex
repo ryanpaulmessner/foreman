@@ -54,7 +54,8 @@ defmodule Foreman.Config.Schema do
             "merge_policy" => {:one_of, ~w(board human)},
             "merge_base" => :branch,
             "color" => :text,
-            "enabled" => :boolean
+            "enabled" => :boolean,
+            "docs" => {:table, %{"allow" => {:list, :text}, "legacy" => {:list, :text}}}
           }}},
       "backfill" => {:table, %{"closed" => :stage, "default" => :stage}},
       "epics" =>

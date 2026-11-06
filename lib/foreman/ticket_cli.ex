@@ -1,6 +1,6 @@
 defmodule Foreman.TicketCLI do
   @moduledoc "Offline ticket commands. All writes are validated before publication."
-  alias Foreman.{TicketFile, TicketStore}
+  alias Foreman.{DocCheck, TicketFile, TicketStore}
   @verbs ~w(new show ls ready update close reopen dep note tree renumber check)
   @switches [
     json: :boolean,
@@ -66,7 +66,13 @@ defmodule Foreman.TicketCLI do
         {:error, reason} -> {2, %{"error" => reason}}
       end
 
-    if "--json" in args, do: IO.puts(Jason.encode!(output)), else: IO.puts(human(output))
+    if "--json" in args do
+      IO.puts(Jason.encode!(output))
+    else
+      Enum.each(output_warnings(output), &IO.puts(:stderr, "warning: " <> &1))
+      IO.puts(human(output))
+    end
+
     code
   rescue
     error in [File.Error, File.CopyError] ->
@@ -76,8 +82,10 @@ defmodule Foreman.TicketCLI do
   end
 
   defp execute(["check"], _opts, root) do
-    errors = TicketStore.check(root)
+    docs = DocCheck.check(root)
+    errors = TicketStore.check(root) ++ docs.errors
     result = %{"valid" => errors == [], "errors" => errors}
+    result = if docs.warnings == [], do: result, else: Map.put(result, "warnings", docs.warnings)
     if errors == [], do: {:ok, result}, else: {:invalid, result}
   end
 
@@ -451,6 +459,13 @@ defmodule Foreman.TicketCLI do
   defp human(%{"error" => reason}), do: "error: " <> reason
   defp human(%{"warning" => reason}), do: "warning: " <> reason
   defp human(%{"valid" => true}), do: "tickets valid"
-  defp human(%{"errors" => errors}), do: Enum.map_join(errors, "\n", &"#{&1.file}: #{&1.reason}")
+  defp human(%{"errors" => errors}), do: Enum.map_join(errors, "\n", &human_error/1)
   defp human(output), do: Jason.encode!(output, pretty: true)
+
+  defp human_error(%{command: command} = error),
+    do: "#{error.file}: #{error.reason}. Use: #{command}"
+
+  defp human_error(error), do: "#{error.file}: #{error.reason}"
+  defp output_warnings(%{"valid" => _, "warnings" => warnings}), do: warnings
+  defp output_warnings(_), do: []
 end
