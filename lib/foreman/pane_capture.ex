@@ -39,6 +39,82 @@ defmodule Foreman.PaneCapture do
     end
   end
 
+  @doc "Read visible targets in one client per distinct socket (decision 54d0a459)."
+  def read_batch(targets, opts \\ []) do
+    runner =
+      Keyword.get(
+        opts,
+        :runner,
+        Application.get_env(:foreman, :pane_capture_runner, &System.cmd/3)
+      )
+
+    targets
+    |> Enum.group_by(& &1.socket)
+    |> Enum.reduce(%{}, fn {socket, panes}, acc ->
+      marker = "foreman-" <> Base.encode16(:crypto.strong_rand_bytes(16))
+
+      commands =
+        Enum.with_index(panes)
+        |> Enum.flat_map(fn {pane, index} ->
+          target = "'" <> String.replace(pane.target, "'", "'\\''") <> "'"
+
+          [
+            "display-message",
+            "-p",
+            "#{marker}:#{index}:start",
+            ";",
+            "if-shell",
+            "-F",
+            "1",
+            "capture-pane -p -e -J -S -200 -t #{target} ; display-message -p '#{marker}:#{index}:ok'",
+            ";",
+            "display-message",
+            "-p",
+            "#{marker}:#{index}:end",
+            ";"
+          ]
+        end)
+        |> Enum.drop(-1)
+
+      task =
+        Task.async(fn ->
+          try do
+            runner.("tmux", ["-N", "-L", socket | commands], stderr_to_stdout: true)
+          rescue
+            ErlangError -> {"", 1}
+          end
+        end)
+
+      output =
+        case Task.yield(task, @timeout) || Task.shutdown(task, :brutal_kill) do
+          {:ok, {text, _}} -> String.replace_invalid(text)
+          _ -> ""
+        end
+
+      Enum.with_index(panes)
+      |> Enum.reduce(acc, fn {pane, index}, result ->
+        start = "#{marker}:#{index}:start\n"
+        finish = "#{marker}:#{index}:ok\n"
+
+        value =
+          case String.split(output, start, parts: 2) do
+            [_, rest] ->
+              case String.split(rest, "#{marker}:#{index}:end", parts: 2)
+                   |> hd()
+                   |> String.split(finish, parts: 2) do
+                [text, _] -> {:ok, text}
+                _ -> {:error, :tmux_unavailable}
+              end
+
+            _ ->
+              {:error, :tmux_unavailable}
+          end
+
+        Map.put(result, pane.id, value)
+      end)
+    end)
+  end
+
   defp run(runner, args) do
     case runner.("tmux", args, stderr_to_stdout: true) do
       {out, 0} -> {:ok, String.replace_invalid(out)}
