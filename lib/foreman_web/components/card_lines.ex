@@ -7,21 +7,25 @@ defmodule ForemanWeb.CardLines do
   draw it.
   """
   use ForemanWeb, :html
-  alias ForemanWeb.{CopyField, StatusLine}
+  alias ForemanWeb.{CopyField, NoteLine, StatusLine}
 
   @doc "The actions that take a card out of pending, and so fire `resolved`."
   def resolving,
     do: ~w(answer batch-answer approve decline complete reply wrong-question withdraw)
 
+  @answers ~w(answer batch-answer)
+
   @doc """
   The result line (Decision 30) for `action` on `request` (as saved), with the
-  form `params` and the source `view` (`Foreman.RequestSource.view/1`).
+  form `params` and the source `view` (`Foreman.RequestSource.view/1`). `note` is the
+  note saved for a busy coordinator (fm-9mm.23), if any: the line then follows it.
   """
-  def result_info(action, request, params, view) do
-    Map.merge(
-      %{id: request.id, lead: lead(action, request, params), at: DateTime.utc_now()},
-      receiver(action, view)
-    )
+  def result_info(action, request, params, view, note \\ nil) do
+    line = %{id: request.id, lead: lead(action, request, params), at: DateTime.utc_now()}
+
+    if note && action in @answers,
+      do: Map.merge(line, %{before: nil, after: nil, note: note}),
+      else: Map.merge(line, receiver(action, view))
   end
 
   defp lead("answer", _request, params) do
@@ -61,8 +65,6 @@ defmodule ForemanWeb.CardLines do
   end
 
   defp reply(_, _), do: ""
-
-  @answers ~w(answer batch-answer)
 
   # The receiver sentence. `before` and `after` go around the time ("just now").
   defp receiver("approve", _), do: %{before: nil, after: "The board starts it now."}
@@ -177,7 +179,28 @@ defmodule ForemanWeb.CardLines do
 
   attr :line, :map, required: true
 
-  @doc "The result line of a card, in its place in the list."
+  @doc """
+  The result line of a card, in its place in the list. A line whose note waits for a
+  busy coordinator offers Do not send and an X, and changes when the note is sent.
+  """
+  def result_line(%{line: %{note: note}} = assigns) when not is_nil(note) do
+    assigns = assign(assigns, note: note, waiting: NoteLine.waiting?(note))
+
+    ~H"""
+    <StatusLine.status_line
+      id={"card-result-" <> @line.id}
+      kind={NoteLine.kind(@note)}
+      close={if(@waiting, do: JS.push("dismiss-line", value: %{id: @line.id}))}
+      close_id={"card-result-close-" <> @line.id}
+    >
+      <b class="font-semibold">{@line.lead}</b>
+      <span :if={@waiting}>Saved <ForemanWeb.TicketDetail.timestamp at={@line.at} />.</span>
+      <NoteLine.text note={@note} /> It moves to Recent outcomes.
+      <NoteLine.withdraw id={"card-note-withdraw-" <> @line.id} note={@note} />
+    </StatusLine.status_line>
+    """
+  end
+
   def result_line(assigns) do
     ~H"""
     <StatusLine.status_line id={"card-result-" <> @line.id} kind={:success}>
