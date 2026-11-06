@@ -348,6 +348,9 @@ defmodule ForemanWeb.NeedsYouLive do
   defp act(socket, %{"id" => id} = params, action) do
     socket = CardItems.text(socket, @cards, Map.put(params, "card_id", id))
     before = with {:error, :database} <- safely(fn -> Requests.get(id) end), do: nil
+    # Read before the action: answering an ended session can resume it (R9), and the
+    # result line names where the answer went.
+    view = before && safely(fn -> Foreman.RequestSource.view(before) end)
 
     case safely(fn -> resolve(params) end) do
       {:navigate, path} ->
@@ -361,7 +364,7 @@ defmodule ForemanWeb.NeedsYouLive do
 
         if match?(%{state: state} when state not in ["pending", "superseded"], request) and
              id == socket.assigns.list.open do
-          view = Foreman.RequestSource.view(before || request)
+          view = if is_map(view), do: view, else: Foreman.RequestSource.view(request)
           line = CardLines.result_info(action, request, params, view)
           socket |> load(resolved: {id, line}) |> patch_url()
         else

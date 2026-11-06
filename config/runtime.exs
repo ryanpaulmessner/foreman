@@ -55,6 +55,11 @@ if socket = System.get_env("FOREMAN_EXTERNAL_TMUX_SOCKET") do
   config :foreman, external_tmux_socket: socket
 end
 
+# Pi's own session directory override: Resume looks for a build's session file there.
+if dir = System.get_env("PI_CODING_AGENT_SESSION_DIR") do
+  config :foreman, pi_sessions_dir: dir
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

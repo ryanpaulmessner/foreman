@@ -483,6 +483,15 @@ defmodule Foreman.Requests do
         audit(request, state, event, payload, effects)
         if state == :pending, do: Foreman.AgentSessions.card_closed(request)
 
+        # R9: an answer to an ended session resumes it or goes to its coordinator, in this
+        # transaction; when it cannot be delivered the card stays open.
+        if event == :answer and state == :pending do
+          case Foreman.SessionResume.deliver_answer(request, payload, answer_opts()) do
+            :ok -> :ok
+            {:error, reason} -> Repo.rollback(reason)
+          end
+        end
+
         if {:enqueue, :job} in effects do
           with {:ok, handler} <- Kind.fetch(request.kind), :ok <- handler.enqueue(request) do
             :ok
@@ -498,6 +507,9 @@ defmodule Foreman.Requests do
       {:error, _} -> {:error, :invalid}
     end
   end
+
+  # Tests and the preview point the answer's tmux and launchers at stand-ins.
+  defp answer_opts, do: Application.get_env(:foreman, :session_controls_tmux, [])
 
   defp answer_payload(%{kind: "review_ui"} = request, :answer, payload),
     do: Foreman.Requests.ReviewUI.answer(request, payload)

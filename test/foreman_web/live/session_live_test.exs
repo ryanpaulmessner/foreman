@@ -42,7 +42,7 @@ defmodule ForemanWeb.SessionLiveTest do
     end
   end
 
-  test "ended resumable session does not offer live controls", %{conn: conn} do
+  test "ended resumable session offers Resume and no live control (R3, R4)", %{conn: conn} do
     row =
       agent_session(harness: "claude", conversation_id: Ecto.UUID.generate())
       |> Foreman.AgentSessions.end_session()
@@ -51,10 +51,15 @@ defmodule ForemanWeb.SessionLiveTest do
     assert has_element?(view, "#session-next-step", "Ended")
     refute has_element?(view, "#session-next-step", "cannot resume")
     assert has_element?(view, "#session-unavailable", "The pane is closed.")
-    refute has_element?(view, "#session-next-step button")
+    assert has_element?(view, "#session-next-step #session-control-resume")
+
+    for control <- ~w(focus continue park stop),
+        do: refute(has_element?(view, "#session-control-#{control}"))
+
+    refute has_element?(view, "#session-stop")
   end
 
-  test "open card on a dead session stays waiting without promising future answer routing", %{
+  test "open card on a dead session with no coordinator stays waiting and names no receiver", %{
     conn: conn
   } do
     row = agent_session() |> Foreman.AgentSessions.end_session()

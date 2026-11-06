@@ -281,6 +281,49 @@ defmodule Foreman.EpicCoordinatorLaunchTest do
     assert is_nil(row.ended_at)
   end
 
+  test "the session page's Resume and R8 relaunch note go through the planning session", c do
+    {:ok, _} =
+      AgentSessions.create(%{
+        name: "main",
+        kind: "main_coordinator",
+        harness: "claude",
+        model: "opus",
+        tmux_server: "default"
+      })
+
+    {:ok, planning} = Sessions.launch({"sample", "lc-1"}, c.opts)
+    assert eventually(fn -> File.exists?(Path.join(c.dir, "identity")) end)
+    coordinator = AgentSessions.get(planning.agent_session_id)
+    {:ok, coordinator, _} = AgentSessions.fire(coordinator, :stop)
+    System.cmd("tmux", ["-L", c.socket, "kill-window", "-t", planning.window])
+    File.rm!(Path.join(c.dir, "identity"))
+
+    {:ok, build} =
+      AgentSessions.create(%{
+        name: "lc-build",
+        kind: "build",
+        harness: "pi",
+        parent_id: coordinator.id,
+        tmux_server: "default",
+        ticket: "lc-2",
+        branch: "feat/lc-2"
+      })
+
+    build = AgentSessions.end_session(build)
+
+    assert {:ok, %{coordinator: "lc-1", resumed: true}} =
+             Foreman.SessionResume.relaunch_build(build, c.opts)
+
+    assert eventually(fn -> File.exists?(Path.join(c.dir, "identity")) end)
+    args = File.read!(Path.join(c.dir, "argv"))
+    assert args =~ "--resume\n#{planning.session_id}\n"
+    assert args =~ "[foreman note from board] Relaunch the build for lc-2 on feat/lc-2.\n"
+    refute args =~ "/orient"
+    row = AgentSessions.get(coordinator.id)
+    assert is_nil(row.ended_at)
+    assert row.pane_id != coordinator.pane_id
+  end
+
   test "a configured worktree launches in the main checkout", c do
     linked = Path.join(c.dir, "linked")
 
