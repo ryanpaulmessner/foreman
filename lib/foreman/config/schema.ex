@@ -18,7 +18,8 @@ defmodule Foreman.Config.Schema do
            "stale_session_after" => :duration,
            "terminal_app" => :app,
            "tmux_session" => :key,
-           "os_notifications" => :boolean
+           "os_notifications" => :boolean,
+           "model_fallbacks" => {:list, :model_pair}
          }},
       "merge_policy" => {:one_of, ~w(board human)},
       "views" =>
@@ -150,6 +151,16 @@ defmodule Foreman.Config.Schema do
       each(value, fn item, index -> check(item, type, "#{field}[#{index}]") end)
     end
   end
+
+  defp check(value, :model_pair, field) when is_map(value) do
+    with :ok <- check(value, {:table, %{"from" => :model, "to" => :model}}, field),
+         :ok <- required(value, ~w(from to), field) do
+      if value["from"] != value["to"], do: :ok, else: {:error, "#{field}: models must differ"}
+    end
+  end
+
+  defp check(value, :model, field),
+    do: pattern(value, ~r/\A[a-zA-Z0-9][a-zA-Z0-9._\/-]{0,127}\z/, field)
 
   defp check(value, :stage, field) do
     stages = Enum.map(Foreman.Stage.__fsm__(:states), &Atom.to_string/1)

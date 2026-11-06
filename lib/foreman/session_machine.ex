@@ -20,6 +20,8 @@ defmodule Foreman.SessionMachine do
   event(:idle_timeout, source: :observed)
   event(:activity, source: :observed)
   event(:relaunch)
+  event(:resume_on_model)
+  event(:model_resume_failed)
   effects([:open, :clear, :close, :identity])
   guard(:parkable?)
   guard(:coordinator?)
@@ -67,6 +69,10 @@ defmodule Foreman.SessionMachine do
     guard: :parkable?,
     do: [close: :window, clear: :waiting]
   )
+
+  transition(:resume_on_model, from: [:starting, :running, :waiting], to: :starting)
+  transition(:model_resume_failed, from: [:starting, :running, :waiting], to: :ended)
+  invalid([:resume_on_model, :model_resume_failed], from: :any)
 
   transition(:relaunch, from: [:parked, :ended], to: :starting, do: [open: :resume])
   guard(:resume_matches?)

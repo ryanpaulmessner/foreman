@@ -18,6 +18,27 @@ defmodule Foreman.SessionWaitingTest do
     %{session: session}
   end
 
+  test "a shared limit replaces a family limit instead of reusing its authorization", %{
+    session: s
+  } do
+    params = %{
+      "session" => s.session_id,
+      "facts" => %{"reason" => "usage_limit", "limit_family" => "opus"}
+    }
+
+    assert {:ok, family} = Requests.ask({"sample", "s-1"}, "session_waiting", params)
+
+    assert {:ok, shared} =
+             Requests.ask({"sample", "s-1"}, "session_waiting", %{
+               params
+               | "facts" => %{"reason" => "usage_limit"}
+             })
+
+    assert shared.id != family.id
+    assert shared.facts["limit_family"] == nil
+    assert Requests.get(family.id).state == "superseded"
+  end
+
   test "a repeated waiting hook is still activity", %{session: s} do
     params = %{"session" => s.session_id, "facts" => %{"reason" => "input", "tool" => "ask"}}
     {:ok, request} = Requests.ask({"sample", "s-1"}, "session_waiting", params)

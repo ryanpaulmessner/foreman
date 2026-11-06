@@ -11,21 +11,25 @@ stateDiagram-v2
     fsm_set_3 --> starting: coordinator_fresh [coordinator?] / identity(new), open(window)
     fsm_set_5 --> ended: window_gone [coordinator?] / clear(waiting)
     fsm_set_6 --> parked: idle_timeout [parkable?] / close(window), clear(waiting)
-    fsm_set_7 --> starting: relaunch / open(resume)
+    fsm_set_7 --> starting: resume_on_model
+    fsm_set_8 --> ended: model_resume_failed
+    fsm_set_10 --> starting: relaunch / open(resume)
     new --> starting: launch / open(window)
     starting --> running: started
-    fsm_set_10 --> waiting: waiting
+    fsm_set_13 --> waiting: waiting
     waiting --> running: resumed [resume_matches?] / clear(waiting)
-    fsm_set_12 --> ended: exited / clear(waiting)
-    fsm_set_13 --> parked: window_gone / clear(waiting)
+    fsm_set_15 --> ended: exited / clear(waiting)
+    fsm_set_16 --> parked: window_gone / clear(waiting)
     state "new, ended" as fsm_set_0
     state "new, ended" as fsm_set_3
     state "starting, running, waiting, ended" as fsm_set_5
     state "running, waiting, ended" as fsm_set_6
-    state "parked, ended" as fsm_set_7
-    state "starting, running" as fsm_set_10
-    state "running, waiting" as fsm_set_12
-    state "starting, running, waiting, ended" as fsm_set_13
+    state "starting, running, waiting" as fsm_set_7
+    state "starting, running, waiting" as fsm_set_8
+    state "parked, ended" as fsm_set_10
+    state "starting, running" as fsm_set_13
+    state "running, waiting" as fsm_set_15
+    state "starting, running, waiting, ended" as fsm_set_16
 ```
 
 | state | event | result | effects |
@@ -45,6 +49,8 @@ stateDiagram-v2
 | new | idle_timeout | ignored |  |
 | new | activity | ignored |  |
 | new | relaunch | invalid |  |
+| new | resume_on_model | invalid |  |
+| new | model_resume_failed | invalid |  |
 | starting | launch | invalid |  |
 | starting | adopt | invalid |  |
 | starting | coordinator_resume | invalid |  |
@@ -58,6 +64,8 @@ stateDiagram-v2
 | starting | idle_timeout | ignored |  |
 | starting | activity | ignored |  |
 | starting | relaunch | invalid |  |
+| starting | resume_on_model | -> starting |  |
+| starting | model_resume_failed | -> ended |  |
 | running | launch | invalid |  |
 | running | adopt | invalid |  |
 | running | coordinator_resume | invalid |  |
@@ -72,6 +80,8 @@ stateDiagram-v2
 | running | idle_timeout | ignored |  |
 | running | activity | ignored |  |
 | running | relaunch | invalid |  |
+| running | resume_on_model | -> starting |  |
+| running | model_resume_failed | -> ended |  |
 | waiting | launch | invalid |  |
 | waiting | adopt | invalid |  |
 | waiting | coordinator_resume | invalid |  |
@@ -87,6 +97,8 @@ stateDiagram-v2
 | waiting | idle_timeout | ignored |  |
 | waiting | activity | ignored |  |
 | waiting | relaunch | invalid |  |
+| waiting | resume_on_model | -> starting |  |
+| waiting | model_resume_failed | -> ended |  |
 | ended | launch | invalid |  |
 | ended | adopt [coordinator?] | -> ended | identity(adopt) |
 | ended | adopt | invalid |  |
@@ -104,6 +116,8 @@ stateDiagram-v2
 | ended | idle_timeout | ignored |  |
 | ended | activity | ignored |  |
 | ended | relaunch | -> starting | open(resume) |
+| ended | resume_on_model | invalid |  |
+| ended | model_resume_failed | invalid |  |
 | parked | launch | invalid |  |
 | parked | adopt | invalid |  |
 | parked | coordinator_resume | invalid |  |
@@ -116,3 +130,5 @@ stateDiagram-v2
 | parked | idle_timeout | ignored |  |
 | parked | activity | ignored |  |
 | parked | relaunch | -> starting | open(resume) |
+| parked | resume_on_model | invalid |  |
+| parked | model_resume_failed | invalid |  |

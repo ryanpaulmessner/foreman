@@ -3,6 +3,103 @@ defmodule ForemanWeb.SessionLiveTest do
   import Phoenix.LiveViewTest
   import Foreman.AgentSessionFixtures
 
+  test "usage limit offers the configured fallback beside Continue, but no pair and shared Claude limits do not",
+       %{conn: conn} do
+    for {name, harness, kind, model, fallback} <- [
+          {"paired", "pi", "build", "openai-codex/gpt-6-astra", "anthropic/claude-opus-5-5"},
+          {"unpaired", "pi", "build", "other/model", nil},
+          {"claude", "claude", "epic_coordinator", "claude-opus-5-5", nil}
+        ] do
+      row = fallback_session(name, harness, kind, model)
+      {:ok, row, _} = Foreman.AgentSessions.fire(row, :usage_limit)
+      {:ok, view, _} = live(conn, "/sessions/#{row.id}")
+      assert has_element?(view, "#session-control-continue")
+
+      if fallback do
+        assert has_element?(
+                 view,
+                 "#session-next-step #session-control-resume_on_model[phx-disable-with='Resuming…']",
+                 "Resume on #{fallback}"
+               )
+      else
+        refute has_element?(view, "#session-control-resume_on_model")
+      end
+    end
+  end
+
+  test "Claude offers another family only for an explicit family limit and keeps the reset time",
+       %{conn: conn} do
+    row =
+      agent_session(
+        name: "opus-coordinator",
+        harness: "claude",
+        kind: "epic_coordinator",
+        model: "claude-opus-5-5",
+        conversation_id: Ecto.UUID.generate()
+      )
+
+    {:ok, row, _} = Foreman.AgentSessions.fire(row, :usage_limit)
+
+    Foreman.Repo.insert!(%Foreman.Requests.Request{
+      repo_key: "sample",
+      bead_id: "s-1",
+      actor: "claude",
+      kind: "session_waiting",
+      state: "pending",
+      agent_session_id: row.id,
+      facts: %{
+        "reason" => "usage_limit",
+        "limit_family" => "opus",
+        "provider" => "Anthropic",
+        "reset_at" => DateTime.to_iso8601(DateTime.add(DateTime.utc_now(), 3600))
+      }
+    })
+
+    {:ok, view, _} = live(conn, "/sessions/#{row.id}")
+    assert has_element?(view, "#session-control-resume_on_model", "Resume on claude-sonnet-5-5")
+    assert has_element?(view, "#session-control-continue")
+    assert has_element?(view, "#session-state-second", "resets")
+    assert has_element?(view, "#session-next-step p[title]", "resets")
+  end
+
+  test "a paired Pi without a saved conversation does not offer an unusable resume", %{conn: conn} do
+    row = agent_session(model: "openai-codex/gpt-6-astra")
+    {:ok, row, _} = Foreman.AgentSessions.fire(row, :usage_limit)
+    {:ok, view, _} = live(conn, "/sessions/#{row.id}")
+    refute has_element?(view, "#session-control-resume_on_model")
+    assert has_element?(view, "#session-control-continue")
+    assert has_element?(view, "#session-unavailable", "No Pi session id was recorded")
+  end
+
+  defp fallback_session(name, harness, kind, model) do
+    root = Path.join(System.tmp_dir!(), "fallback-lv-#{System.unique_integer([:positive])}")
+    id = Ecto.UUID.generate()
+
+    dir =
+      Path.join(
+        root,
+        "--" <> (root |> String.trim_leading("/") |> String.replace("/", "-")) <> "--"
+      )
+
+    File.mkdir_p!(dir)
+    File.write!(Path.join(dir, "stamp_#{id}.jsonl"), "{}\n")
+    Application.put_env(:foreman, :pi_sessions_dir, root)
+
+    on_exit(fn ->
+      File.rm_rf!(root)
+      Application.delete_env(:foreman, :pi_sessions_dir)
+    end)
+
+    agent_session(
+      name: name,
+      harness: harness,
+      kind: kind,
+      model: model,
+      conversation_id: id,
+      workdir: root
+    )
+  end
+
   test "working session opens Recent output and Details keeps the attach command", %{conn: conn} do
     row = agent_session(name: "page-build", pane_id: "%8", branch: "feat/session")
     {:ok, view, _} = live(conn, "/sessions/#{row.id}")

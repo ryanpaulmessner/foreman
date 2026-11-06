@@ -16,6 +16,14 @@ defmodule Foreman.Config do
                  |> elem(1)
                  |> Map.fetch!("views")
 
+  @default_fallbacks @defaults_text
+                     |> TomlElixir.decode(spec: :"1.0.0")
+                     |> elem(1)
+                     |> get_in(["board", "model_fallbacks"])
+
+  def model_fallbacks(config),
+    do: Map.get(Map.get(config, "board", %{}), "model_fallbacks", @default_fallbacks)
+
   @doc "Resolve presets for snapshots saved before views were configurable."
   def views(config), do: Map.get(config, "views", @default_views)
 
