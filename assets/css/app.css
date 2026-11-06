@@ -15,7 +15,30 @@ html[data-theme=dark] { color-scheme: dark; }
 body { margin: 0; background: var(--background-base); }
 .bb-launch-control { white-space: nowrap; }
 .bb-panel { border: 1px solid var(--border-base); border-radius: 10px; background: var(--surface); padding: 16px; box-shadow: var(--shadow-base); }
-.bb-session-panel { padding: 0; overflow: hidden; }
+.bb-view-switch { float: right; display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--border-base); border-radius: 8px; background: var(--background-sunken); }
+.bb-view-switch [aria-pressed="true"] { background: var(--surface); box-shadow: var(--shadow-base); }
+.bb-session-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; padding: 16px; background: var(--background-sunken); }
+.bb-session-grid[hidden] { display: none; }
+.bb-grid-heading { grid-column: 1 / -1; padding-top: 8px; }
+.bb-grid-cell { min-width: 0; }
+.bb-grid-card { position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; height: 100%; padding: 10px; border: 1px solid var(--border-base); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-base); transition: box-shadow .15s; }
+.bb-grid-card:hover { box-shadow: var(--shadow-base); }
+.bb-grid-card[data-color="info"] { border-top: 2px solid var(--info); }
+.bb-grid-card[data-color="primary"] { border-color: var(--primary); }
+.bb-grid-card[data-color="warning"] { border-color: var(--warning); }
+.bb-grid-card > span { flex-wrap: wrap; }
+.bb-grid-focus { position: relative; z-index: 2; margin-left: auto; width: 32px; height: 32px; flex-shrink: 0; }
+.bb-grid-ticket { min-height: 20px; }
+.bb-grid-ticket > span { border: 1px solid var(--border-base); border-radius: 4px; padding: 1px 4px; }
+.bb-grid-output { margin-top: auto; pointer-events: none; }
+.bb-grid-output .bb-term-body { height: 108px; overflow: hidden; padding: 6px 8px; font-size: 11px; line-height: 16px; }
+.bb-grid-stale .bb-grid-output .bb-term-body { opacity: .5; }
+.bb-grid-cell:has(.bb-grid-ended) { grid-column: 1 / -1; }
+.bb-grid-ended { flex-direction: row; align-items: center; flex-wrap: wrap; height: auto; opacity: .65; padding: 7px 10px; }
+.bb-grid-ended .bb-session-kind { display: none; }
+.bb-grid-skeleton { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+@media (max-width: 1100px) { .bb-session-grid, .bb-grid-skeleton { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.bb-session-panel { clear: both; padding: 0; overflow: hidden; }
 /* Session page controls (spec Decision 17): buttons size to their labels and never wrap; Stop sits apart at the right end. */
 .bb-session-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .bb-session-controls > *, .bb-session-control { flex: none; white-space: nowrap; }

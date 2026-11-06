@@ -2,7 +2,7 @@
 id: fm-9mm.22
 title: "Idle-timeout park closes the whole coordinator window, builds included"
 type: bug
-status: open
+status: closed
 priority: 2
 parent: fm-9mm
 blocked_by: []
@@ -11,8 +11,8 @@ supersedes: []
 discovered_from: null
 labels: []
 created: 2026-11-05
-closed: null
-close_reason: null
+closed: 2026-11-05
+close_reason: "PR #21 merged; deployed 2026-11-05"
 ---
 
 Found by the fm-9mm.14 build review (2026-11-05). The observed idle_timeout park path still calls SessionTmux.park/2, which runs kill-window. A board-launched epic coordinator that idles out takes the pane builds in its window with it. This breaks spec rules R11 (close only the session's own pane) and R8 (builds keep running). The Park control (fm-9mm.14) already closes one pane through Foreman.SessionPane.close/2.
