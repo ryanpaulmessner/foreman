@@ -62,14 +62,18 @@ defmodule ForemanWeb.CardLines do
 
   defp reply(_, _), do: ""
 
+  @answers ~w(answer batch-answer)
+
   # The receiver sentence. `before` and `after` go around the time ("just now").
   defp receiver("approve", _), do: %{before: nil, after: "The board starts it now."}
 
-  defp receiver(_, %{receiver: receiver}) when is_binary(receiver),
-    do: %{before: "Sent to #{receiver} ", after: ", as a note with the question."}
+  # R9: only an answer goes to an ended session's coordinator or resumes it.
+  defp receiver(action, %{receiver: receiver})
+       when action in @answers and is_binary(receiver),
+       do: %{before: "Sent to #{receiver} ", after: ", as a note with the question."}
 
-  defp receiver(_, %{resumes: true, name: name}),
-    do: %{before: "Sent to #{name} ", after: ". The board resumes it first."}
+  defp receiver(action, %{resumes: true, name: name}) when action in @answers,
+    do: %{before: "Sent to #{name} ", after: ". The board resumed it first."}
 
   defp receiver(_, %{state: :live, name: name}), do: %{before: "Sent to #{name} ", after: "."}
 
@@ -141,15 +145,33 @@ defmodule ForemanWeb.CardLines do
         _ -> ""
       end
 
+    sentence =
+      case reason do
+        {:not_delivered, name, why} ->
+          "The board could not send it: #{not_delivered(name, why)}. The card stays open."
+
+        _ ->
+          "The board could not save it#{because}."
+      end
+
     %{
       id: id,
       action: action,
       params: params,
       lead: @leads[action],
-      reason: "The board could not save it#{because}.",
+      reason: sentence,
       kept: if(kind != "chore", do: "Your choice and note are still here.")
     }
   end
+
+  # R9: why an answer to an ended session did not reach the session or coordinator `name`.
+  defp not_delivered(name, :prompt_busy), do: "#{name} is busy"
+  defp not_delivered(name, :window_gone), do: "the pane of #{name} is closed"
+  defp not_delivered(_, :tmux_unavailable), do: "tmux does not answer"
+  defp not_delivered(name, :coordinator_not_resumable), do: "#{name} cannot resume"
+  defp not_delivered(name, :still_open), do: "the old pane of #{name} is still open"
+  defp not_delivered(_, "refused in preview"), do: "this preview does not write to tmux"
+  defp not_delivered(name, _), do: "the board could not reach #{name}"
 
   defp invalid, do: ": the board does not accept this action on this card"
 

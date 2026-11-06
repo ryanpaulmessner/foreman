@@ -2,7 +2,7 @@ defmodule ForemanWeb.SessionLive do
   use ForemanWeb, :live_view
   alias Foreman.{AgentSessions, PaneCapture, PaneReader, RequestSource, SessionPage}
   alias Foreman.{SessionCaptures, SessionControlPanel, SessionControls, SessionHistory}
-  alias Foreman.{SessionPane, SessionsConnection}
+  alias Foreman.{SessionPane, SessionResume, SessionsConnection}
   alias ForemanWeb.{AnsiHtml, RelativeTime, SessionState}
   alias Fluxon.Components.Button
   import ForemanWeb.TicketDetail, only: [timestamp: 1]
@@ -72,14 +72,24 @@ defmodule ForemanWeb.SessionLive do
       else: {:noreply, panel(socket, :act)}
   end
 
-  @controls %{"focus" => :focus, "continue" => :continue, "park" => :park}
+  @controls %{
+    "focus" => :focus,
+    "continue" => :continue,
+    "park" => :park,
+    "resume" => :resume,
+    "relaunch_build" => :relaunch_build
+  }
 
   def handle_event("control", %{"control" => name}, socket) when is_map_key(@controls, name),
     do: {:noreply, run_control(socket, @controls[name], %{})}
 
   def handle_event("ask-stop", _, socket), do: {:noreply, panel(socket, :ask_stop)}
+  def handle_event("ask-fresh", _, socket), do: {:noreply, panel(socket, :ask_fresh)}
   def handle_event("keep-running", _, socket), do: {:noreply, panel(socket, :keep)}
   def handle_event("stop", _, socket), do: {:noreply, run_control(socket, :stop, %{})}
+
+  def handle_event("start-fresh", _, socket),
+    do: {:noreply, run_control(socket, :start_fresh, %{})}
 
   def handle_event("send-message", %{"message" => %{"text" => text}}, socket) do
     case Foreman.ChatPrompt.typed(text) do
@@ -134,6 +144,7 @@ defmodule ForemanWeb.SessionLive do
     number = max(length(rounds), 1)
     parent = row && AgentSessions.get(row.parent_id)
     resumable = row && AgentSessions.resumable?(row)
+    dead? = row && not is_nil(row.ended_at)
 
     state =
       if row,
@@ -189,6 +200,11 @@ defmodule ForemanWeb.SessionLive do
       card: List.first(cards),
       provider: provider(cards),
       resumable: resumable,
+      # The dead view (copy table): where an answer goes (R9), the coordinator that
+      # Relaunch resumes first (R8), and what ended the session.
+      route: if(dead? && cards != [], do: SessionResume.answer_route(List.first(cards))),
+      coordinator: if(dead?, do: AgentSessions.coordinator(row)),
+      ended_by: if(dead?, do: ended_by(SessionCaptures.get(row.id))),
       repos: Foreman.RuntimeState.repos(),
       saved: if(row && row.ended_at && tab == :output, do: SessionCaptures.get(row.id))
     )
@@ -223,7 +239,10 @@ defmodule ForemanWeb.SessionLive do
       stop: on?(controls, :stop),
       unavailable: unavailable(controls),
       row_controls:
-        Enum.filter([:answer, :continue, :focus, :park], &(&1 != primary and on?(controls, &1)))
+        Enum.filter(
+          [:answer, :resume, :relaunch_build, :start_fresh, :continue, :focus, :park],
+          &(&1 != primary and on?(controls, &1))
+        )
     )
   end
 
@@ -286,7 +305,16 @@ defmodule ForemanWeb.SessionLive do
     to_form(%{"text" => text}, as: :message, errors: errors)
   end
 
-  @verbs %{focus: "focus", continue: "continue", message: "send to", park: "park", stop: "stop"}
+  @verbs %{
+    focus: "focus",
+    continue: "continue",
+    message: "send to",
+    park: "park",
+    stop: "stop",
+    resume: "resume",
+    relaunch_build: "relaunch",
+    start_fresh: "start a new conversation for"
+  }
 
   # Result lines (Decision 17): the exact copy for each control, then the shared failure line.
   defp result_line(:focus, :ok, row), do: {:success, "Brought #{row.name} to the front."}
@@ -303,6 +331,20 @@ defmodule ForemanWeb.SessionLive do
   defp result_line(:stop, :ok, row),
     do: {:success, "Stopped #{row.name}. The worktree and branch stay."}
 
+  defp result_line(:resume, {:ok, row}, _),
+    do: {:success, "Resumed #{row.name} in #{row.workdir || "its workdir"}."}
+
+  defp result_line(:relaunch_build, {:ok, %{resumed: false} = sent}, _),
+    do: {:success, ~s(Sent #{sent.coordinator} the note: "#{sent.note}")}
+
+  defp result_line(:relaunch_build, {:ok, %{resumed: true} = sent}, _),
+    do: {:success, "Resumed #{sent.coordinator} and sent it the note."}
+
+  defp result_line(:start_fresh, {:ok, new}, row),
+    do:
+      {:success, "Started a new #{row.name} conversation. Its builds stay under it.",
+       "/sessions/#{new.id}"}
+
   defp result_line(control, {:error, reason}, row),
     do: {:error, "Could not #{@verbs[control]} #{row.name}: #{failure(reason)}. Nothing changed."}
 
@@ -313,7 +355,35 @@ defmodule ForemanWeb.SessionLive do
   defp failure(:invalid), do: "it is not available now"
   defp failure(:answer_required), do: "the message is empty"
   defp failure("refused in preview"), do: "this preview does not write to tmux"
+  defp failure(:name_taken), do: "another live session has this name"
+  defp failure(:not_resumable), do: "it cannot resume"
+  defp failure(:workdir_gone), do: "the workdir was removed"
+  defp failure(:still_open), do: "its old pane is still open"
+  defp failure(:no_coordinator), do: "no coordinator is recorded for it"
+  defp failure(:pi_unavailable), do: "Pi is not on the board's PATH"
+  defp failure(:claude_unavailable), do: "Claude is not on the board's PATH"
+
+  defp failure({:coordinator, name, :coordinator_not_resumable}),
+    do: "#{name} ended and cannot resume"
+
+  defp failure({:coordinator, name, :prompt_busy}), do: "#{name} is busy"
+  defp failure({:coordinator, name, reason}), do: "#{name}: " <> failure(reason)
   defp failure(_), do: "the board could not do it"
+
+  # R8 (copy table): a dead build whose coordinator ended too says what Relaunch does.
+  defp relaunch_line(true, _), do: "."
+
+  defp relaunch_line(false, coordinator) do
+    if AgentSessions.resumable?(coordinator),
+      do: ". Relaunch resumes #{coordinator.name} first.",
+      else: " and cannot resume."
+  end
+
+  # What ended a dead session, from how its last output was saved.
+  defp ended_by(%{reason: "stop"}), do: "You pressed Stop."
+  defp ended_by(%{reason: "exit"}), do: "The agent exited."
+  defp ended_by(%{reason: "park"}), do: "It was parked."
+  defp ended_by(_), do: "The pane closed."
 
   def terminate(_reason, socket), do: read(socket, :closed)
 
@@ -394,17 +464,11 @@ defmodule ForemanWeb.SessionLive do
     end
   end
 
-  defp resume_reason(%{conversation_id: id}) when id in [nil, ""],
-    do: "No Pi session id was recorded at launch."
-
-  defp resume_reason(%{workdir: dir}) do
-    if is_binary(dir) and File.dir?(dir),
-      do: "The Pi session file is not available.",
-      else: "The worktree was removed."
-  end
-
   @buttons %{
     answer: {"Answer on the card", "hero-inbox", nil},
+    resume: {"Resume", "hero-arrow-uturn-right", "Resuming…"},
+    relaunch_build: {"Relaunch build on this ticket", "hero-arrow-path", "Relaunching…"},
+    start_fresh: {"Start fresh", "hero-sparkles", nil},
     continue: {"Continue", "hero-play", "Continuing…"},
     focus: {"Focus terminal", "hero-command-line", "Focusing…"},
     park: {"Park", "hero-pause", "Parking…"},
@@ -434,13 +498,17 @@ defmodule ForemanWeb.SessionLive do
 
   defp on?(controls, control), do: List.keyfind(controls, control, 0) == {control, :on}
 
-  # The next-step panel's one filled button (Decision 10).
+  # The next-step panel's one filled button (Decision 10): for a dead session the open
+  # card first, else the control R4 offers.
   defp primary(row, controls, card) do
     cond do
       on?(controls, :retry) -> :retry
       row.state == "waiting.usage_limit" and on?(controls, :continue) -> :continue
       row.state == "waiting.permission" and on?(controls, :focus) -> :focus
       card -> :answer
+      on?(controls, :resume) -> :resume
+      on?(controls, :relaunch_build) -> :relaunch_build
+      on?(controls, :start_fresh) -> :start_fresh
       true -> nil
     end
   end
@@ -448,6 +516,7 @@ defmodule ForemanWeb.SessionLive do
   attr :control, :atom, required: true
   attr :card, :map, default: nil
   attr :filled, :boolean, default: false
+  attr :expanded, :boolean, default: false, doc: "the Start fresh confirm is open"
 
   # One control button; buttons size to their labels (Decision 17).
   defp control(assigns) do
@@ -466,7 +535,20 @@ defmodule ForemanWeb.SessionLive do
       <.icon name={@icon} class="size-4" /> {@label}
     </Button.button>
     <Button.button
-      :if={@control != :answer}
+      :if={@control == :start_fresh}
+      id="session-control-start_fresh"
+      type="button"
+      size="sm"
+      variant={if(@filled, do: "solid", else: "outline")}
+      class="bb-session-control"
+      phx-click="ask-fresh"
+      aria-expanded={to_string(@expanded)}
+      aria-controls="session-fresh-confirm"
+    >
+      <.icon name={@icon} class="size-4" /> {@label}
+    </Button.button>
+    <Button.button
+      :if={@control not in [:answer, :start_fresh]}
       id={"session-control-#{@control}"}
       type="button"
       size="sm"
@@ -666,6 +748,17 @@ defmodule ForemanWeb.SessionLive do
               <% @row.ended_at && @card -> %>
                 <h2 class="font-semibold">Its question is still open.</h2>
                 <p>{@card.facts["question"]}</p>
+                <%= case @route do %>
+                  <% {:note, coordinator} -> %>
+                    <p id="session-answer-route">
+                      When you answer, your answer and the question go to {coordinator.name} as a note, and the card closes.
+                    </p>
+                  <% {:resume, _} -> %>
+                    <p id="session-answer-route">
+                      When you answer, the board resumes the session first.
+                    </p>
+                  <% _ -> %>
+                <% end %>
               <% @row.state == "parked" -> %>
                 <h2 class="font-semibold">Parked <.timestamp at={@row.ended_at} />.</h2>
                 <p>Its builds keep running.</p>
@@ -675,15 +768,22 @@ defmodule ForemanWeb.SessionLive do
                   <.timestamp at={@row.ended_at} />{if !@resumable && @row.kind == "build",
                     do: " during round #{@round}"}.
                 </h2>
-                <p :if={@resumable}>The pane is closed.</p>
-                <p :if={@parent && @parent.ended_at}>
-                  {@parent.name} ended <.timestamp at={@parent.ended_at} /> too.
-                </p>
+                <p :if={@resumable}>{@ended_by}</p>
                 <p :if={!@resumable && @row.kind != "build"}>
                   The board has no conversation id for it.
                 </p>
                 <p :if={!@resumable && @row.kind == "build"}>
-                  This build cannot resume: {resume_reason(@row)}
+                  This build cannot resume: {SessionControls.resume_reason(@row)}
+                </p>
+                <p
+                  :if={@row.kind == "build" && @coordinator && @coordinator.ended_at}
+                  id="session-coordinator-ended"
+                >
+                  {@coordinator.name} ended <.timestamp at={@coordinator.ended_at} />
+                  too{relaunch_line(
+                    @resumable,
+                    @coordinator
+                  )}
                 </p>
               <% @row.state == "waiting.permission" -> %>
                 <h2 class="font-semibold">It waits for a permission answer in the terminal.</h2>
@@ -714,11 +814,17 @@ defmodule ForemanWeb.SessionLive do
               :if={@primary}
               control={@primary}
               card={@card}
+              expanded={@panel == :confirming_fresh}
               filled
             />
           </section>
           <div :if={@row_controls != [] or @stop} id="session-controls" class="bb-session-controls">
-            <.control :for={control <- @row_controls} control={control} card={@card} />
+            <.control
+              :for={control <- @row_controls}
+              control={control}
+              card={@card}
+              expanded={@panel == :confirming_fresh}
+            />
             <Button.button
               :if={@stop}
               id="session-stop"
@@ -780,12 +886,54 @@ defmodule ForemanWeb.SessionLive do
               </Button.button>
             </div>
           </section>
+          <section
+            :if={@panel == :confirming_fresh}
+            id="session-fresh-confirm"
+            role="alertdialog"
+            aria-labelledby="session-fresh-question"
+            class="bb-panel bb-session-confirm-fresh space-y-3"
+          >
+            <h2 id="session-fresh-question" class="font-semibold">
+              Start a new conversation for {@row.name}?
+            </h2>
+            <p class="text-sm">The old conversation stays in history.</p>
+            <div class="bb-session-controls">
+              <Button.button
+                id="session-fresh-confirm-yes"
+                type="button"
+                size="sm"
+                variant="solid"
+                phx-click="start-fresh"
+                phx-disable-with="Starting…"
+              >
+                Start fresh
+              </Button.button>
+              <Button.button
+                id="session-fresh-cancel"
+                type="button"
+                size="sm"
+                variant="outline"
+                phx-click="keep-running"
+                phx-mounted={JS.focus()}
+              >
+                Cancel
+              </Button.button>
+            </div>
+          </section>
           <ForemanWeb.StatusLine.status_line
             :if={@result}
             id="session-result"
             kind={elem(@result, 0)}
           >
             {elem(@result, 1)}
+            <.link
+              :if={tuple_size(@result) > 2}
+              id="session-result-link"
+              navigate={elem(@result, 2)}
+              class="underline underline-offset-4"
+            >
+              Open the new session
+            </.link>
           </ForemanWeb.StatusLine.status_line>
           <.form
             :if={on?(@controls, :message)}

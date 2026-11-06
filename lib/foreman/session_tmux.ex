@@ -515,10 +515,18 @@ defmodule Foreman.SessionTmux do
 
     args = [hd(args)] ++ model_args ++ tl(args)
 
+    # A resume that delivers a note or an answer starts with it (spec R8, R9).
     args =
-      if Foreman.Sessions.coordinator?(s) and Keyword.get(opts, :resume, false),
-        do: args ++ ["/orient"],
-        else: args
+      cond do
+        Keyword.get(opts, :resume, false) and is_binary(opts[:prompt]) ->
+          args ++ [opts[:prompt]]
+
+        Foreman.Sessions.coordinator?(s) and Keyword.get(opts, :resume, false) ->
+          args ++ ["/orient"]
+
+        true ->
+          args
+      end
 
     # Match a normal tmux window's interactive login startup, then remove service
     # settings even if a local shell startup file reintroduces them.
@@ -606,7 +614,8 @@ defmodule Foreman.SessionTmux do
     end
   end
 
-  defp configured_tmux_session do
+  @doc "The one tmux session every launched session goes to (`board.tmux_session`), or nil."
+  def configured_tmux_session do
     Application.get_env(:foreman, :tmux_session) || board_tmux_session()
   end
 
