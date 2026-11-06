@@ -244,4 +244,33 @@ defmodule Foreman.CardListTest do
     doc = Foreman.Fsm.Renderer.document(CardList, "card_list")
     for state <- ~w(loading empty closed open failed), do: assert(doc =~ state)
   end
+
+  describe "a note that waits for a busy coordinator (fm-9mm.23)" do
+    test "its result line has no timer while the note waits" do
+      list = open(["a", "b"], "a")
+      line = %{lead: "Answered.", note: %{state: "queued"}}
+      {list, fx} = CardList.resolved(list, "a", ["b"], line)
+      assert list.lines["a"] == {:result, line}
+      refute {:expire, "a"} in fx
+    end
+
+    test "the line follows the note, and its timer starts when the note is sent" do
+      list = open(["a", "b"], "a")
+      {list, _} = CardList.resolved(list, "a", ["b"], %{note: %{state: "queued"}})
+
+      assert {^list, []} = CardList.note_changed(list, "a", %{state: "queued"})
+      {list, fx} = CardList.note_changed(list, "a", %{state: "sent"})
+      assert list.lines["a"] == {:result, %{note: %{state: "sent"}}}
+      assert fx == [expire: "a"]
+
+      # Sent once: a later read starts no second timer.
+      assert {^list, []} = CardList.note_changed(list, "a", %{state: "sent"})
+    end
+
+    test "a line with no note ignores note reads" do
+      list = open(["a", "b"], "a")
+      {list, _} = CardList.resolved(list, "a", ["b"], :sent)
+      assert {^list, []} = CardList.note_changed(list, "a", %{state: "sent"})
+    end
+  end
 end

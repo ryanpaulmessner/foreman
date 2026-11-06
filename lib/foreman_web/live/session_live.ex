@@ -84,6 +84,12 @@ defmodule ForemanWeb.SessionLive do
   def handle_event("control", %{"control" => name}, socket) when is_map_key(@controls, name),
     do: {:noreply, run_control(socket, @controls[name], %{})}
 
+  # Do not send, on a note that waits for a busy coordinator (fm-9mm.23).
+  def handle_event("withdraw-note", %{"note" => id}, socket) do
+    with {id, ""} <- Integer.parse(to_string(id)), do: Foreman.QueuedNotes.withdraw(id)
+    {:noreply, refresh(socket)}
+  end
+
   def handle_event("ask-stop", _, socket), do: {:noreply, panel(socket, :ask_stop)}
   def handle_event("ask-fresh", _, socket), do: {:noreply, panel(socket, :ask_fresh)}
   def handle_event("keep-running", _, socket), do: {:noreply, panel(socket, :keep)}
@@ -207,6 +213,8 @@ defmodule ForemanWeb.SessionLive do
       route: if(dead? && cards != [], do: SessionResume.answer_route(List.first(cards))),
       coordinator: if(dead?, do: AgentSessions.coordinator(row)),
       ended_by: if(dead?, do: ended_by(SessionCaptures.get(row.id))),
+      # The latest note about this dead session saved for a busy coordinator (fm-9mm.23).
+      note: if(dead?, do: List.first(Foreman.QueuedNotes.for_subject(row.id))),
       repos: Foreman.RuntimeState.repos(),
       saved: if(row && row.ended_at && tab == :output, do: SessionCaptures.get(row.id))
     )
@@ -358,6 +366,9 @@ defmodule ForemanWeb.SessionLive do
 
   defp result_line(:resume, {:ok, row}, _),
     do: {:success, "Resumed #{row.name} in #{row.workdir || "its workdir"}."}
+
+  defp result_line(:relaunch_build, {:ok, %{queued: true} = sent}, _),
+    do: {:info, ~s(#{sent.coordinator} is busy. Saved the note: "#{sent.note}")}
 
   defp result_line(:relaunch_build, {:ok, %{resumed: false} = sent}, _),
     do: {:success, ~s(Sent #{sent.coordinator} the note: "#{sent.note}")}
@@ -979,6 +990,14 @@ defmodule ForemanWeb.SessionLive do
             >
               Open the new session
             </.link>
+          </ForemanWeb.StatusLine.status_line>
+          <ForemanWeb.StatusLine.status_line
+            :if={@note}
+            id="session-note"
+            kind={ForemanWeb.NoteLine.kind(@note)}
+          >
+            <ForemanWeb.NoteLine.text note={@note} />
+            <ForemanWeb.NoteLine.withdraw id="session-note-withdraw" note={@note} />
           </ForemanWeb.StatusLine.status_line>
           <.form
             :if={on?(@controls, :message)}

@@ -23,6 +23,7 @@ defmodule Foreman.CardList do
   leaves without a line that says why (R6).
   """
   use Foreman.Fsm
+  alias Foreman.QueuedNotes
 
   defstruct state: :loading,
             order: [],
@@ -60,6 +61,7 @@ defmodule Foreman.CardList do
   event(:resolve_failed)
   event(:line_expired, source: :observed)
   event(:dismiss_line)
+  event(:note_changed, source: :observed)
 
   effects([
     :show_rows,
@@ -74,6 +76,7 @@ defmodule Foreman.CardList do
     :error_line,
     :clear_error,
     :remove_line,
+    :update_line,
     :load_error
   ])
 
@@ -184,6 +187,7 @@ defmodule Foreman.CardList do
   invalid(:resolve_failed, from: [:loading, :empty, :closed])
   transition(:line_expired, from: :any, to: :stay, do: [remove_line: :line])
   transition(:dismiss_line, from: :any, to: :stay, do: [remove_line: :line])
+  transition(:note_changed, from: :any, to: :stay, do: [update_line: :note])
 
   # Guards: `payload.ids` are the pending card ids in list order.
   def wanted_pending?(_, %{want: want, ids: ids}), do: want != nil and want in ids
@@ -240,6 +244,12 @@ defmodule Foreman.CardList do
   @doc "You closed a line with its X."
   def dismiss_line(list, id), do: fire(list, :dismiss_line, %{id: id})
 
+  @doc """
+  The note of card `id`'s result line, saved for a busy coordinator (fm-9mm.23), was read
+  again as `note`. The line follows it; its 10 s start when the note no longer waits.
+  """
+  def note_changed(list, id, note), do: fire(list, :note_changed, %{id: id, note: note})
+
   defp fire(list, event, payload) do
     case step(list.state, {event, payload}, list) do
       {:error, _} ->
@@ -285,7 +295,22 @@ defmodule Foreman.CardList do
   end
 
   defp apply_effect({:result_line, :card}, list, %{id: id, line: line}),
-    do: {%{list | lines: Map.put(list.lines, id, {:result, line})}, [expire: id]}
+    do: {%{list | lines: Map.put(list.lines, id, {:result, line})}, expire(id, line)}
+
+  defp apply_effect({:update_line, :note}, list, %{id: id, note: note}) do
+    case list.lines[id] do
+      {:result, %{note: %{} = old} = line} when old != note ->
+        host =
+          if QueuedNotes.waiting?(old) and not QueuedNotes.waiting?(note),
+            do: [expire: id],
+            else: []
+
+        {%{list | lines: Map.put(list.lines, id, {:result, %{line | note: note}})}, host}
+
+      _ ->
+        {list, []}
+    end
+  end
 
   defp apply_effect({:closed_line, :open_card}, list, %{closed: info}),
     do: {%{list | lines: Map.put(list.lines, list.open, {:closed, info.(list.open)})}, []}
@@ -301,6 +326,12 @@ defmodule Foreman.CardList do
   end
 
   defp apply_effect({:load_error, :page}, list, _), do: {%{list | load_error: true}, []}
+
+  # A result line whose note waits for a busy coordinator stays until the note is sent.
+  defp expire(id, %{note: note}),
+    do: if(QueuedNotes.waiting?(note), do: [], else: [expire: id])
+
+  defp expire(id, _), do: [expire: id]
 
   # The row under `id` in the list as it was, still pending; else the first row.
   defp next(order, id, ids) do

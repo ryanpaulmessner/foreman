@@ -42,6 +42,7 @@ stateDiagram-v2
 | loading | resolve_failed | invalid |  |
 | loading | line_expired | stay | remove_line(line) |
 | loading | dismiss_line | stay | remove_line(line) |
+| loading | note_changed | stay | update_line(note) |
 | empty | loaded [wanted_pending?] | -> open | show_rows(list), open_card(wanted) |
 | empty | loaded [stale_with_rows?] | -> open | show_rows(list), open_card(first), stale_line(page) |
 | empty | loaded [any_pending?] | -> open | show_rows(list), open_card(first) |
@@ -54,6 +55,7 @@ stateDiagram-v2
 | empty | resolve_failed | invalid |  |
 | empty | line_expired | stay | remove_line(line) |
 | empty | dismiss_line | stay | remove_line(line) |
+| empty | note_changed | stay | update_line(note) |
 | closed | loaded [any_pending?] | stay | show_rows(list) |
 | closed | loaded | -> empty | show_rows(list), close_card(open) |
 | closed | load_failed | stay | load_error(page) |
@@ -64,6 +66,7 @@ stateDiagram-v2
 | closed | resolve_failed | invalid |  |
 | closed | line_expired | stay | remove_line(line) |
 | closed | dismiss_line | stay | remove_line(line) |
+| closed | note_changed | stay | update_line(note) |
 | open | loaded [open_pending?] | stay | show_rows(list) |
 | open | loaded [any_pending?] | -> open | closed_line(open_card), open_card(next), show_rows(list) |
 | open | loaded | -> empty | closed_line(open_card), show_rows(list), close_card(open) |
@@ -77,6 +80,7 @@ stateDiagram-v2
 | open | resolve_failed | -> failed | clear_lines(your_action), error_line(card) |
 | open | line_expired | stay | remove_line(line) |
 | open | dismiss_line | stay | remove_line(line) |
+| open | note_changed | stay | update_line(note) |
 | failed | loaded [open_pending?] | stay | show_rows(list) |
 | failed | loaded [any_pending?] | -> open | clear_error(card), closed_line(open_card), open_card(next), show_rows(list) |
 | failed | loaded | -> empty | clear_error(card), closed_line(open_card), show_rows(list), close_card(open) |
@@ -90,3 +94,4 @@ stateDiagram-v2
 | failed | resolve_failed | -> failed | clear_lines(your_action), error_line(card) |
 | failed | line_expired | stay | remove_line(line) |
 | failed | dismiss_line | stay | remove_line(line) |
+| failed | note_changed | stay | update_line(note) |

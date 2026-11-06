@@ -191,6 +191,23 @@ defmodule Foreman.SessionTmux do
     end
   end
 
+  @doc """
+  Whether `source`'s pane shows an idle, empty prompt, read-only: the same check
+  `reply_source/3` makes before it types. `:ok` or `{:error, reason}`.
+  """
+  def prompt_ready(source, opts \\ []) do
+    run = if source.server == :board, do: &cmd(&1, opts), else: &external_cmd(&1, opts)
+
+    with :ok <- Foreman.Preview.allow_external_write(),
+         {:ok, pane} <- Foreman.RequestSource.pane(source, opts) do
+      case source.harness do
+        "claude" -> prompt_idle(pane, run)
+        "pi" -> pi_prompt(pane, run)
+        _ -> {:error, :prompt_busy}
+      end
+    end
+  end
+
   def reply_source(source, text, opts \\ []) do
     run = if source.server == :board, do: &cmd(&1, opts), else: &external_cmd(&1, opts)
 
@@ -236,10 +253,20 @@ defmodule Foreman.SessionTmux do
     end
   end
 
+  # `tag_typing: true` marks a failure after the prompt check passed as
+  # `{:error, {:typing, reason}}`: the text may be in the pane (queued notes, fm-9mm.23).
   defp type_reply(pane, text, run, opts, check \\ &prompt_idle/2) do
     with {:ok, [{:literal, text}, :enter]} <- Foreman.ChatPrompt.keys(text),
-         :ok <- check.(pane, run),
-         {:ok, _} <- tmux(run, ["send-keys", "-t", pane, "-l", "--", text]) do
+         :ok <- check.(pane, run) do
+      case {type_keys(pane, text, run, opts), Keyword.get(opts, :tag_typing, false)} do
+        {{:error, reason}, true} -> {:error, {:typing, reason}}
+        {result, _} -> result
+      end
+    end
+  end
+
+  defp type_keys(pane, text, run, opts) do
+    with {:ok, _} <- tmux(run, ["send-keys", "-t", pane, "-l", "--", text]) do
       # Claude reads typed text and Enter on separate renders; never coalesce them.
       Process.sleep(Keyword.get(opts, :key_delay, 150))
       with {:ok, _} <- tmux(run, ["send-keys", "-t", pane, "Enter"]), do: :ok

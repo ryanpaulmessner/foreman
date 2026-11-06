@@ -542,13 +542,16 @@ defmodule Foreman.SessionResumeTest do
       assert ["-N", "-L", "default", "send-keys", "-t", "%1", "-l", "--", typed] in seen
     end
 
-    test "a coordinator that is busy: the answer is refused and the card stays open" do
+    test "a coordinator that is busy: the answer is saved and the note waits for it (fm-9mm.23)" do
       parent = coordinator()
       row = ended(agent_session(name: "stuck", parent_id: parent.id))
       request = card(row)
+      test = self()
 
       with_tmux(
         runner: fn "tmux", args, _ ->
+          send(test, {:tmux, args})
+
           cond do
             "list-panes" in args -> {"%1\t@1\tforeman\tfm-epic\t1\n", 0}
             "capture-pane" in args -> {"✳ Working… (3s)\n───\n❯ \n───\nesc to interrupt\n", 0}
@@ -558,10 +561,28 @@ defmodule Foreman.SessionResumeTest do
         key_delay: 0
       )
 
+      assert {:ok, %{state: "answered"}} =
+               Requests.resolve(request.id, :answer, %{"answer" => "Keep it"})
+
+      assert [] = for(args <- calls(), "send-keys" in args, do: args)
+
+      assert %{state: "queued", coordinator_id: coordinator_id, subject_id: subject_id} =
+               Foreman.QueuedNotes.for_request(request.id)
+
+      assert {coordinator_id, subject_id} == {parent.id, row.id}
+    end
+
+    test "a coordinator whose pane is gone: the answer is refused and the card stays open" do
+      parent = coordinator()
+      row = ended(agent_session(name: "stuck", parent_id: parent.id))
+      request = card(row)
+      with_tmux(runner: fn "tmux", _, _ -> {"", 0} end, key_delay: 0)
+
       assert Requests.resolve(request.id, :answer, %{"answer" => "Keep it"}) ==
-               {:error, {:not_delivered, "fm-epic", :prompt_busy}}
+               {:error, {:not_delivered, "fm-epic", :window_gone}}
 
       assert %{state: "pending"} = Requests.get(request.id)
+      assert Foreman.QueuedNotes.for_request(request.id) == nil
     end
 
     test "a session that can resume: the board resumes it with the answer as its first message",

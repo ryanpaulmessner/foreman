@@ -62,7 +62,8 @@ defmodule Foreman.FsmDocsTest do
         {"close_out_nag", Foreman.CloseOutNag},
         {"card_list", Foreman.CardList},
         {"pane_reader", Foreman.PaneReader},
-        {"session_control_panel", Foreman.SessionControlPanel}
+        {"session_control_panel", Foreman.SessionControlPanel},
+        {"queued_note", Foreman.QueuedNote}
       ] do
     test "#{name} documentation matches the committed golden" do
       module = unquote(module)

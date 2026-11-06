@@ -401,6 +401,7 @@ merge_policy = "human" # optional; overrides the top-level value for this repo
 merge_base = "staging" # optional PR base; defaults to the forge default branch
 color = "violet"
 enabled = true
+docs = { allow = ["skills/**"], legacy = ["slices"] } # optional; see below
 
 [[columns]]
 title = "Working"
@@ -465,6 +466,17 @@ the board automatically retargets that child to `merge_base`, or the forge defau
 This changes the PR base, not the commit history. No second approval is required.
 The merge request completes from the recorded merge SHA even if the follow-up fails.
 If the old push head is missing from the worktree, fetch it before requesting another push.
+
+`foreman check`, run by the pre-commit hook that `foreman adopt` installs, also checks
+the `.md` and `.html` files added in the commit being made (a rename counts as an add)
+against the document layout in `docs/specs/doc-layout.md`. Edits and deletes are not
+checked. `README.md`, `AGENTS.md`, `CLAUDE.md` and `CHANGELOG.md` pass anywhere, as do
+paths matching the repo's `docs.allow` globs (`*`, `**`, `?`). In a `docs.legacy` folder,
+existing files can be edited and new files are refused. Each refusal names the file and
+the `foreman doc path` command that gives the right path. With nothing added, the output is
+the ticket check alone; if git cannot be read, the layout check is skipped with a warning.
+The rules come from the `[[repos]]` entry whose `path` is the same repo (worktrees
+included). `foreman adopt` also adds `builds/*/evidence/` to `.gitignore`.
 
 When a project's tickets and code live in different repos (tickets in a workspace repo, code
 in a separate nested repo with its own remote), set `code_path` to the code checkout. Tickets

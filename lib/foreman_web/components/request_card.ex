@@ -6,6 +6,10 @@ defmodule ForemanWeb.RequestCard do
   attr :repos, :list, default: nil
   attr :link, :atom, default: :navigate, values: [:patch, :navigate]
 
+  attr :note, :any,
+    default: nil,
+    doc: "the note saved for a busy coordinator (fm-9mm.23); its page handles withdraw-note"
+
   def summary(assigns) do
     ~H"""
     <article id={@id} class="space-y-2 rounded-lg border border-base p-4">
@@ -48,6 +52,10 @@ defmodule ForemanWeb.RequestCard do
       >{@request.note}</p>
       <p :if={@request.outcome["reason"]} class="text-foreground-softer">
         {String.replace(@request.outcome["reason"], "_", " ")}
+      </p>
+      <p :if={@note} id={@id <> "-note"} class="text-sm text-foreground-softer">
+        <ForemanWeb.NoteLine.text note={@note} />
+        <ForemanWeb.NoteLine.withdraw id={@id <> "-note-withdraw"} note={@note} />
       </p>
       <.live_component
         module={ForemanWeb.CardConversation}
