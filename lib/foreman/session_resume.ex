@@ -15,14 +15,25 @@ defmodule Foreman.SessionResume do
     (`start_fresh`). The old row stays ended.
   - `answer_route/1` and `deliver_answer/2` (R9): an answer to a card of an ended session
     resumes it first when it can, with the answer as its first message; otherwise it goes
-    to its coordinator as a note with the question. When that cannot be delivered, the
-    answer is refused, so the card stays open and the answer never goes nowhere.
+    to its coordinator as a note with the question. A live coordinator that is mid-turn
+    gets the note when its prompt is next idle (`Foreman.QueuedNotes`, fm-9mm.23). When
+    the note cannot be delivered or saved, the answer is refused, so the card stays open
+    and the answer never goes nowhere.
 
   Every write checks the lifecycle first and refuses in a preview. Options go to tmux and
   the launchers (`:runner`, `:executables`, `:executable`, `:socket`).
   """
   import Ecto.Query
-  alias Foreman.{AgentSession, AgentSessions, PlanningSession, Repo, SessionLaunch, Sessions}
+
+  alias Foreman.{
+    AgentSession,
+    AgentSessions,
+    PlanningSession,
+    QueuedNotes,
+    Repo,
+    SessionLaunch,
+    Sessions
+  }
 
   @prefix "[foreman note from board] "
 
@@ -76,8 +87,10 @@ defmodule Foreman.SessionResume do
 
   @doc """
   Relaunch build on this ticket. Returns `{:ok, %{coordinator: name, resumed: boolean,
-  note: text}}` or `{:error, reason}`: `:no_coordinator`, `:coordinator_not_resumable`,
-  or `{:coordinator, name, reason}` when the note could not reach it.
+  queued: boolean, note: text}}` or `{:error, reason}`: `:no_coordinator`,
+  `:coordinator_not_resumable`, or `{:coordinator, name, reason}` when the note could not
+  reach it. A live coordinator that is busy gets the note when its prompt is next idle
+  (`queued: true`, fm-9mm.23); while that note waits, pressing again adds no note.
   """
   def relaunch_build(%AgentSession{} = row, opts \\ []) do
     with :ok <- Foreman.Preview.allow_external_write(),
@@ -87,12 +100,34 @@ defmodule Foreman.SessionResume do
            AgentSessions.coordinator(row) || {:error, :no_coordinator} do
       note = relaunch_note(row)
       resumed = not is_nil(coordinator.ended_at)
-      run = fn _row, _effects -> note(coordinator, note, opts) end
+
+      # Under the build's name lock (`AgentSessions.fire/3`): one open note per build, and
+      # none is typed while one waits.
+      run = fn _row, _effects ->
+        if QueuedNotes.open_relaunch(row.id) do
+          :ok
+        else
+          with {:ok, _} <-
+                 note_or_queue(coordinator, note, opts, kind: "relaunch", subject_id: row.id),
+               do: :ok
+        end
+      end
 
       case AgentSessions.fire(row, :relaunch_build, run: run) do
-        {:ok, _, _} -> {:ok, %{coordinator: coordinator.name, resumed: resumed, note: note}}
-        {:error, {:invalid, _, _}} -> {:error, :invalid}
-        error -> error
+        {:ok, _, _} ->
+          {:ok,
+           %{
+             coordinator: coordinator.name,
+             resumed: resumed,
+             queued: not is_nil(QueuedNotes.open_relaunch(row.id)),
+             note: note
+           }}
+
+        {:error, {:invalid, _, _}} ->
+          {:error, :invalid}
+
+        error ->
+          error
       end
     end
   end
@@ -197,8 +232,15 @@ defmodule Foreman.SessionResume do
         end
 
       {:note, coordinator} ->
-        case note(coordinator, answer_text(request, payload, {:for, source_name(request)}), opts) do
-          :ok -> :ok
+        text = answer_text(request, payload, {:for, source_name(request)})
+        subject = Foreman.RequestSource.row(request)
+
+        case note_or_queue(coordinator, text, opts,
+               kind: "answer",
+               subject_id: subject && subject.id,
+               request_id: request.id
+             ) do
+          {:ok, _} -> :ok
           {:error, {:coordinator, name, reason}} -> {:error, {:not_delivered, name, reason}}
         end
 
@@ -244,6 +286,23 @@ defmodule Foreman.SessionResume do
   defp clip(text, max) do
     text = String.replace(text, ~r/\s+/u, " ") |> String.trim()
     if byte_size(text) <= max, do: text, else: String.slice(text, 0, div(max, 4)) <> "…"
+  end
+
+  # A note that finds a live coordinator mid-turn is saved and typed when its prompt is
+  # next idle (fm-9mm.23). `{:ok, :sent | :queued}` or `{:error, {:coordinator, name, why}}`.
+  defp note_or_queue(coordinator, text, opts, attrs) do
+    case note(coordinator, text, opts) do
+      :ok ->
+        {:ok, :sent}
+
+      {:error, {:coordinator, _, :prompt_busy}} when is_nil(coordinator.ended_at) ->
+        attrs = Map.new(attrs) |> Map.merge(%{coordinator: coordinator, text: @prefix <> text})
+        {:ok, _} = QueuedNotes.queue(attrs)
+        {:ok, :queued}
+
+      error ->
+        error
+    end
   end
 
   # A note to a coordinator: typed into its pane while it is live; a dead one resumes with

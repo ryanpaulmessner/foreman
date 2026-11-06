@@ -25,7 +25,7 @@ defmodule ForemanWeb.NeedsYouLive do
   def mount(params, _, socket) do
     socket =
       socket
-      |> assign(list: CardList.new(), cards: %{}, shown: [], card_url: nil)
+      |> assign(list: CardList.new(), cards: %{}, shown: [], card_url: nil, recent_notes: %{})
       |> CardItems.assigns(@cards)
       |> assign(panel: Foreman.CardPanel.__fsm__(:initial), panel_doc: nil, card_repos: [])
       |> stream_configure(:pending, dom_id: & &1.dom)
@@ -116,6 +116,12 @@ defmodule ForemanWeb.NeedsYouLive do
 
   def handle_event("dismiss-line", %{"id" => id}, socket),
     do: {:noreply, change(socket, &CardList.dismiss_line(&1, id))}
+
+  # Do not send, on a note that waits for a busy coordinator (fm-9mm.23).
+  def handle_event("withdraw-note", %{"note" => id}, socket) do
+    with {id, ""} <- Integer.parse(to_string(id)), do: Foreman.QueuedNotes.withdraw(id)
+    {:noreply, socket |> load() |> patch_url()}
+  end
 
   def handle_event("reload-cards", _, socket), do: {:noreply, socket |> load() |> patch_url()}
 
@@ -365,7 +371,10 @@ defmodule ForemanWeb.NeedsYouLive do
         if match?(%{state: state} when state not in ["pending", "superseded"], request) and
              id == socket.assigns.list.open do
           view = if is_map(view), do: view, else: Foreman.RequestSource.view(request)
-          line = CardLines.result_info(action, request, params, view)
+          # An answer can wait for a busy coordinator (fm-9mm.23).
+          note = safely(fn -> Foreman.QueuedNotes.for_request(id) end)
+          note = if match?(%Foreman.QueuedNotes.Note{}, note), do: note
+          line = CardLines.result_info(action, request, params, view, note)
           socket |> load(resolved: {id, line}) |> patch_url()
         else
           socket |> load() |> patch_url()
@@ -464,16 +473,31 @@ defmodule ForemanWeb.NeedsYouLive do
             nil -> change(socket, &CardList.loaded(&1, ids, want: opts[:want], closed: closed))
           end
 
+        recent = Requests.recent()
+
         socket
+        |> notes_changed()
         |> CardItems.prune(@cards, MapSet.new(ids))
         |> sync()
         |> ForemanWeb.RequestCount.refresh()
-        |> stream(:recent, Requests.recent(), reset: true)
+        |> assign(:recent_notes, Foreman.QueuedNotes.for_requests(Enum.map(recent, & &1.id)))
+        |> stream(:recent, recent, reset: true)
         |> merge_list()
 
       :error ->
         change(socket, &CardList.load_failed/1)
     end
+  end
+
+  # Result lines whose note waited for a busy coordinator follow the note (fm-9mm.23).
+  defp notes_changed(socket) do
+    ids = for {id, {:result, %{note: %{}}}} <- socket.assigns.list.lines, do: id
+
+    ids
+    |> Foreman.QueuedNotes.for_requests()
+    |> Enum.reduce(socket, fn {id, note}, socket ->
+      change(socket, &CardList.note_changed(&1, id, note))
+    end)
   end
 
   defp read_pending do
@@ -743,6 +767,7 @@ defmodule ForemanWeb.NeedsYouLive do
                 :for={{id, request} <- @streams.recent}
                 id={id}
                 request={request}
+                note={@recent_notes[request.id]}
                 repos={@card_repos}
                 link={:patch}
               />

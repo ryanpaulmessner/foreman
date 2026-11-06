@@ -38,6 +38,7 @@ defmodule Foreman.RoleTest do
     assert Foreman.Config.Watcher in normal
     assert Foreman.SessionMonitor in normal
     assert Foreman.CloseOutNagMonitor in normal
+    assert Foreman.QueuedNoteMonitor in normal
 
     System.put_env("PREVIEW", "1")
     System.put_env("FOREMAN_PREVIEW_READERS", "1")

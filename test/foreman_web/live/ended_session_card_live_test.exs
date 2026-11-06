@@ -76,7 +76,8 @@ defmodule ForemanWeb.EndedSessionCardLiveTest do
     assert has_element?(view, "#card-result-#{r.id}", "as a note with the question.")
   end
 
-  test "a busy coordinator: the card stays open and says why", %{conn: conn, request: r} do
+  test "a busy coordinator: the card closes and the note waits for it (fm-9mm.23)",
+       %{conn: conn, request: r} do
     tmux("✳ Working… (3s)\n───\n❯ \n───\nesc to interrupt\n")
     {:ok, view, _} = live(conn, "/needs-you?card=#{r.id}")
 
@@ -85,12 +86,30 @@ defmodule ForemanWeb.EndedSessionCardLiveTest do
     |> render_submit(%{"action" => "answer"})
 
     refute_received {:typed, _}
+    assert %{state: "answered"} = Requests.get(r.id)
+
+    assert has_element?(
+             view,
+             "#card-result-#{r.id}",
+             "The note to fm-epic waits until its prompt is idle."
+           )
+  end
+
+  test "a coordinator whose pane is gone: the card stays open and says why",
+       %{conn: conn, request: r} do
+    Application.put_env(:foreman, :session_controls_tmux, runner: fn "tmux", _, _ -> {"", 0} end)
+    {:ok, view, _} = live(conn, "/needs-you?card=#{r.id}")
+
+    view
+    |> form("#decision-#{r.id}", decision: %{choice: "Keep it"})
+    |> render_submit(%{"action" => "answer"})
+
     assert %{state: "pending"} = Requests.get(r.id)
 
     assert has_element?(
              view,
              "#request-#{r.id}",
-             "The board could not send it: fm-epic is busy. The card stays open."
+             "The board could not send it: the pane of fm-epic is closed. The card stays open."
            )
   end
 
