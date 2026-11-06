@@ -3,6 +3,7 @@ defmodule Foreman.Adopt do
   alias Foreman.{AdoptConfig, AdoptMachine, BeadsConversion, TicketStore}
 
   @agent_block "<!-- BEGIN FOREMAN -->\n## Tickets\n\nUse the globally linked `foreman` skill (`~/.agents/skills/foreman/SKILL.md`).\nDocuments: follow the `foreman` skill's Documents section before writing a document.\n<!-- END FOREMAN -->\n"
+  @evidence "builds/*/evidence"
   @hook_block "# BEGIN FOREMAN CHECK\nforeman check || exit $?\n# END FOREMAN CHECK\n"
 
   def run(root, opts \\ []) do
@@ -20,6 +21,8 @@ defmodule Foreman.Adopt do
          {:ok, entry} <- registered_identity(config, inferred, records),
          {:ok, _} <- AdoptConfig.plan(config, entry),
          {:ok, agents} <- agents(root),
+         {:ok, gitignore} <- gitignore(root),
+         files = %{"AGENTS.md" => agents, ".gitignore" => gitignore},
          {:ok, tickets} <- BeadsConversion.convert(records),
          [] <- TicketStore.validate_graph(tickets) do
       lock = Path.join(root, ".git/foreman-adopt-lock")
@@ -27,7 +30,7 @@ defmodule Foreman.Adopt do
       case File.mkdir(lock) do
         :ok ->
           try do
-            execute(root, config, entry, records, tickets, agents, hooks)
+            execute(root, config, entry, records, tickets, files, hooks)
           after
             File.rmdir!(lock)
           end
@@ -43,7 +46,7 @@ defmodule Foreman.Adopt do
     e -> {:error, Exception.message(e)}
   end
 
-  defp execute(root, config, entry, records, tickets, agents, hooks) do
+  defp execute(root, config, entry, records, tickets, files, hooks) do
     beads? = File.dir?(Path.join(root, ".beads"))
     source_snapshot = if beads?, do: snapshot!(Path.join(root, ".beads")), else: nil
     backup = if beads?, do: backup!(root, config), else: nil
@@ -92,8 +95,9 @@ defmodule Foreman.Adopt do
       end
 
     state = advance(state, :verify)
-    # Hook and agent text was validated before any publication.
-    changes = put_file(root, "AGENTS.md", agents, changes)
+    # Hook, agent and ignore text was validated before any publication.
+    changes =
+      Enum.reduce(files, changes, fn {path, text}, acc -> put_file(root, path, text, acc) end)
 
     changes =
       Enum.reduce(hooks, changes, fn {name, text}, acc ->
@@ -158,7 +162,7 @@ defmodule Foreman.Adopt do
 
   defp safe_paths(root) do
     Enum.reduce_while(
-      ~w(.git .git/hooks .git/config .beads .foreman .foreman/hooks tickets AGENTS.md),
+      ~w(.git .git/hooks .git/config .beads .foreman .foreman/hooks tickets AGENTS.md .gitignore),
       :ok,
       fn path, :ok ->
         case File.lstat(Path.join(root, path)) do
@@ -345,6 +349,30 @@ defmodule Foreman.Adopt do
          if(text == "" or String.ends_with?(text, "\n"), do: "", else: "\n") <>
          "\n" <> @agent_block}
     end
+  end
+
+  # Decision 8 of docs/specs/doc-layout.md: build evidence stays out of git.
+  defp gitignore(root) do
+    text =
+      case File.read(Path.join(root, ".gitignore")) do
+        {:ok, text} -> text
+        {:error, :enoent} -> ""
+      end
+
+    present? =
+      text
+      |> String.split(~r/\r?\n/)
+      |> Enum.any?(
+        &(String.trim(&1) |> String.trim_leading("/") |> String.trim_trailing("/") == @evidence)
+      )
+
+    if present?,
+      do: {:ok, text},
+      else:
+        {:ok,
+         text <>
+           if(text == "" or String.ends_with?(text, "\n"), do: "", else: "\n") <>
+           @evidence <> "/\n"}
   end
 
   defp hooks(root) do

@@ -39,6 +39,26 @@ defmodule Foreman.AdoptTest do
              "Documents: follow the `foreman` skill's Documents section before writing a document."
   end
 
+  test "ignores build evidence in .gitignore, keeping existing lines, once", %{
+    root: root,
+    config: config
+  } do
+    gitignore = Path.join(root, ".gitignore")
+    File.write!(gitignore, "/_build\n/deps")
+    assert {:ok, first} = Foreman.Adopt.run(root, config_dir: config)
+    assert ".gitignore" in first.changes
+    assert File.read!(gitignore) == "/_build\n/deps\nbuilds/*/evidence/\n"
+    assert {:ok, %{changes: []}} = Foreman.Adopt.run(root, config_dir: config)
+
+    File.rm!(gitignore)
+    assert {:ok, %{changes: [".gitignore"]}} = Foreman.Adopt.run(root, config_dir: config)
+    assert File.read!(gitignore) == "builds/*/evidence/\n"
+
+    File.write!(gitignore, "# docs\n/builds/*/evidence/\n")
+    assert {:ok, %{changes: []}} = Foreman.Adopt.run(root, config_dir: config)
+    assert File.read!(gitignore) == "# docs\n/builds/*/evidence/\n"
+  end
+
   test "preserves custom hooks and removes marked beads instructions", %{
     root: root,
     config: config
