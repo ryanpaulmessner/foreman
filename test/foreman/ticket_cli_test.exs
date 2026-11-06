@@ -231,4 +231,93 @@ defmodule Foreman.TicketCLITest do
     assert file == "tickets/#{id}.md"
     assert reason =~ "priority"
   end
+
+  describe "check and added documents" do
+    test "output is unchanged when the commit adds no documents", %{root: root} do
+      id = call(root, ["new", "Task"])["id"]
+      expected = %{"errors" => [], "valid" => true}
+      assert call(root, ["check"]) == expected
+      assert plain(root, ["check"]) == {"tickets valid\n", 0}
+
+      stage(root, "tickets/#{id}.md")
+      stage(root, "lib/code.ex")
+      stage(root, "builds/#{id}/report.md")
+      assert call(root, ["check"]) == expected
+      assert plain(root, ["check"]) == {"tickets valid\n", 0}
+    end
+
+    test "a refused add fails with its file and command, plain and --json", %{root: root} do
+      File.write!(
+        Path.join(root, "config/foreman.toml"),
+        "[repos.docs]\nlegacy = [\"slices\"]\n",
+        [
+          :append
+        ]
+      )
+
+      stage(root, "slices/new-thing.md")
+
+      assert call(root, ["check"], 2) == %{
+               "valid" => false,
+               "errors" => [
+                 %{
+                   "file" => "slices/new-thing.md",
+                   "reason" =>
+                     "slices/ is a legacy folder: existing files can be edited, new files are refused",
+                   "command" => "foreman doc path note <kind> new-thing"
+                 }
+               ]
+             }
+
+      assert plain(root, ["check"]) ==
+               {"slices/new-thing.md: slices/ is a legacy folder: existing files can be edited, " <>
+                  "new files are refused. Use: foreman doc path note <kind> new-thing\n", 2}
+    end
+
+    test "ticket errors and layout errors are reported together", %{root: root} do
+      File.mkdir_p!(Path.join(root, "tickets"))
+      File.write!(Path.join(root, "tickets/zz-bad.md"), "broken")
+      stage(root, "notes.md")
+      errors = call(root, ["check"], 2)["errors"]
+      assert Enum.map(errors, & &1["file"]) == ["tickets/zz-bad.md", "notes.md"]
+    end
+
+    test "unreadable git index skips the layout check with a warning", %{root: root} do
+      stage(root, "notes.md")
+      File.write!(Path.join(root, ".git/index"), "garbage")
+      assert %{"valid" => true, "errors" => [], "warnings" => [warning]} = call(root, ["check"])
+      assert warning =~ "document layout check skipped"
+
+      {stdout, stderr, 0} = plain_split(root, ["check"])
+      assert stdout == "tickets valid\n"
+      assert stderr =~ "warning: document layout check skipped"
+    end
+  end
+
+  defp plain(root, args) do
+    output = capture_io(fn -> send(self(), {:code, Foreman.CLI.run(args, cwd: root)}) end)
+    assert_received {:code, code}
+    {output, code}
+  end
+
+  defp plain_split(root, args) do
+    stderr =
+      capture_io(:stderr, fn ->
+        send(
+          self(),
+          {:stdout, capture_io(fn -> send(self(), {:code, Foreman.CLI.run(args, cwd: root)}) end)}
+        )
+      end)
+
+    assert_received {:stdout, stdout}
+    assert_received {:code, code}
+    {stdout, stderr, code}
+  end
+
+  defp stage(root, path) do
+    full = Path.join(root, path)
+    File.mkdir_p!(Path.dirname(full))
+    unless File.exists?(full), do: File.write!(full, "x\n")
+    {_, 0} = System.cmd("git", ["-C", root, "add", "--", path])
+  end
 end
