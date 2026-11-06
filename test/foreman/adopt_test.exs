@@ -28,6 +28,17 @@ defmodule Foreman.AdoptTest do
              Foreman.Adopt.run(root, config_dir: config)
   end
 
+  test "new AGENTS block points document writers to the foreman Documents section", %{
+    root: root,
+    config: config
+  } do
+    assert {:ok, _} = Foreman.Adopt.run(root, config_dir: config)
+    [_, block] = String.split(File.read!(Path.join(root, "AGENTS.md")), "<!-- BEGIN FOREMAN -->")
+
+    assert block =~
+             "Documents: follow the `foreman` skill's Documents section before writing a document."
+  end
+
   test "preserves custom hooks and removes marked beads instructions", %{
     root: root,
     config: config
