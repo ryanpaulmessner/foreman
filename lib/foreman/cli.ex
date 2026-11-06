@@ -91,6 +91,7 @@ defmodule Foreman.CLI do
       List.first(args) == "coordinator" -> Foreman.CoordinatorCLI.run(tl(args), opts)
       List.first(args) == "session-hook" -> session_hook(tl(args), opts)
       List.first(args) == "adopt" -> Foreman.AdoptCLI.run(tl(args), opts)
+      List.first(args) == "doc" -> Foreman.DocCLI.run(tl(args), opts)
       Foreman.TicketCLI.command?(args, opts) -> Foreman.TicketCLI.run(args, opts)
       true -> run_overlay(List.delete(args, "--overlay"), opts)
     end
