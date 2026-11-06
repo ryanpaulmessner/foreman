@@ -48,6 +48,7 @@ defmodule Foreman.SessionLifecycle do
   event(:resume)
   event(:start_fresh)
   event(:relaunch_build)
+  event(:fresh_relaunch)
   event(:output_changed, source: :observed)
   event(:quiet, source: :observed)
   event(:asked, source: :observed)
@@ -80,6 +81,7 @@ defmodule Foreman.SessionLifecycle do
   guard(:resumable?)
   guard(:fresh?)
   guard(:relaunch?)
+  guard(:fresh_relaunch?)
 
   transition(:launch, from: :none, to: :starting, do: [write: :row, open: :window])
   transition(:register, from: :none, to: :starting, do: [write: :row])
@@ -139,6 +141,13 @@ defmodule Foreman.SessionLifecycle do
     do: [resume: :parent, note: :relaunch]
   )
 
+  transition(:fresh_relaunch,
+    from: :ended,
+    to: :stay,
+    guard: :fresh_relaunch?,
+    do: [create: :coordinator, move: :build, note: :relaunch]
+  )
+
   invalid(
     [
       :launch,
@@ -151,7 +160,8 @@ defmodule Foreman.SessionLifecycle do
       :stop,
       :resume,
       :start_fresh,
-      :relaunch_build
+      :relaunch_build,
+      :fresh_relaunch
     ],
     from: :any
   )
@@ -182,6 +192,9 @@ defmodule Foreman.SessionLifecycle do
       Map.get(data, :kind) in ~w(main_coordinator epic_coordinator) and not resumable?(data, nil)
 
   def relaunch?(data, _), do: Map.get(data, :kind) == "build" and not resumable?(data, nil)
+
+  def fresh_relaunch?(data, _),
+    do: relaunch?(data, nil) and Map.get(data, :coordinator_fresh) == true
 
   @stored %{
     starting: "starting",

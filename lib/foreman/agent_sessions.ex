@@ -256,7 +256,15 @@ defmodule Foreman.AgentSessions do
   defp guard_data(row, event \\ nil) do
     data = %{kind: Map.get(row, :kind), harness: Map.get(row, :harness)}
 
-    if event in [:resume, :start_fresh, :relaunch_build],
+    data =
+      if event == :fresh_relaunch do
+        parent = coordinator(row)
+        Map.put(data, :coordinator_fresh, not is_nil(parent) and allowed?(parent, :start_fresh))
+      else
+        data
+      end
+
+    if event in [:resume, :start_fresh, :relaunch_build, :fresh_relaunch],
       do: Map.put(data, :resumable, resumable?(row)),
       else: data
   end
