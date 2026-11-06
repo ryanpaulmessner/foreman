@@ -256,9 +256,21 @@ defmodule Foreman.AgentSessions do
   defp guard_data(row, event \\ nil) do
     data = %{kind: Map.get(row, :kind), harness: Map.get(row, :harness)}
 
-    if event in [:resume, :start_fresh, :relaunch_build],
-      do: Map.put(data, :resumable, resumable?(row)),
-      else: data
+    cond do
+      event in [:resume, :start_fresh, :relaunch_build] ->
+        Map.put(data, :resumable, resumable?(row))
+
+      event == :resume_on_model ->
+        fallback? = not is_nil(Foreman.SessionFallback.model(row)) and resumable?(row)
+
+        Map.merge(data, %{
+          fallback: fallback?,
+          family_limit: row.harness == "claude" and fallback?
+        })
+
+      true ->
+        data
+    end
   end
 
   # Notifications go out at commit; the tree reloads rows from Postgres.

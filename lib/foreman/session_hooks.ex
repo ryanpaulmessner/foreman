@@ -89,14 +89,20 @@ defmodule Foreman.SessionHooks do
         end
       )
 
-    if Regex.match?(~r/usage.limit|extra.usage|rate.limit|429|quota/i, message) do
+    if Regex.match?(
+         ~r/usage.limit|extra.usage|rate.limit|429|quota|hit your (?:opus|sonnet|session|weekly) limit/i,
+         message
+       ) do
       reset =
         case Regex.run(~r/resets?\s+([^\n·]+)/i, message, capture: :all_but_first) do
           [time] -> String.trim(time)
           _ -> nil
         end
 
-      {:waiting, %{"reason" => "usage_limit", "provider" => "Anthropic", "reset_at" => reset}}
+      facts = %{"reason" => "usage_limit", "provider" => "Anthropic", "reset_at" => reset}
+      family = Foreman.SessionFallback.limit_family(message)
+      facts = if family, do: Map.put(facts, "limit_family", family), else: facts
+      {:waiting, facts}
     else
       :activity
     end

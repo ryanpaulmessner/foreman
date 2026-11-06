@@ -2,7 +2,7 @@
 id: fm-qpm.1
 title: "foreman doc path: print the layout path for a ticket document or a note"
 type: feature
-status: open
+status: in_progress
 priority: 2
 parent: fm-qpm
 blocked_by: []

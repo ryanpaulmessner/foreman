@@ -120,7 +120,11 @@ defmodule Foreman.SessionLifecycleTest do
     end
 
     test "waiting.usage_limit resume_on_model -> starting, Pi builds only" do
-      assert M.step(:waiting_usage_limit, :resume_on_model, data("build", %{harness: "pi"})) ==
+      assert M.step(
+               :waiting_usage_limit,
+               :resume_on_model,
+               data("build", %{harness: "pi", fallback: true})
+             ) ==
                {:starting, [save: :capture, stop: :process, resume: :model]}
 
       for data <- [

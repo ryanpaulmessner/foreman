@@ -15,10 +15,10 @@ defmodule Foreman.SessionWaiting do
       {:ok,
        facts
        |> Map.take(
-         ~w(reason provider reset_at attach window pane pid target session_id snapshot tool tool_name questions question title)
+         ~w(reason provider reset_at limit_family attach window pane pid target session_id snapshot tool tool_name questions question title)
        )
        |> Map.reject(fn {key, value} ->
-         key in ~w(tool_name questions question title) and not display?(key, value)
+         key in ~w(tool_name questions question title limit_family) and not display?(key, value)
        end)
        |> chat_question()}
     else
@@ -40,6 +40,7 @@ defmodule Foreman.SessionWaiting do
   defp display?("questions", questions) when is_list(questions) and length(questions) in 1..4,
     do: Enum.all?(questions, &question?/1)
 
+  defp display?("limit_family", family), do: family in ~w(opus sonnet)
   defp display?("title", title), do: label?(title, 2_000)
   defp display?("question", text), do: label?(text, 8_000)
   defp display?(_, _), do: false
@@ -97,9 +98,9 @@ defmodule Foreman.SessionWaiting do
   end
 
   defp ask_or_reuse(key, params, facts, existing) do
-    identity = Map.take(facts, ~w(reason question))
+    identity = Map.take(facts, ~w(reason question limit_family))
 
-    case Enum.find(existing, &(Map.take(&1.facts, ~w(reason question)) == identity)) do
+    case Enum.find(existing, &(Map.take(&1.facts, ~w(reason question limit_family)) == identity)) do
       %Request{} = request ->
         if facts["target"] == "planning",
           do: Sessions.signal(key, params["session"], :waiting)
