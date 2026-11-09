@@ -73,6 +73,7 @@ Tickets follow this order. Each step ships on its own and leaves the board worki
    | parked, ended | resume (user) [resumable] | starting | same row; Claude `--resume <id>`, Pi `--session-id <id>` in its worktree |
    | parked, ended, coordinator | start_fresh (user) [not resumable] | (old row stays) | new row with the same name and parent, new conversation; live builds of the old row move to the new row |
    | ended, build | relaunch_build (user) [not resumable] | (row stays ended) | resume the parent first if it is dead, then send the parent the relaunch note |
+   | ended, build | fresh_relaunch (user) [not resumable, parent dead and not resumable] | (row stays ended) | start fresh the parent (new row), then queue the relaunch note for the new row (R9); a failed launch changes nothing (fm-9mm.24) |
    | any other pair | | | claimed events refused, observed events ignored |
 
    `resumable`: Claude needs `conversation_id`. Pi needs `conversation_id`, the worktree and the Pi session file (fm-9mm.2).
@@ -86,7 +87,7 @@ Tickets follow this order. Each step ships on its own and leaves the board worki
    - R5 Stop never deletes the worktree or the branch.
    - R6 The main coordinator is never parked.
    - R7 At most one live session has a given name (enforced by the index, Decision 2).
-   - R8 When a coordinator ends, its live builds keep running and stay under it with "Parent ended". Relaunch build on a dead build resumes its coordinator first, then sends the note.
+   - R8 When a coordinator ends, its live builds keep running and stay under it with "Parent ended". Relaunch build on a dead build resumes its coordinator first, then sends the note. If the coordinator cannot resume either, the build offers Start fresh and relaunch build instead: it starts the coordinator fresh, then queues the note for the new conversation (fm-9mm.24). If the old coordinator becomes live before the click, the board refuses it.
    - R9 When a session ends with an open card, the card stays open. If the session can resume, answering resumes it first, then delivers the answer. If not, the answer goes to its parent coordinator as a note with the question, and the card closes.
    - R10 Every dead build has Resume, Relaunch build, or is closed out (its ticket stage is committed or later).
    - R11 (agent call) Park and Stop close only the session's own pane, never its window, so pane-mode builds in a coordinator's window keep running (R8). Today's park closes the whole window.
@@ -120,6 +121,7 @@ Tickets follow this order. Each step ships on its own and leaves the board worki
     | Resume on `<model>` | Pi build at a usage limit, model has a fallback (Decision 19) | | | Resuming… | Resumed `<name>` on `<model>`. |
     | Resume | dead and resumable | No Pi session id was recorded at launch. / The worktree was removed. | | Resuming… | Resumed `<name>` in `<workdir>`. |
     | Relaunch build on this ticket | dead build, not resumable | | | Relaunching… | Sent `<coordinator>` the note: "Relaunch the build for `<ticket>` on `<branch>`." With R8: Resumed `<coordinator>` and sent it the note. |
+    | Start fresh and relaunch build | dead build, not resumable, its coordinator dead and not resumable (R8) | | in-page: **Start a new conversation for `<coordinator>`?** Then send it the note: "`<relaunch note>`" [Start fresh and relaunch build] [Cancel] | Starting… | Started a new `<coordinator>` conversation. Saved the relaunch note. Refused when the coordinator is live again: The coordinator is available again. Use Relaunch build on this ticket. Nothing changed. |
     | Start fresh | dead coordinator, not resumable | | in-page: **Start a new conversation for `<name>`?** The old conversation stays in history. [Start fresh] [Cancel] | Starting… | Started a new `<name>` conversation. Its builds stay under it. |
     | Focus terminal | live, tmux answers | The pane is closed. / tmux does not answer. | | Focusing… | Brought `<name>` to the front. No client: No terminal is attached. Copy the attach command from Details. |
     | Send message | `idle`, `waiting.question` | The agent is working. A message now interrupts it. / Use Continue at a usage limit. | | Sending… | Sent to `<name>`. |
