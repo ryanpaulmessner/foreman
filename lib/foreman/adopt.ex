@@ -2,7 +2,7 @@ defmodule Foreman.Adopt do
   @moduledoc "Explicit, local repository onboarding. Never commits."
   alias Foreman.{AdoptConfig, AdoptMachine, BeadsConversion, TicketStore}
 
-  @agent_block "<!-- BEGIN FOREMAN -->\n## Tickets\n\nUse the globally linked `foreman` skill (`~/.agents/skills/foreman/SKILL.md`).\n<!-- END FOREMAN -->\n"
+  @agent_block "<!-- BEGIN FOREMAN -->\n## Tickets\n\nUse the globally linked `foreman` skill (`~/.agents/skills/foreman/SKILL.md`).\nDocuments: follow the `foreman` skill's Documents section before writing a document.\n<!-- END FOREMAN -->\n"
   @evidence "builds/*/evidence"
   @hook_block "# BEGIN FOREMAN CHECK\nforeman check || exit $?\n# END FOREMAN CHECK\n"
 
