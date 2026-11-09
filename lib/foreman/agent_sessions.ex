@@ -264,9 +264,21 @@ defmodule Foreman.AgentSessions do
         data
       end
 
-    if event in [:resume, :start_fresh, :relaunch_build, :fresh_relaunch],
-      do: Map.put(data, :resumable, resumable?(row)),
-      else: data
+    cond do
+      event in [:resume, :start_fresh, :relaunch_build, :fresh_relaunch] ->
+        Map.put(data, :resumable, resumable?(row))
+
+      event == :resume_on_model ->
+        fallback? = not is_nil(Foreman.SessionFallback.model(row)) and resumable?(row)
+
+        Map.merge(data, %{
+          fallback: fallback?,
+          family_limit: row.harness == "claude" and fallback?
+        })
+
+      true ->
+        data
+    end
   end
 
   # Notifications go out at commit; the tree reloads rows from Postgres.

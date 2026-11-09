@@ -16,7 +16,8 @@ stateDiagram-v2
     waiting_question --> idle: last_card_closed
     waiting_permission --> working: prompt_cleared / clear(request)
     waiting_usage_limit --> waiting_usage_limit: continue / send(continue)
-    waiting_usage_limit --> starting: resume_on_model [pi_build?] / save(capture), stop(process), resume(model)
+    waiting_usage_limit --> starting: resume_on_model [model_fallback?] / save(capture), stop(process), resume(model)
+    starting --> ended: model_resume_failed
     live --> parked: park, idle_timeout [parkable?] / save(capture), close(pane)
     live --> ended: stop / save(capture), close(pane)
     live --> ended: pane_gone, exited / save(capture)
@@ -37,6 +38,7 @@ stateDiagram-v2
 | none | focus | invalid |  |
 | none | message | invalid |  |
 | none | resume_on_model | invalid |  |
+| none | model_resume_failed | invalid |  |
 | none | park | invalid |  |
 | none | stop | invalid |  |
 | none | resume | invalid |  |
@@ -59,6 +61,7 @@ stateDiagram-v2
 | starting | focus | stay | show(pane) |
 | starting | message | invalid |  |
 | starting | resume_on_model | invalid |  |
+| starting | model_resume_failed | -> ended |  |
 | starting | park [parkable?] | -> parked | save(capture), close(pane) |
 | starting | park | invalid |  |
 | starting | stop | -> ended | save(capture), close(pane) |
@@ -83,6 +86,7 @@ stateDiagram-v2
 | working | focus | stay | show(pane) |
 | working | message | invalid |  |
 | working | resume_on_model | invalid |  |
+| working | model_resume_failed | invalid |  |
 | working | park [parkable?] | -> parked | save(capture), close(pane) |
 | working | park | invalid |  |
 | working | stop | -> ended | save(capture), close(pane) |
@@ -107,6 +111,7 @@ stateDiagram-v2
 | idle | focus | stay | show(pane) |
 | idle | message | stay | send(message) |
 | idle | resume_on_model | invalid |  |
+| idle | model_resume_failed | invalid |  |
 | idle | park [parkable?] | -> parked | save(capture), close(pane) |
 | idle | park | invalid |  |
 | idle | stop | -> ended | save(capture), close(pane) |
@@ -131,6 +136,7 @@ stateDiagram-v2
 | waiting_question | focus | stay | show(pane) |
 | waiting_question | message | stay | send(message) |
 | waiting_question | resume_on_model | invalid |  |
+| waiting_question | model_resume_failed | invalid |  |
 | waiting_question | park [parkable?] | -> parked | save(capture), close(pane) |
 | waiting_question | park | invalid |  |
 | waiting_question | stop | -> ended | save(capture), close(pane) |
@@ -155,6 +161,7 @@ stateDiagram-v2
 | waiting_permission | focus | stay | show(pane) |
 | waiting_permission | message | invalid |  |
 | waiting_permission | resume_on_model | invalid |  |
+| waiting_permission | model_resume_failed | invalid |  |
 | waiting_permission | park [parkable?] | -> parked | save(capture), close(pane) |
 | waiting_permission | park | invalid |  |
 | waiting_permission | stop | -> ended | save(capture), close(pane) |
@@ -178,8 +185,9 @@ stateDiagram-v2
 | waiting_usage_limit | continue | stay | send(continue) |
 | waiting_usage_limit | focus | stay | show(pane) |
 | waiting_usage_limit | message | invalid |  |
-| waiting_usage_limit | resume_on_model [pi_build?] | -> starting | save(capture), stop(process), resume(model) |
+| waiting_usage_limit | resume_on_model [model_fallback?] | -> starting | save(capture), stop(process), resume(model) |
 | waiting_usage_limit | resume_on_model | invalid |  |
+| waiting_usage_limit | model_resume_failed | invalid |  |
 | waiting_usage_limit | park [parkable?] | -> parked | save(capture), close(pane) |
 | waiting_usage_limit | park | invalid |  |
 | waiting_usage_limit | stop | -> ended | save(capture), close(pane) |
@@ -204,6 +212,7 @@ stateDiagram-v2
 | parked | focus | invalid |  |
 | parked | message | invalid |  |
 | parked | resume_on_model | invalid |  |
+| parked | model_resume_failed | invalid |  |
 | parked | park | invalid |  |
 | parked | stop | invalid |  |
 | parked | resume [resumable?] | -> starting | resume(conversation) |
@@ -228,6 +237,7 @@ stateDiagram-v2
 | ended | focus | invalid |  |
 | ended | message | invalid |  |
 | ended | resume_on_model | invalid |  |
+| ended | model_resume_failed | invalid |  |
 | ended | park | invalid |  |
 | ended | stop | invalid |  |
 | ended | resume [resumable?] | -> starting | resume(conversation) |

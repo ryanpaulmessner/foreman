@@ -77,6 +77,7 @@ defmodule ForemanWeb.SessionLive do
     "continue" => :continue,
     "park" => :park,
     "resume" => :resume,
+    "resume_on_model" => :resume_on_model,
     "relaunch_build" => :relaunch_build
   }
 
@@ -211,6 +212,7 @@ defmodule ForemanWeb.SessionLive do
       source: row && RequestSource.view(%{agent_session_id: row.id}),
       card: List.first(cards),
       provider: provider(cards),
+      fallback_model: row && Foreman.SessionFallback.model(row),
       resumable: resumable,
       # The dead view (copy table): where an answer goes (R9), the coordinator that
       # Relaunch resumes first (R8), and what ended the session.
@@ -335,6 +337,7 @@ defmodule ForemanWeb.SessionLive do
     park: "park",
     stop: "stop",
     resume: "resume",
+    resume_on_model: "resume",
     relaunch_build: "relaunch",
     start_fresh: "start a new conversation for"
   }
@@ -353,6 +356,28 @@ defmodule ForemanWeb.SessionLive do
 
   defp result_line(:stop, :ok, row),
     do: {:success, "Stopped #{row.name}. The worktree and branch stay."}
+
+  defp result_line(:resume_on_model, {:ok, row}, _),
+    do: {:success, "Resumed #{row.name} on #{row.model}."}
+
+  defp result_line(:resume_on_model, {:error, {:model_resume_partial, :opened, reason}}, row),
+    do:
+      {:error,
+       "Opened #{row.name}, but could not finish resuming: #{failure(reason)}. Check the terminal before continuing."}
+
+  defp result_line(:resume_on_model, {:error, {:model_resume_partial, :stopped, reason}}, row),
+    do:
+      {:error,
+       "Stopped #{row.name}, but could not resume it: #{failure(reason)}. Its output was saved. Use Resume to try again."}
+
+  defp result_line(
+         :resume_on_model,
+         {:error, {:model_resume_partial, :stop_unconfirmed, reason}},
+         row
+       ),
+       do:
+         {:error,
+          "Could not confirm that #{row.name} stopped: #{failure(reason)}. No replacement was started. Check the terminal."}
 
   defp result_line(:resume, {:ok, row}, _),
     do: {:success, "Resumed #{row.name} in #{row.workdir || "its workdir"}."}
@@ -391,6 +416,12 @@ defmodule ForemanWeb.SessionLive do
   defp result_line(control, {:error, reason}, row),
     do: {:error, "Could not #{@verbs[control]} #{row.name}: #{failure(reason)}. Nothing changed."}
 
+  defp failure(:pin_unconfirmed),
+    do: "Bifrost pin was not confirmed; no continue message was sent"
+
+  defp failure(:process_unverified), do: "the agent process could not be identified"
+  defp failure(:process_changed), do: "the process identity changed"
+  defp failure(:process_still_running), do: "the process still runs"
   defp failure(:tmux_unavailable), do: "tmux does not answer"
   defp failure(:window_gone), do: "the pane is closed"
   defp failure(:pane_changed), do: "the pane no longer runs this session"
@@ -511,6 +542,7 @@ defmodule ForemanWeb.SessionLive do
   @buttons %{
     answer: {"Answer on the card", "hero-inbox", nil},
     resume: {"Resume", "hero-arrow-uturn-right", "Resuming…"},
+    resume_on_model: {"Resume on another model", "hero-arrow-path", "Resuming…"},
     relaunch_build: {"Relaunch build on this ticket", "hero-arrow-path", "Relaunching…"},
     start_fresh: {"Start fresh", "hero-sparkles", nil},
     fresh_relaunch: {"Start fresh and relaunch build", "hero-arrow-path", nil},
@@ -836,7 +868,7 @@ defmodule ForemanWeb.SessionLive do
               <% @row.state == "waiting.usage_limit" -> %>
                 <h2 class="font-semibold">Stopped at the {@provider} usage limit.</h2>
                 <p :if={@state.second} title={@state.at && DateTime.to_iso8601(@state.at)}>
-                  {@state.second}
+                  {String.replace_prefix(@state.second, "Usage limit · resets ", "The limit resets ")}
                 </p>
               <% @state.label == "Waiting on you" -> %>
                 <h2 class="font-semibold">It asked you a question.</h2>
@@ -856,13 +888,26 @@ defmodule ForemanWeb.SessionLive do
                 <h2 class="font-semibold">Working on round {@round}.</h2>
                 <p>Nothing waits on you.</p>
             <% end %>
-            <.control
-              :if={@primary}
-              control={@primary}
-              card={@card}
-              expanded={@panel == :confirming_fresh}
-              filled
-            />
+            <div class="bb-session-controls">
+              <.control
+                :if={@primary}
+                control={@primary}
+                card={@card}
+                expanded={@panel == :confirming_fresh}
+                filled
+              />
+              <Button.button
+                :if={@fallback_model && on?(@controls, :resume_on_model)}
+                id="session-control-resume_on_model"
+                type="button"
+                class="bb-session-control"
+                phx-click="control"
+                phx-value-control="resume_on_model"
+                phx-disable-with="Resuming…"
+              >
+                <.icon name="hero-arrow-path" class="size-4" /> Resume on {@fallback_model}
+              </Button.button>
+            </div>
           </section>
           <div :if={@row_controls != [] or @stop} id="session-controls" class="bb-session-controls">
             <.control

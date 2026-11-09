@@ -5,7 +5,7 @@ type: task
 status: open
 priority: 2
 parent: fm-9mm
-blocked_by: []
+blocked_by: ["fm-9mm.23"]
 related: []
 supersedes: []
 discovered_from: null
@@ -19,3 +19,6 @@ Found by the fm-9mm.15 review (2026-11-05). Spec R10: a dead build always has a 
 
 ## Acceptance
 - [ ] A dead, non-resumable build under a dead, non-resumable coordinator offers one working control on its own page (LiveView test).
+
+## Notes
+- 2026-11-06 claude: Ryan 2026-11-06 (card f0b76c6a): Start fresh the coordinator, then relaunch. The build page gets one control that starts a fresh coordinator from its handoff, then sends it the relaunch note. Build after fm-9mm.23 (same note path).

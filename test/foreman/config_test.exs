@@ -11,6 +11,18 @@ defmodule Foreman.ConfigTest do
     assert error =~ "tickets"
   end
 
+  test "model fallback pairs ship in board config and can be replaced or disabled" do
+    assert {:ok, config} = parse("")
+
+    pairs = config["board"]["model_fallbacks"] || []
+    assert %{"from" => "openai-codex/gpt-6-astra", "to" => "anthropic/claude-opus-5-5"} in pairs
+    assert %{"from" => "anthropic/claude-opus-5-5", "to" => "openai-codex/gpt-6-astra"} in pairs
+
+    assert {:ok, config} = parse("[board]\nmodel_fallbacks = []")
+    assert config["board"]["model_fallbacks"] == []
+    assert {:error, _} = parse("[board]\nmodel_fallbacks = [{from = \"x\"}]")
+  end
+
   test "shipped views are ordered with Open first" do
     assert {:ok, config} = parse("")
     assert Enum.map(config["views"] || [], & &1["key"]) == ~w(open in-flight stale all)
@@ -336,7 +348,7 @@ defmodule Foreman.ConfigTest do
                home: "/tmp/config-home"
              )
 
-    assert config["board"] == %{
+    assert Map.drop(config["board"], ["model_fallbacks"]) == %{
              "swimlanes" => "epic",
              "stale_session_after" => "30m",
              "timezone" => "America/Chicago",

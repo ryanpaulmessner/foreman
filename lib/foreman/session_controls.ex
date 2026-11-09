@@ -44,7 +44,23 @@ defmodule Foreman.SessionControls do
           do: {control, live(row, control, tmux_down?)}
 
     [{:answer, if(cards > 0, do: :on, else: {:off, "No card is open."})}] ++
-      dead(row) ++ live ++ if(tmux_down?, do: [{:retry, :on}], else: [])
+      dead(row) ++
+      fallback(row, tmux_down?) ++ live ++ if(tmux_down?, do: [{:retry, :on}], else: [])
+  end
+
+  defp fallback(row, tmux_down?) do
+    if Foreman.SessionFallback.model(row) do
+      availability =
+        cond do
+          tmux_down? -> {:off, "tmux does not answer."}
+          not AgentSessions.resumable?(row) -> {:off, resume_reason(row)}
+          true -> :on
+        end
+
+      [{:resume_on_model, availability}]
+    else
+      []
+    end
   end
 
   # R4: Resume when its conditions hold; otherwise Relaunch build or Start fresh.
@@ -166,6 +182,9 @@ defmodule Foreman.SessionControls do
       end
     end
   end
+
+  def run(%AgentSession{} = row, :resume_on_model, _params, opts),
+    do: Foreman.SessionModelResume.resume(row, opts)
 
   def run(%AgentSession{} = row, control, _params, opts) when control in @dead do
     apply(SessionResume, control, [row, opts])

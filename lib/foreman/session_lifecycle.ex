@@ -43,6 +43,7 @@ defmodule Foreman.SessionLifecycle do
   event(:focus)
   event(:message)
   event(:resume_on_model)
+  event(:model_resume_failed)
   event(:park)
   event(:stop)
   event(:resume)
@@ -77,7 +78,7 @@ defmodule Foreman.SessionLifecycle do
   ])
 
   guard(:parkable?)
-  guard(:pi_build?)
+  guard(:model_fallback?)
   guard(:resumable?)
   guard(:fresh?)
   guard(:relaunch?)
@@ -111,9 +112,11 @@ defmodule Foreman.SessionLifecycle do
   transition(:resume_on_model,
     from: :waiting_usage_limit,
     to: :starting,
-    guard: :pi_build?,
+    guard: :model_fallback?,
     do: [save: :capture, stop: :process, resume: :model]
   )
+
+  transition(:model_resume_failed, from: :starting, to: :ended)
 
   transition([:park, :idle_timeout],
     from: :live,
@@ -156,6 +159,7 @@ defmodule Foreman.SessionLifecycle do
       :focus,
       :message,
       :resume_on_model,
+      :model_resume_failed,
       :park,
       :stop,
       :resume,
@@ -184,7 +188,14 @@ defmodule Foreman.SessionLifecycle do
 
   @doc "Only epic coordinators park; builds and the main coordinator never do (R6)."
   def parkable?(data, _), do: Map.get(data, :kind) == "epic_coordinator"
-  def pi_build?(data, _), do: Map.get(data, :kind) == "build" and Map.get(data, :harness) == "pi"
+
+  def model_fallback?(data, _) do
+    Map.get(data, :fallback) == true and
+      ((Map.get(data, :kind) == "build" and Map.get(data, :harness) == "pi") or
+         (Map.get(data, :kind) in ~w(main_coordinator epic_coordinator) and
+            Map.get(data, :harness) == "claude" and Map.get(data, :family_limit) == true))
+  end
+
   def resumable?(data, _), do: Map.get(data, :resumable) == true
 
   def fresh?(data, _),

@@ -2,7 +2,7 @@
 id: fm-9mm.23
 title: "Queue a note to a busy coordinator until its prompt is idle"
 type: task
-status: open
+status: in_progress
 priority: 2
 parent: fm-9mm
 blocked_by: []
