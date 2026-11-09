@@ -5,6 +5,12 @@ timezone = "America/Chicago"
 week_repos = ["work"]
 swimlanes = "project"
 stale_session_after = "2h"
+model_fallbacks = [
+  { from = "openai-codex/gpt-6-astra", to = "anthropic/claude-opus-5-5" },
+  { from = "anthropic/claude-opus-5-5", to = "openai-codex/gpt-6-astra" },
+  { from = "claude-opus-5-5", to = "claude-sonnet-5-5" },
+  { from = "claude-sonnet-5-5", to = "claude-opus-5-5" }
+]
 
 [[columns]]
 title = "Queued"

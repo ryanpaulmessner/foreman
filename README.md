@@ -418,6 +418,19 @@ collapse = false
 color = "violet"
 ```
 
+`board.model_fallbacks` is a list of `{ from = "provider/model", to = "provider/model" }`
+pairs. It replaces the entire default list; `model_fallbacks = []` disables fallback controls.
+Use the exact model names stored on session rows. Defaults in `priv/foreman.defaults.toml`
+pair Codex Astra with Anthropic Opus for Pi, and Opus with Sonnet for Claude.
+Claude offers a switch only for an explicit Opus/Sonnet family limit, never a shared or
+unclassified limit. Continue remains available before the reset time.
+
+Resume on a model saves the pane output, stops the identified agent and its launch shell
+by PID, and opens the same conversation in its workdir. Pi starts without a message;
+the board confirms its Bifrost pin and model before sending `continue`. If pinning fails,
+the new pane stays recorded and the result asks you to check the terminal. A failed open
+after stopping leaves an ended row with saved output, not a claim that nothing changed.
+
 With `tickets = "files"`, the worker watches the main checkout's `tickets/`
 directory using non-recursive inotify and rescans every 60 seconds. Hand edits and
 CLI rename saves are coalesced into stable snapshots. Malformed files retain their

@@ -30,8 +30,21 @@ defmodule Foreman.SessionLaunch do
   def resume(%AgentSession{conversation_id: id} = row, opts \\ []) when is_binary(id) do
     args =
       case row.harness do
-        "pi" -> ["--session-id", id]
+        "pi" -> if(opts[:model_resume], do: model(row), else: []) ++ ["--session-id", id]
         "claude" -> model(row) ++ ["--resume", id]
+      end
+
+    args =
+      if row.harness == "claude" and opts[:model_resume] do
+        case Foreman.Repo.get(Foreman.PlanningSession, row.id) do
+          nil ->
+            args
+
+          planning ->
+            args ++ ["--settings", Jason.encode!(Foreman.SessionHooks.settings(planning, opts))]
+        end
+      else
+        args
       end
 
     open(row, args, opts)
@@ -62,11 +75,22 @@ defmodule Foreman.SessionLaunch do
          false <- Enum.any?(panes, &(&1.pane == row.pane_id)) && {:error, :still_open} do
       prompt = if is_binary(opts[:prompt]), do: [opts[:prompt]], else: []
       command = command(row, [executable | args ++ prompt])
-      place(row, panes, socket, command, opts)
+
+      with {:ok, pane} <- place(row, panes, socket, command, opts) do
+        if row.tmux_server == "board" do
+          case tmux(socket, ["set-option", "-w", "-t", pane, "@foreman-session", row.id], opts) do
+            {:ok, _} -> {:ok, pane}
+            {:error, reason} -> {:error, {:opened, pane, reason}}
+          end
+        else
+          {:ok, pane}
+        end
+      end
     end
   end
 
-  defp executable(harness, opts) do
+  @doc "Checks the harness executable before an existing process is stopped."
+  def executable(harness, opts) do
     name = Map.get(Keyword.get(opts, :executables, %{}), harness, harness)
 
     case System.find_executable(name) do
@@ -160,10 +184,81 @@ defmodule Foreman.SessionLaunch do
         env <>
         "; " <>
         shims <>
+        board_state(row, "running") <>
         Enum.map_join(argv, " ", &quote_arg/1) <>
-        "; echo; echo #{quote_arg("[#{row.harness} exited] press enter")}; read line"
+        "; " <>
+        board_state(row, "ended") <>
+        "echo; echo #{quote_arg("[#{row.harness} exited] press enter")}; read line"
 
     "exec \"$SHELL\" -ilc " <> quote_arg(line)
+  end
+
+  defp board_state(%{tmux_server: "board"}, state),
+    do:
+      "tmux -N -L " <>
+        quote_arg(SessionPane.socket("board")) <>
+        " set-option -w -t \"$TMUX_PANE\" @foreman-state " <> state <> "; "
+
+  defp board_state(_, _), do: ""
+
+  def window(row, opts) do
+    with {:ok, window} <-
+           tmux(
+             SessionPane.socket(row.tmux_server),
+             ["display-message", "-p", "-t", row.pane_id, "\#{window_id}"],
+             opts
+           ),
+         window = String.trim(window),
+         true <- Regex.match?(~r/\A@\d+\z/, window) do
+      {:ok, window}
+    else
+      _ -> {:error, :tmux_unavailable}
+    end
+  end
+
+  @doc "Pins Bifrost before the first resumed message; a failed check sends no message."
+  def activate_model(%{harness: "pi"} = row, opts) do
+    socket = SessionPane.socket(row.tmux_server)
+
+    with :ok <- Foreman.Preview.allow_external_write(),
+         :ok <- wait_screen(row, socket, opts, false, 60),
+         :ok <- send_line(socket, row.pane_id, "/bifrost pin", opts),
+         :ok <- wait_screen(row, socket, opts, true, 15),
+         do: send_line(socket, row.pane_id, "continue", opts)
+  end
+
+  def activate_model(%{harness: "claude"}, _opts), do: :ok
+
+  defp wait_screen(_, _, _, _, 0), do: {:error, :pin_unconfirmed}
+
+  defp wait_screen(row, socket, opts, pinned?, attempts) do
+    with {:ok, text} <- tmux(socket, ["capture-pane", "-p", "-J", "-t", row.pane_id], opts),
+         {:ok, command} <-
+           tmux(
+             socket,
+             ["display-message", "-p", "-t", row.pane_id, "\#{pane_current_command}"],
+             opts
+           ) do
+      marker = if pinned?, do: "Bifrost · pinned", else: "Bifrost"
+
+      footer =
+        text |> String.trim_trailing() |> String.split("\n") |> Enum.take(-8) |> Enum.join("\n")
+
+      if String.trim(command) in ["pi", "node"] and String.contains?(footer, marker) and
+           String.contains?(footer, List.last(String.split(row.model, "/"))) do
+        :ok
+      else
+        Process.sleep(Keyword.get(opts, :poll_delay, 1000))
+        wait_screen(row, socket, opts, pinned?, attempts - 1)
+      end
+    end
+  end
+
+  defp send_line(socket, pane, text, opts) do
+    with {:ok, _} <- tmux(socket, ["send-keys", "-t", pane, "-l", "--", text], opts) do
+      Process.sleep(Keyword.get(opts, :key_delay, 500))
+      with {:ok, _} <- tmux(socket, ["send-keys", "-t", pane, "Enter"], opts), do: :ok
+    end
   end
 
   defp quote_arg(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
