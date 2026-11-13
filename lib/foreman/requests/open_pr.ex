@@ -70,18 +70,7 @@ defmodule Foreman.Requests.OpenPr do
 
   @doc "A stack parent must be a recorded ticket blocker with an open PR. Epic membership is not a stack edge."
   def base_rule(repo, snapshot, facts, key) do
-    parents = stack_parents(key)
-
-    branches =
-      for pr <- snapshot["change_requests"] || [],
-          pr["state"] == "open",
-          pr["source_branch"] != facts["head_branch"],
-          Enum.any?(
-            Foreman.Forge.Stack.links(pr, ticket_prefix(key)),
-            &(&1["bead_id"] in parents)
-          ),
-          do: pr["source_branch"]
-
+    branches = stack_bases(snapshot, facts["head_branch"], key)
     expected = Enum.uniq([Foreman.MergePolicy.base(repo, snapshot["default_branch"]) | branches])
 
     if facts["base_ok"] == true or facts["base_branch"] in expected do
@@ -95,6 +84,20 @@ defmodule Foreman.Requests.OpenPr do
            "Use one of these base branches: #{Enum.join(expected, ", ")}. Use --base-ok to approve a different base."
        }}
     end
+  end
+
+  @doc "Open PR heads belonging to recorded blockers, excluding the child's own head."
+  def stack_bases(snapshot, head, key) do
+    parents = stack_parents(key)
+
+    for pr <- snapshot["change_requests"] || [],
+        pr["state"] == "open",
+        pr["source_branch"] != head,
+        Enum.any?(
+          Foreman.Forge.Stack.links(pr, ticket_prefix(key)),
+          &(&1["bead_id"] in parents)
+        ),
+        do: pr["source_branch"]
   end
 
   defp ticket_prefix({_, id}), do: id |> String.split("-", parts: 2) |> hd()

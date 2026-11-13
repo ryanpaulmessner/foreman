@@ -242,7 +242,8 @@ defmodule Foreman.DocLayout do
   defp folder(folder), do: String.trim_trailing(folder, "/") <> "/"
   defp under?(path, folder), do: String.starts_with?(path, folder(folder))
 
-  defp glob?(glob, path) do
+  @doc "Match a repo-relative path using the docs.allow glob rules."
+  def glob?(glob, path) do
     pattern =
       Regex.split(~r/\*\*\/|\*\*|\*|\?/, glob, include_captures: true)
       |> Enum.map_join(fn

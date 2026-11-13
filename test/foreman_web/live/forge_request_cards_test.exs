@@ -2,6 +2,33 @@ defmodule ForemanWeb.ForgeRequestCardsTest do
   use ForemanWeb.ConnCase, async: false
   import Phoenix.LiveViewTest
 
+  test "push exception is visible before approval and absent on normal cards", %{conn: conn} do
+    Foreman.Overlay.backfill("sample", [%{bead_id: "s-1", status: "open", issue_type: "task"}])
+
+    requests =
+      for facts <- [%{}, %{"no_try_it" => "Emergency fix"}] do
+        Foreman.Repo.insert!(%Foreman.Requests.Request{
+          repo_key: "sample",
+          bead_id: "s-1",
+          kind: "push",
+          actor: "pi",
+          state: "pending",
+          facts: facts
+        })
+      end
+
+    [normal, exception] = requests
+    {:ok, view, _} = live(conn, "/needs-you")
+    refute has_element?(view, "#push-not-tried-#{normal.id}")
+    render_patch(view, "/needs-you?card=#{exception.id}")
+
+    assert has_element?(
+             view,
+             "#push-not-tried-#{exception.id}",
+             "Not tried: Emergency fix"
+           )
+  end
+
   test "approval cards name history replacement and the base override", %{conn: conn} do
     Foreman.Overlay.backfill("sample", [%{bead_id: "s-1", status: "open", issue_type: "task"}])
 

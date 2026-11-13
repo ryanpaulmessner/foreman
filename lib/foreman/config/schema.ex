@@ -56,6 +56,7 @@ defmodule Foreman.Config.Schema do
             "merge_base" => :branch,
             "color" => :text,
             "enabled" => :boolean,
+            "try_it" => {:table, %{"paths" => {:list, :text}}},
             "docs" => {:table, %{"allow" => {:list, :text}, "legacy" => {:list, :text}}}
           }}},
       "backfill" => {:table, %{"closed" => :stage, "default" => :stage}},
