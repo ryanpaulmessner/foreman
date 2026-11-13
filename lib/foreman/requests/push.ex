@@ -18,11 +18,12 @@ defmodule Foreman.Requests.Push do
          true <- remote == repo["github"] || {:error, :config_changed},
          :ok <- default_rule(facts, row, snapshot["default_branch"]),
          :ok <- human_rule(facts, repo, snapshot["default_branch"]),
+         :ok <- Foreman.Requests.TryItGate.validate(facts, row, repo, snapshot),
          :ok <- update_rule(facts, snapshot, row.stage) do
       {:ok,
        facts
        |> Map.take(
-         ~w(worktree local_branch expected_sha remote_branch expected_old_head force_with_lease)
+         ~w(worktree local_branch expected_sha remote_branch expected_old_head force_with_lease no_try_it)
        )
        |> Map.put("remote", remote)}
     else
@@ -79,7 +80,9 @@ defmodule Foreman.Requests.Push do
   def shape(facts) do
     if LocalRefs.branch_name?(facts["local_branch"]) and
          LocalRefs.branch_name?(facts["remote_branch"]) and
-         match?({:ok, _}, LocalRefs.sha(facts["expected_sha"])) and is_binary(facts["worktree"]),
+         match?({:ok, _}, LocalRefs.sha(facts["expected_sha"])) and is_binary(facts["worktree"]) and
+         (not Map.has_key?(facts, "no_try_it") or
+            Foreman.Requests.Decision.text?(facts["no_try_it"])),
        do: :ok,
        else: {:error, :invalid_facts}
   end

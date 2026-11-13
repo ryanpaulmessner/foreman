@@ -65,6 +65,7 @@ defmodule Foreman.CLI do
     base_ok: :boolean,
     expected_old_head: :string,
     force_with_lease: :boolean,
+    no_try_it: :string,
     brief: :string,
     report: :string,
     path: :string,
@@ -378,10 +379,11 @@ defmodule Foreman.CLI do
       "expected_sha" => opts[:sha],
       "remote_branch" => opts[:remote_branch],
       "expected_old_head" => opts[:expected_old_head],
-      "force_with_lease" => opts[:force_with_lease]
+      "force_with_lease" => opts[:force_with_lease],
+      "no_try_it" => opts[:no_try_it]
     }
     |> Map.reject(fn {key, value} ->
-      key in ["expected_old_head", "force_with_lease"] and is_nil(value)
+      key in ["expected_old_head", "force_with_lease", "no_try_it"] and is_nil(value)
     end)
   end
 

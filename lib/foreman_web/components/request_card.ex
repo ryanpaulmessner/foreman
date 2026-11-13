@@ -314,6 +314,13 @@ defmodule ForemanWeb.RequestCard do
   def push_facts(assigns) do
     ~H"""
     <p
+      :if={@request.facts["no_try_it"]}
+      id={@prefix <> "push-not-tried-" <> @request.id}
+      class="break-words text-amber-800 dark:text-amber-300"
+    >
+      Not tried: {@request.facts["no_try_it"]}
+    </p>
+    <p
       :if={@request.facts["force_with_lease"] == true}
       id={@prefix <> "force-push-" <> @request.id}
       class="text-warning"

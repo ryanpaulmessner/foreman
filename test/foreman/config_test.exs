@@ -1,6 +1,16 @@
 defmodule Foreman.ConfigTest do
   use ExUnit.Case, async: true
 
+  test "try_it paths opt a repo into the push gate" do
+    base = "[[repos]]\nkey = \"sample\"\npath = \"/tmp/sample\"\n"
+    assert {:ok, config} = parse(base <> "try_it = { paths = [\"lib/*_web/**\", \"assets/**\"] }")
+    assert hd(config["repos"])["try_it"] == %{"paths" => ["lib/*_web/**", "assets/**"]}
+
+    for value <- ["false", "{ paths = [1] }", "{ paths = [\"\"] }", "{ other = [] }"] do
+      assert {:error, _} = parse(base <> "try_it = " <> value)
+    end
+  end
+
   test "ticket source defaults to beads and permits a per-repo files override" do
     base = "[[repos]]\nkey = \"sample\"\npath = \"/tmp/sample\"\n"
     assert {:ok, config} = parse(base)

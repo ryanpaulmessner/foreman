@@ -1,6 +1,13 @@
 defmodule Foreman.ReviewCLITest do
   use ExUnit.Case, async: true
 
+  test "push CLI sends the explicit try-it exception" do
+    assert {:ok, %{request: %{"facts" => facts}}} =
+             Foreman.CLI.parse(["ask", "push", "s-1", "--no-try-it", "Emergency fix"])
+
+    assert facts["no_try_it"] == "Emergency fix"
+  end
+
   test "preview CLI copies the walkthrough and resolves media paths" do
     root = Path.join(System.tmp_dir!(), "walkthrough-#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)
