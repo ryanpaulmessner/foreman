@@ -503,7 +503,13 @@ defmodule ForemanWeb.NeedsYouLive do
   defp read_pending do
     pending = Requests.pending()
     messages = Foreman.CardMessages.versions(Enum.map(pending, & &1.id))
-    versions = Map.new(pending, &{&1.id, {messages[&1.id], &1.edited_at, &1.similar_question}})
+
+    versions =
+      Map.new(
+        pending,
+        &{&1.id, {messages[&1.id], &1.edited_at, &1.similar_question, &1.facts["preview"]}}
+      )
+
     {:ok, pending, versions}
   rescue
     e -> if Foreman.Repo.unavailable?(e), do: :error, else: reraise(e, __STACKTRACE__)

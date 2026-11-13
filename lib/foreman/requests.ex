@@ -40,7 +40,11 @@ defmodule Foreman.Requests do
             actor: params["actor"] || "user",
             session: params["session"],
             agent_session_id: agent_session_id,
-            facts: facts,
+            facts:
+              if(kind == "review_ui" and facts["url"],
+                do: Map.put(facts, "preview", "unchecked"),
+                else: facts
+              ),
             state: "pending"
           })
 
@@ -472,6 +476,11 @@ defmodule Foreman.Requests do
           request
           |> Ecto.Changeset.change(
             state: to_string(next),
+            facts:
+              if(request.kind == "review_ui",
+                do: Foreman.PreviewCheck.stop(request.facts),
+                else: request.facts
+              ),
             outcome: outcome,
             note: Map.get(payload, "note", request.note)
           )

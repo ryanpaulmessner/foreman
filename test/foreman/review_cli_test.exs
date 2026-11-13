@@ -1,6 +1,37 @@
 defmodule Foreman.ReviewCLITest do
   use ExUnit.Case, async: true
 
+  test "preview CLI copies the walkthrough and resolves media paths" do
+    root = Path.join(System.tmp_dir!(), "walkthrough-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    walkthrough = %{"intro" => "Try this", "seed" => [], "steps" => []}
+    File.write!(root <> "/walk.json", Jason.encode!(walkthrough))
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    assert {:ok, %{request: %{"facts" => facts}}} =
+             Foreman.CLI.parse(
+               [
+                 "ask",
+                 "review_ui",
+                 "s-1",
+                 "--url",
+                 "http://localhost:4812",
+                 "--walkthrough",
+                 "walk.json",
+                 "--video",
+                 "run.webm",
+                 "--sha",
+                 String.duplicate("a", 40)
+               ],
+               cwd: root
+             )
+
+    assert facts["walkthrough"] == walkthrough
+    assert facts["walkthrough_path"] == root <> "/walk.json"
+    assert facts["video"] == root <> "/run.webm"
+    assert facts["url"] == "http://localhost:4812"
+  end
+
   test "a PNG without verify metadata carries its intrinsic dimensions" do
     root = Path.join(System.tmp_dir!(), "review-size-#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)

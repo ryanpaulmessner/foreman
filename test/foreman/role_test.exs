@@ -72,6 +72,7 @@ defmodule Foreman.RoleTest do
       )
 
     assert ForemanWeb.Endpoint in children
+    assert Foreman.PreviewCheckMonitor in children
     {Oban, opts} = List.keyfind(children, Oban, 0)
     assert opts[:queues] == false
     assert opts[:plugins] == false
@@ -87,7 +88,10 @@ defmodule Foreman.RoleTest do
     assert worker_opts[:queues] == [external_reads: 4]
     assert worker_opts[:plugins] == [Oban.Plugins.Pruner]
     assert worker_opts[:notifier] == Oban.Notifiers.Postgres
-    assert Foreman.Role.children("all", opts) == worker ++ [ForemanWeb.Endpoint]
+
+    assert Foreman.Role.children("all", opts) ==
+             worker ++ [ForemanWeb.Endpoint, Foreman.PreviewCheckMonitor]
+
     refute Foreman.Role.endpoint?("worker")
     assert Foreman.Role.endpoint?("web")
   end

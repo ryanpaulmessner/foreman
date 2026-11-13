@@ -3,7 +3,7 @@ defmodule ForemanWeb.ReviewImageController do
 
   def show(conn, %{"id" => id, "index" => index}) do
     with %{kind: "review_ui"} = request <- Foreman.Requests.get(id),
-         {index, ""} <- Integer.parse(index),
+         {:ok, index} <- media_index(index),
          {:ok, bytes, type} <- Foreman.ReviewImages.read(request, index) do
       conn
       |> put_resp_header("content-type", type)
@@ -13,6 +13,15 @@ defmodule ForemanWeb.ReviewImageController do
       |> send_resp(200, bytes)
     else
       _ -> send_resp(conn, 404, "Image unavailable")
+    end
+  end
+
+  defp media_index("video"), do: {:ok, :video}
+
+  defp media_index(index) do
+    case Integer.parse(index) do
+      {index, ""} when index >= 0 -> {:ok, index}
+      _ -> :error
     end
   end
 end
