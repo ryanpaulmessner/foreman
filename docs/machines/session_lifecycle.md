@@ -23,6 +23,7 @@ stateDiagram-v2
     live --> ended: pane_gone, exited / save(capture)
     dead --> starting: resume [resumable?] / resume(conversation)
     ended --> ended: relaunch_build [relaunch?] / resume(parent), note(relaunch)
+    ended --> ended: fresh_relaunch [fresh_relaunch?] / create(coordinator), move(build), note(relaunch)
     state "active: starting, working, idle" as active
     state "dead: parked, ended" as dead
     state "live: starting, working, idle, waiting_question, waiting_permission, waiting_usage_limit" as live
@@ -43,6 +44,7 @@ stateDiagram-v2
 | none | resume | invalid |  |
 | none | start_fresh | invalid |  |
 | none | relaunch_build | invalid |  |
+| none | fresh_relaunch | invalid |  |
 | none | output_changed | ignored |  |
 | none | quiet | ignored |  |
 | none | asked | ignored |  |
@@ -66,6 +68,7 @@ stateDiagram-v2
 | starting | resume | invalid |  |
 | starting | start_fresh | invalid |  |
 | starting | relaunch_build | invalid |  |
+| starting | fresh_relaunch | invalid |  |
 | starting | output_changed | -> working |  |
 | starting | quiet | ignored |  |
 | starting | asked | -> waiting_question |  |
@@ -90,6 +93,7 @@ stateDiagram-v2
 | working | resume | invalid |  |
 | working | start_fresh | invalid |  |
 | working | relaunch_build | invalid |  |
+| working | fresh_relaunch | invalid |  |
 | working | output_changed | ignored |  |
 | working | quiet | -> idle |  |
 | working | asked | -> waiting_question |  |
@@ -114,6 +118,7 @@ stateDiagram-v2
 | idle | resume | invalid |  |
 | idle | start_fresh | invalid |  |
 | idle | relaunch_build | invalid |  |
+| idle | fresh_relaunch | invalid |  |
 | idle | output_changed | -> working |  |
 | idle | quiet | ignored |  |
 | idle | asked | -> waiting_question |  |
@@ -138,6 +143,7 @@ stateDiagram-v2
 | waiting_question | resume | invalid |  |
 | waiting_question | start_fresh | invalid |  |
 | waiting_question | relaunch_build | invalid |  |
+| waiting_question | fresh_relaunch | invalid |  |
 | waiting_question | output_changed | ignored |  |
 | waiting_question | quiet | ignored |  |
 | waiting_question | asked | ignored |  |
@@ -162,6 +168,7 @@ stateDiagram-v2
 | waiting_permission | resume | invalid |  |
 | waiting_permission | start_fresh | invalid |  |
 | waiting_permission | relaunch_build | invalid |  |
+| waiting_permission | fresh_relaunch | invalid |  |
 | waiting_permission | output_changed | ignored |  |
 | waiting_permission | quiet | ignored |  |
 | waiting_permission | asked | ignored |  |
@@ -187,6 +194,7 @@ stateDiagram-v2
 | waiting_usage_limit | resume | invalid |  |
 | waiting_usage_limit | start_fresh | invalid |  |
 | waiting_usage_limit | relaunch_build | invalid |  |
+| waiting_usage_limit | fresh_relaunch | invalid |  |
 | waiting_usage_limit | output_changed | -> working | clear(request) |
 | waiting_usage_limit | quiet | ignored |  |
 | waiting_usage_limit | asked | ignored |  |
@@ -212,6 +220,7 @@ stateDiagram-v2
 | parked | start_fresh [fresh?] | stay | create(row), move(builds) |
 | parked | start_fresh | invalid |  |
 | parked | relaunch_build | invalid |  |
+| parked | fresh_relaunch | invalid |  |
 | parked | output_changed | ignored |  |
 | parked | quiet | ignored |  |
 | parked | asked | ignored |  |
@@ -237,6 +246,8 @@ stateDiagram-v2
 | ended | start_fresh | invalid |  |
 | ended | relaunch_build [relaunch?] | stay | resume(parent), note(relaunch) |
 | ended | relaunch_build | invalid |  |
+| ended | fresh_relaunch [fresh_relaunch?] | stay | create(coordinator), move(build), note(relaunch) |
+| ended | fresh_relaunch | invalid |  |
 | ended | output_changed | ignored |  |
 | ended | quiet | ignored |  |
 | ended | asked | ignored |  |

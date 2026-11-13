@@ -132,6 +132,66 @@ defmodule Foreman.SessionResume do
     end
   end
 
+  @doc """
+  Starts the dead build's non-resumable coordinator afresh, then queues its relaunch note.
+  Returns `{:ok, %{coordinator: new_row}}` or `{:error, reason}`. A coordinator that
+  returned meanwhile is refused with `:coordinator_changed`; an existing waiting note
+  is refused with `:note_waiting`. No note is typed by this call.
+  """
+  def fresh_relaunch(%AgentSession{} = row, opts \\ []) do
+    with :ok <- Foreman.Preview.allow_external_write(),
+         {:ok, row} <- current(row),
+         %AgentSession{} = parent <- AgentSessions.coordinator(row) || {:error, :no_coordinator} do
+      result =
+        Repo.transaction(fn ->
+          AgentSessions.lock(row.name)
+          AgentSessions.lock(parent.name)
+          coordinator = AgentSessions.coordinator(row)
+
+          cond do
+            coordinator.id != parent.id or not AgentSessions.allowed?(coordinator, :start_fresh) ->
+              {:error, :coordinator_changed}
+
+            QueuedNotes.open_relaunch(row.id) ->
+              {:error, :note_waiting}
+
+            true ->
+              run = fn build, _effects ->
+                with {:ok, new} <- start_fresh(coordinator, opts) do
+                  build |> Ecto.Changeset.change(parent_id: new.id) |> Repo.update!()
+
+                  {:ok, _} =
+                    QueuedNotes.queue(%{
+                      kind: "relaunch",
+                      coordinator: new,
+                      subject_id: build.id,
+                      text: @prefix <> relaunch_note(build)
+                    })
+
+                  :ok
+                end
+              end
+
+              case AgentSessions.fire(row, :fresh_relaunch, run: run) do
+                {:ok, _, _} ->
+                  {:ok, %{coordinator: AgentSessions.coordinator(AgentSessions.get(row.id))}}
+
+                {:error, {:invalid, _, _}} ->
+                  Repo.rollback(:invalid)
+
+                {:error, reason} ->
+                  Repo.rollback(reason)
+              end
+          end
+        end)
+
+      case result do
+        {:ok, outcome} -> outcome
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
   @doc "The relaunch note (Decision 17): `Relaunch the build for <ticket> on <branch>.`"
   def relaunch_note(row),
     do: "Relaunch the build for #{row.ticket || row.name} on #{row.branch || "its branch"}."

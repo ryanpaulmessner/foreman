@@ -200,6 +200,85 @@ defmodule Foreman.SessionResumeTest do
     end
   end
 
+  describe "fresh_relaunch/2" do
+    test "starts a fresh epic coordinator and queues the relaunch for that new row", ctx do
+      parent = coordinator(%{workdir: worktree(ctx, "coord")}) |> ended()
+
+      row =
+        ended(
+          agent_session(name: "b", parent_id: parent.id, ticket: "fm-9mm.24", branch: "feat/b")
+        )
+
+      assert {:ok, %{coordinator: new}} = SessionResume.fresh_relaunch(row, opts(ctx, []))
+      assert new.id != parent.id
+      assert new.name == parent.name
+      assert new.state == "starting"
+      assert AgentSessions.get(parent.id).state == "ended"
+      assert AgentSessions.get(row.id).parent_id == new.id
+      note = Foreman.QueuedNotes.open_relaunch(row.id)
+      assert note.coordinator_id == new.id
+      assert note.state == "queued"
+      assert note.text == "[foreman note from board] Relaunch the build for fm-9mm.24 on feat/b."
+      calls = calls()
+      assert opened(calls)
+      refute Enum.any?(calls, &("send-keys" in &1))
+
+      screen = start_supervised!({Agent, fn -> "Starting…" end})
+      test = self()
+
+      delivery = fn "tmux", args, _ ->
+        send(test, {:tmux, args})
+
+        cond do
+          "list-panes" in args -> {"%42\t@1\tforeman\tfm-epic\t1\n", 0}
+          "capture-pane" in args -> {Agent.get(screen, & &1), 0}
+          true -> {"", 0}
+        end
+      end
+
+      delivery_opts = [runner: delivery, key_delay: 0]
+      assert %{waiting: 1, sent: 0} = Foreman.QueuedNotes.run(delivery_opts)
+      refute Enum.any?(calls(), &("send-keys" in &1))
+      Agent.update(screen, fn _ -> "───\n❯ \n───\n" end)
+      assert %{sent: 1} = Foreman.QueuedNotes.run(delivery_opts)
+      typed = Enum.filter(calls(), &("-l" in &1))
+      assert [["-N", "-L", "default", "send-keys", "-t", "%42", "-l", "--", text]] = typed
+      assert text == note.text
+      assert %{sent: 0} = Foreman.QueuedNotes.run(delivery_opts)
+      refute Enum.any?(calls(), &("send-keys" in &1))
+    end
+
+    test "a failed fresh launch leaves both rows ended and saves no note", ctx do
+      parent = coordinator(%{workdir: worktree(ctx, "coord")}) |> ended()
+      row = ended(agent_session(name: "b", parent_id: parent.id))
+
+      assert {:error, :tmux_unavailable} =
+               SessionResume.fresh_relaunch(row, opts(ctx, [], ["new-session"]))
+
+      assert AgentSessions.get(parent.id).state == "ended"
+      assert AgentSessions.get(row.id).parent_id == parent.id
+      assert AgentSessions.live_by_name(parent.name) == nil
+      assert Foreman.QueuedNotes.for_subject(row.id) == []
+      refute Enum.any?(calls(), &("send-keys" in &1))
+    end
+
+    test "a same-name coordinator came back: no launch and no note", ctx do
+      parent = coordinator(%{workdir: worktree(ctx, "coord")}) |> ended()
+      row = ended(agent_session(name: "b", parent_id: parent.id))
+      coordinator()
+      assert {:error, :coordinator_changed} = SessionResume.fresh_relaunch(row, opts(ctx, []))
+      assert calls() == []
+      assert Foreman.QueuedNotes.for_subject(row.id) == []
+    end
+
+    test "a resumable build cannot start a fresh coordinator", ctx do
+      parent = coordinator(%{workdir: worktree(ctx, "coord")}) |> ended()
+      row = resumable_build(ctx, parent) |> ended()
+      assert {:error, :invalid} = SessionResume.fresh_relaunch(row, opts(ctx, []))
+      assert calls() == []
+    end
+  end
+
   describe "resume/2" do
     test "a Pi build next to its live coordinator: a new pane in the coordinator's window, same row",
          ctx do

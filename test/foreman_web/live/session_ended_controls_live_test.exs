@@ -164,6 +164,7 @@ defmodule ForemanWeb.SessionEndedControlsLiveTest do
              )
 
       refute has_element?(view, "#session-control-relaunch_build")
+      refute has_element?(view, "#session-control-fresh_relaunch")
       refute has_element?(view, "#session-unavailable", "Resume")
       assert has_element?(view, "#session-unavailable", "(The pane is closed.)")
     end
@@ -220,14 +221,17 @@ defmodule ForemanWeb.SessionEndedControlsLiveTest do
              )
 
       assert has_element?(view, "#session-next-step", "too. Relaunch resumes fm-gone first.")
+      refute has_element?(view, "#session-control-fresh_relaunch")
     end
 
-    test "a coordinator that cannot resume either: Relaunch build is off", %{conn: conn} = ctx do
+    test "a build whose coordinator cannot resume offers chained recovery on its own page",
+         %{conn: conn} = ctx do
       parent = epic(%{name: "fm-stuck"})
       row = ended(build(ctx, "build-e", parent))
       ended(parent)
       view = open(conn, row)
       assert has_element?(view, "#session-next-step", "too and cannot resume.")
+      assert has_element?(view, "#session-control-fresh_relaunch")
       refute has_element?(view, "#session-control-relaunch_build")
 
       assert has_element?(
@@ -235,6 +239,85 @@ defmodule ForemanWeb.SessionEndedControlsLiveTest do
                "#session-unavailable",
                "Relaunch build on this ticket (fm-stuck ended and cannot resume.)"
              )
+    end
+
+    test "chained recovery is absent for live builds and builds with no coordinator",
+         %{conn: conn} = ctx do
+      parent = epic() |> ended()
+      live_build = build(ctx, "still-working", parent)
+      no_parent = build(ctx, "unassigned", nil) |> ended()
+
+      for row <- [live_build, no_parent] do
+        view = open(conn, row)
+        refute has_element?(view, "#session-control-fresh_relaunch")
+      end
+    end
+
+    test "chained recovery confirms both steps and saves the note for the new coordinator",
+         %{conn: conn} = ctx do
+      parent = epic(%{workdir: dir(ctx, "coord")}) |> ended()
+      row = ended(build(ctx, "build-chain", parent))
+      tmux(ctx, [])
+      view = open(conn, row)
+      view |> element("#session-control-fresh_relaunch") |> render_click()
+
+      assert has_element?(
+               view,
+               "#session-fresh-question",
+               "Start a new conversation for fm-epic?"
+             )
+
+      assert has_element?(
+               view,
+               "#session-fresh-confirm",
+               "Relaunch the build for fm-9mm.15 on feat/build-chain."
+             )
+
+      assert has_element?(view, "#session-fresh-confirm-yes[phx-disable-with='Starting…']")
+      view |> element("#session-fresh-confirm-yes") |> render_click()
+      assert has_element?(view, "#session-result", "Started a new fm-epic conversation.")
+      assert has_element?(view, "#session-note", "waits until its prompt is idle")
+      new = AgentSessions.coordinator(AgentSessions.get(row.id))
+      assert has_element?(view, "#session-result-link[href='/sessions/#{new.id}']")
+      refute has_element?(view, "#session-control-fresh_relaunch")
+      tmux(ctx, [{"%42", "foreman", "fm-epic"}])
+      Foreman.QueuedNotes.run()
+      send(view.pid, {:notification, :foreman_events, :sessions_changed})
+      assert has_element?(view, "#session-note", "Sent fm-epic the relaunch note")
+    end
+
+    test "a failed fresh start says nothing changed and queues nothing", %{conn: conn} = ctx do
+      parent = epic(%{workdir: dir(ctx, "coord")}) |> ended()
+      row = ended(build(ctx, "build-chain", parent))
+      tmux(ctx, [], ["new-session"])
+      view = open(conn, row)
+      view |> element("#session-control-fresh_relaunch") |> render_click()
+      view |> element("#session-fresh-confirm-yes") |> render_click()
+
+      assert has_element?(
+               view,
+               "#session-result",
+               "Could not start a new conversation for fm-epic: tmux does not answer. Nothing changed."
+             )
+
+      assert Foreman.QueuedNotes.for_subject(row.id) == []
+    end
+
+    test "a coordinator that came back during confirmation is refused", %{conn: conn} = ctx do
+      parent = epic(%{workdir: dir(ctx, "coord")}) |> ended()
+      row = ended(build(ctx, "build-chain", parent))
+      view = open(conn, row)
+      view |> element("#session-control-fresh_relaunch") |> render_click()
+      epic()
+      view |> element("#session-fresh-confirm-yes") |> render_click()
+
+      assert has_element?(
+               view,
+               "#session-result",
+               "The coordinator is available again. Use Relaunch build on this ticket. Nothing changed."
+             )
+
+      assert Foreman.QueuedNotes.for_subject(row.id) == []
     end
 
     test "parked coordinator: Parked <time>, its builds keep running, [Resume]", %{conn: conn} do
@@ -248,6 +331,7 @@ defmodule ForemanWeb.SessionEndedControlsLiveTest do
 
     test "dead coordinator, cannot resume: [Start fresh]", %{conn: conn} do
       view = open(conn, ended(epic(%{name: "fm-old"})))
+      refute has_element?(view, "#session-control-fresh_relaunch")
       assert has_element?(view, "#session-next-step", "The board has no conversation id for it.")
 
       assert has_element?(

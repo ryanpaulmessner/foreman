@@ -22,7 +22,7 @@ defmodule Foreman.SessionControls do
 
   # Each control fires the lifecycle event of the same name.
   @controls [:focus, :message, :continue, :park, :stop]
-  @dead [:resume, :relaunch_build, :start_fresh]
+  @dead [:resume, :relaunch_build, :start_fresh, :fresh_relaunch]
 
   @doc """
   The controls of `row`, in page order: a list of `{control, :on}` or
@@ -72,10 +72,20 @@ defmodule Foreman.SessionControls do
       resume = {:resume, if(resumable?, do: :on, else: {:off, resume_reason(row)})}
 
       cond do
-        resumable? -> [resume]
-        AgentSessions.allowed?(row, :relaunch_build) -> [resume, {:relaunch_build, relaunch(row)}]
-        AgentSessions.allowed?(row, :start_fresh) -> [resume, {:start_fresh, :on}]
-        true -> [resume]
+        resumable? ->
+          [resume]
+
+        AgentSessions.allowed?(row, :fresh_relaunch) ->
+          [resume, {:relaunch_build, relaunch(row)}, {:fresh_relaunch, :on}]
+
+        AgentSessions.allowed?(row, :relaunch_build) ->
+          [resume, {:relaunch_build, relaunch(row)}]
+
+        AgentSessions.allowed?(row, :start_fresh) ->
+          [resume, {:start_fresh, :on}]
+
+        true ->
+          [resume]
       end
     end
   end

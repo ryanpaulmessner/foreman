@@ -96,7 +96,13 @@ defmodule ForemanWeb.SessionLive do
   def handle_event("stop", _, socket), do: {:noreply, run_control(socket, :stop, %{})}
 
   def handle_event("start-fresh", _, socket),
-    do: {:noreply, run_control(socket, :start_fresh, %{})}
+    do:
+      {:noreply,
+       run_control(
+         socket,
+         if(socket.assigns.row.kind == "build", do: :fresh_relaunch, else: :start_fresh),
+         %{}
+       )}
 
   def handle_event("send-message", %{"message" => %{"text" => text}}, socket) do
     case Foreman.ChatPrompt.typed(text) do
@@ -250,7 +256,16 @@ defmodule ForemanWeb.SessionLive do
       unavailable: unavailable(controls),
       row_controls:
         Enum.filter(
-          [:answer, :resume, :relaunch_build, :start_fresh, :continue, :focus, :park],
+          [
+            :answer,
+            :resume,
+            :relaunch_build,
+            :fresh_relaunch,
+            :start_fresh,
+            :continue,
+            :focus,
+            :park
+          ],
           &(&1 != primary and on?(controls, &1))
         )
     )
@@ -376,6 +391,23 @@ defmodule ForemanWeb.SessionLive do
   defp result_line(:relaunch_build, {:ok, %{resumed: true} = sent}, _),
     do: {:success, "Resumed #{sent.coordinator} and sent it the note."}
 
+  defp result_line(:fresh_relaunch, {:ok, %{coordinator: new}}, _),
+    do:
+      {:info, "Started a new #{new.name} conversation. Saved the relaunch note.",
+       "/sessions/#{new.id}"}
+
+  defp result_line(:fresh_relaunch, {:error, :coordinator_changed}, _),
+    do:
+      {:error,
+       "The coordinator is available again. Use Relaunch build on this ticket. Nothing changed."}
+
+  defp result_line(:fresh_relaunch, {:error, reason}, row) do
+    parent = AgentSessions.get(row.parent_id)
+
+    {:error,
+     "Could not start a new conversation for #{parent && parent.name}: #{failure(reason)}. Nothing changed."}
+  end
+
   defp result_line(:start_fresh, {:ok, new}, row),
     do:
       {:success, "Started a new #{row.name} conversation. Its builds stay under it.",
@@ -401,6 +433,7 @@ defmodule ForemanWeb.SessionLive do
   defp failure(:not_resumable), do: "it cannot resume"
   defp failure(:workdir_gone), do: "the workdir was removed"
   defp failure(:still_open), do: "its old pane is still open"
+  defp failure(:note_waiting), do: "a relaunch note already waits"
   defp failure(:no_coordinator), do: "no coordinator is recorded for it"
   defp failure(:pi_unavailable), do: "Pi is not on the board's PATH"
   defp failure(:claude_unavailable), do: "Claude is not on the board's PATH"
@@ -512,6 +545,7 @@ defmodule ForemanWeb.SessionLive do
     resume_on_model: {"Resume on another model", "hero-arrow-path", "Resuming…"},
     relaunch_build: {"Relaunch build on this ticket", "hero-arrow-path", "Relaunching…"},
     start_fresh: {"Start fresh", "hero-sparkles", nil},
+    fresh_relaunch: {"Start fresh and relaunch build", "hero-arrow-path", nil},
     continue: {"Continue", "hero-play", "Continuing…"},
     focus: {"Focus terminal", "hero-command-line", "Focusing…"},
     park: {"Park", "hero-pause", "Parking…"},
@@ -551,6 +585,7 @@ defmodule ForemanWeb.SessionLive do
       card -> :answer
       on?(controls, :resume) -> :resume
       on?(controls, :relaunch_build) -> :relaunch_build
+      on?(controls, :fresh_relaunch) -> :fresh_relaunch
       on?(controls, :start_fresh) -> :start_fresh
       true -> nil
     end
@@ -578,8 +613,8 @@ defmodule ForemanWeb.SessionLive do
       <.icon name={@icon} class="size-4" /> {@label}
     </Button.button>
     <Button.button
-      :if={@control == :start_fresh}
-      id="session-control-start_fresh"
+      :if={@control in [:start_fresh, :fresh_relaunch]}
+      id={"session-control-#{@control}"}
       type="button"
       size="sm"
       variant={if(@filled, do: "solid", else: "outline")}
@@ -591,7 +626,7 @@ defmodule ForemanWeb.SessionLive do
       <.icon name={@icon} class="size-4" /> {@label}
     </Button.button>
     <Button.button
-      :if={@control not in [:answer, :start_fresh]}
+      :if={@control not in [:answer, :start_fresh, :fresh_relaunch]}
       id={"session-control-#{@control}"}
       type="button"
       size="sm"
@@ -950,8 +985,14 @@ defmodule ForemanWeb.SessionLive do
             class="bb-panel bb-session-confirm-fresh space-y-3"
           >
             <h2 id="session-fresh-question" class="font-semibold">
-              Start a new conversation for {@row.name}?
+              Start a new conversation for {if @row.kind == "build",
+                do: @coordinator.name,
+                else: @row.name}?
             </h2>
+            <p :if={@row.kind == "build"} class="text-sm">
+              Then send it the note: “{SessionResume.relaunch_note(@row)}”
+              The note waits until its prompt is idle.
+            </p>
             <p class="text-sm">The old conversation stays in history.</p>
             <div class="bb-session-controls">
               <Button.button
@@ -962,7 +1003,7 @@ defmodule ForemanWeb.SessionLive do
                 phx-click="start-fresh"
                 phx-disable-with="Starting…"
               >
-                Start fresh
+                {if @row.kind == "build", do: "Start fresh and relaunch build", else: "Start fresh"}
               </Button.button>
               <Button.button
                 id="session-fresh-cancel"
