@@ -102,6 +102,7 @@ defmodule Foreman.MixProject do
         "compile --warnings-as-errors",
         "foreman.hygiene",
         "format --check-formatted",
+        "cmd python3 -B -m unittest discover -s test/scripts",
         "test"
       ]
     ]
