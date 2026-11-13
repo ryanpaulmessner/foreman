@@ -1,0 +1,3 @@
+#!/bin/sh
+printf '%s\n' 'Agent execution disabled in foreman preview.' >&2
+exit 1
