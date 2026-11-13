@@ -462,6 +462,11 @@ defmodule ForemanWeb.OpenCard do
       phx-value-id={@request.id}
     >
       <div class="bb-qcard-body">
+        <ForemanWeb.ReviewTryIt.card
+          :if={@request.kind == "review_ui" and @request.facts["url"]}
+          request={@request}
+          prefix={@prefix}
+        />
         <ForemanWeb.ReviewImages.grid
           :if={@request.kind == "review_ui"}
           request={@request}
@@ -472,10 +477,11 @@ defmodule ForemanWeb.OpenCard do
           <label
             :for={{option, index} <- Enum.with_index(@request.facts["options"])}
             data-recommended={to_string(option == @request.facts["recommendation"])}
-            class="bb-opt"
+            class={["bb-opt", works_disabled?(@request, option) && "opacity-50"]}
           >
             <input
               id={"#{@prefix}option-#{@request.id}-#{index}"}
+              disabled={works_disabled?(@request, option)}
               type="radio"
               name="decision[choice]"
               value={option}
@@ -775,6 +781,12 @@ defmodule ForemanWeb.OpenCard do
     do: "The question was not sent. The session is not at an empty prompt."
 
   defp question_error(_), do: "The question was not sent. The board cannot reach the session."
+
+  defp works_disabled?(%{kind: "review_ui", facts: %{"url" => url} = facts}, "Works")
+       when is_binary(url),
+       do: Foreman.PreviewCheck.load(facts) != :up
+
+  defp works_disabled?(_, _), do: false
 
   defp waiting_notice(state) do
     %{

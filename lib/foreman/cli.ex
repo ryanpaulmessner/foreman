@@ -44,6 +44,9 @@ defmodule Foreman.CLI do
     doc: :keep,
     image: :keep,
     artifact: :string,
+    url: :string,
+    walkthrough: :string,
+    video: :string,
     look_at: :string,
     scratchpad: :string,
     timeout: :integer,
@@ -334,6 +337,11 @@ defmodule Foreman.CLI do
       "question" => opts[:question],
       "text" => opts[:text],
       "artifact" => opts[:artifact],
+      "url" => opts[:url],
+      "sha" => opts[:sha],
+      "walkthrough" => read_walkthrough(opts[:walkthrough], cwd),
+      "walkthrough_path" => if(opts[:walkthrough], do: Path.expand(opts[:walkthrough], cwd)),
+      "video" => if(opts[:video], do: Path.expand(opts[:video], cwd)),
       "look_at" => opts[:look_at],
       "scratchpad" => if(opts[:scratchpad], do: Path.expand(opts[:scratchpad], cwd)),
       "images" =>
@@ -416,6 +424,20 @@ defmodule Foreman.CLI do
             if Path.type(doc) == :relative and File.regular?(full), do: full, else: doc
           end)
         )
+    end
+  end
+
+  defp read_walkthrough(nil, _cwd), do: nil
+
+  defp read_walkthrough(path, cwd) do
+    path = Path.expand(path, cwd)
+
+    with {:ok, %{size: size}} when size <= 1_000_000 <- File.stat(path),
+         {:ok, bytes} <- File.read(path),
+         {:ok, value} <- Jason.decode(bytes) do
+      value
+    else
+      _ -> nil
     end
   end
 

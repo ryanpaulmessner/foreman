@@ -29,7 +29,13 @@ defmodule Foreman.Role do
 
     [{Oban, oban}] ++
       if(worker?, do: worker_children(), else: []) ++
-      if(settings.endpoint, do: [ForemanWeb.Endpoint], else: [])
+      if(settings.endpoint, do: web_children(), else: [])
+  end
+
+  defp web_children do
+    if Application.get_env(:foreman, :runtime_enabled, true) and preview_readers_enabled?(),
+      do: [ForemanWeb.Endpoint, Foreman.PreviewCheckMonitor],
+      else: [ForemanWeb.Endpoint]
   end
 
   def endpoint?(role), do: Map.fetch!(@roles, role).endpoint

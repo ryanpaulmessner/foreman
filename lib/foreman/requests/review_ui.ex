@@ -5,6 +5,14 @@ defmodule Foreman.Requests.ReviewUI do
 
   @impl true
   def validate(facts, row) when is_map(facts) do
+    with :ok <- Foreman.TryIt.validate(facts, row.repo_key) do
+      validate_media(facts, row)
+    end
+  end
+
+  def validate(_, _), do: {:error, :invalid_facts}
+
+  defp validate_media(facts, row) do
     cond do
       not Decision.text?(facts["question"]) or not optional_fields?(facts) ->
         {:error, :invalid_facts}
@@ -12,22 +20,36 @@ defmodule Foreman.Requests.ReviewUI do
       not artifact?(facts["artifact"]) ->
         {:error, :invalid_artifact}
 
+      not is_nil(facts["video"]) and
+          not match?(
+            {:ok, _, "video/webm"},
+            Foreman.ReviewImages.read_video_path(
+              facts["video"],
+              row.repo_key,
+              facts["scratchpad"]
+            )
+          ) ->
+        {:error, :invalid_video}
+
       not images?(Map.get(facts, "images", []), row.repo_key, facts) ->
         {:error, :invalid_image}
 
-      Map.get(facts, "images", []) == [] and is_nil(facts["artifact"]) ->
+      Map.get(facts, "images", []) == [] and is_nil(facts["artifact"]) and is_nil(facts["url"]) ->
         {:error, :images_or_artifact_required}
 
       true ->
         {:ok,
          facts
-         |> Map.take(~w(question text artifact images look_at scratchpad))
+         |> Map.take(
+           ~w(question text artifact images look_at scratchpad url sha walkthrough walkthrough_path video preview)
+         )
          |> Map.put_new("images", [])
-         |> Map.put("options", ["Looks right", "Change it"])}
+         |> Map.put(
+           "options",
+           if(facts["url"], do: ["Works", "Found a problem"], else: ["Looks right", "Change it"])
+         )}
     end
   end
-
-  def validate(_, _), do: {:error, :invalid_facts}
 
   defp optional_fields?(facts) do
     Enum.all?(["text", "look_at"], &(is_nil(facts[&1]) or Decision.text?(facts[&1]))) and
@@ -68,7 +90,14 @@ defmodule Foreman.Requests.ReviewUI do
   def answer(request, payload) do
     comments = payload["image_comments"] || %{}
 
-    if payload["answer"] in ["Looks right", "Change it"] and is_map(comments) and
+    options =
+      if request.facts["url"],
+        do: ["Works", "Found a problem"],
+        else: ["Looks right", "Change it"]
+
+    allowed = payload["answer"] != "Works" or Foreman.PreviewCheck.load(request.facts) == :up
+
+    if payload["answer"] in options and allowed and is_map(comments) and
          Enum.all?(comments, fn {_, text} -> is_binary(text) and byte_size(text) <= 2000 end) and
          (is_nil(payload["note"]) or is_binary(payload["note"])) do
       lines =
@@ -88,9 +117,10 @@ defmodule Foreman.Requests.ReviewUI do
 
       note = Enum.reject([payload["note"] | lines], &(&1 in [nil, ""])) |> Enum.join("\n")
 
-      if byte_size(note) <= 20_000,
-        do: {:ok, Map.put(payload, "note", note)},
-        else: {:error, :invalid_note}
+      if byte_size(note) <= 20_000 and
+           (payload["answer"] != "Found a problem" or String.trim(note) != ""),
+         do: {:ok, Map.put(payload, "note", note)},
+         else: {:error, :invalid_note}
     else
       {:error, :invalid_answer}
     end

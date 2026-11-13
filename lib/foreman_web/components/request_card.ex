@@ -46,7 +46,19 @@ defmodule ForemanWeb.RequestCard do
       <.doc_links id={@id <> "-docs"} request={@request} />
       <p :if={@request.outcome["answer"]} class="whitespace-pre-wrap break-words" phx-no-format>{answer_text(@request)}</p>
       <p
-        :if={@request.note not in [nil, "", @request.outcome["answer"]]}
+        :if={
+          @request.kind == "review_ui" and is_binary(@request.facts["url"]) and
+            @request.state == "answered"
+        }
+        id={@id <> "-tried"}
+        data-tried-sha={@request.facts["sha"]}
+        class="font-mono text-xs text-foreground-softer"
+        title={@request.facts["sha"]}
+      >
+        {String.slice(@request.facts["sha"] || "", 0, 7)}
+      </p>
+      <p
+        :if={@request.note not in [nil, "", @request.outcome["answer"]] and not problem?(@request)}
         class="whitespace-pre-wrap break-words text-foreground-softer"
         phx-no-format
       >{@request.note}</p>
@@ -76,7 +88,14 @@ defmodule ForemanWeb.RequestCard do
     |> Enum.map_join(", ", & &1["label"])
   end
 
-  defp answer_text(request), do: request.outcome["answer"]
+  defp answer_text(request) do
+    if problem?(request),
+      do: "Found a problem: " <> (request.note || ""),
+      else: request.outcome["answer"]
+  end
+
+  defp problem?(request),
+    do: request.kind == "review_ui" and request.outcome["answer"] == "Found a problem"
 
   attr :request, :any, required: true
 
