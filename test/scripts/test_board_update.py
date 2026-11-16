@@ -280,13 +280,22 @@ class BoardUpdateTest(unittest.TestCase):
         self.assertEqual(self.git(self.checkout, "rev-parse", "HEAD^2"), remote)
         self.assertEqual((self.checkout / "untracked").read_text(), "keep")
 
-    def test_dirty_tracked_checkout_refused_before_fetch(self):
+    def test_local_edit_to_a_file_the_merge_does_not_touch_is_kept(self):
+        self.commit(self.checkout, "ticket", "local ticket")
+        (self.checkout / "ticket").write_text("uncommitted edit")
+        remote = self.advance()
+        result = self.run_update()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.git(self.checkout, "rev-parse", "HEAD^2"), remote)
+        self.assertEqual((self.checkout / "ticket").read_text(), "uncommitted edit")
+
+    def test_local_edit_to_a_file_the_merge_changes_stops_without_reset(self):
         self.advance()
         (self.checkout / "app").write_text("dirty")
         result = self.run_update()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("dirty", result.stdout)
-        self.assertEqual(self.git(self.checkout, "rev-parse", "origin/main"), self.initial)
+        self.assertIn("FAILED merge", result.stdout)
+        self.assertEqual(self.git(self.checkout, "rev-parse", "HEAD"), self.initial)
         self.assertEqual((self.checkout / "app").read_text(), "dirty")
         self.assertEqual(self.commands(), [])
 
