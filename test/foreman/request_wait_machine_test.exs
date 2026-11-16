@@ -8,15 +8,16 @@ defmodule Foreman.RequestWaitMachineTest do
                {:waiting, [poll: :again]}
     end
 
-    for state <- ~w(answered declined withdrawn superseded done failed) do
+    for state <- ~w(answered declined withdrawn wrong_question superseded done failed) do
       assert WaitMachine.step(:waiting, {:response, %{"state" => state}}, %{}) ==
                {:finished, [reply: :result]}
     end
 
     assert WaitMachine.step(:waiting, {:response, %{"warning" => "unavailable"}}, %{}) ==
-             {:retrying, [warn: :unavailable, poll: :again]}
+             {:retrying,
+              [remember: :outage, warn: :unavailable, remember: :warning, poll: :again]}
 
-    assert WaitMachine.step(:retrying, {:response, %{}}, %{}) ==
+    assert WaitMachine.step(:retrying, {:response, %{}}, %{now: 1, last_warning_at: 0}) ==
              {:retrying, [poll: :again]}
 
     assert WaitMachine.step(:retrying, {:response, %{"state" => "pending"}}, %{}) ==

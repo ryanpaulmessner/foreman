@@ -50,6 +50,7 @@ defmodule Foreman.CLI do
     look_at: :string,
     scratchpad: :string,
     timeout: :integer,
+    any: :boolean,
     json: :boolean,
     actor: :string,
     session: :string,
@@ -143,7 +144,7 @@ defmodule Foreman.CLI do
 
         {code, body} =
           if request["action"] == "wait" do
-            deadline = System.monotonic_time(:millisecond) + request["timeout"] * 1_000
+            deadline = wait_now(opts) + request["timeout"] * 1_000
             wait(request, opts, deadline)
           else
             Foreman.CLITransport.deliver(request, opts)
@@ -181,12 +182,22 @@ defmodule Foreman.CLI do
     :exit, _ -> warn(args, "foreman unavailable; agent may continue")
   end
 
-  defp wait(request, opts, deadline, state \\ :waiting, snapshot \\ nil) do
-    {_, body} = Foreman.CLITransport.deliver(request, opts)
-    {next, effects} = Foreman.RequestWait.step(state, {:response, body}, %{})
+  defp wait(request, opts, deadline, state \\ :waiting, snapshot \\ nil, timing \\ %{}) do
+    body = poll_wait(request, opts)
+    timing = Map.put(timing, :now, wait_now(opts))
+    {next, effects} = Foreman.RequestWait.step(state, {:response, body}, timing)
+
+    timing =
+      Enum.reduce(effects, timing, fn
+        {:remember, :outage}, data -> Map.put(data, :outage_started_at, data.now)
+        {:remember, :warning}, data -> Map.put(data, :last_warning_at, data.now)
+        _, data -> data
+      end)
 
     if {:warn, :unavailable} in effects,
       do: IO.puts(:stderr, "warning: wait poll failed; retrying until the deadline")
+
+    if {:recover, :available} in effects, do: IO.puts(:stderr, "wait polling recovered")
 
     snapshot = if Foreman.RequestWait.snapshot?(nil, body), do: body, else: snapshot
 
@@ -195,25 +206,52 @@ defmodule Foreman.CLI do
         {0, body}
 
       {state, _} when state in [:waiting, :retrying] ->
-        remaining = deadline - System.monotonic_time(:millisecond)
+        remaining = deadline - wait_now(opts)
 
         if remaining <= 0 do
           {:finished, _} = Foreman.RequestWait.step(state, :timeout, %{})
-          {0, snapshot || body}
+          {0, wait_timeout(request, snapshot || body)}
         else
           receive do
           after
             min(remaining, Keyword.get(opts, :poll_interval, 500)) ->
-              if System.monotonic_time(:millisecond) >= deadline do
+              if wait_now(opts) >= deadline do
                 {:finished, _} = Foreman.RequestWait.step(state, :timeout, %{})
-                {0, snapshot || body}
+                {0, wait_timeout(request, snapshot || body)}
               else
-                wait(request, opts, deadline, state, snapshot)
+                wait(request, opts, deadline, state, snapshot, timing)
               end
           end
         end
     end
   end
+
+  defp wait_now(opts),
+    do: Keyword.get(opts, :monotonic_time, fn -> System.monotonic_time(:millisecond) end).()
+
+  defp poll_wait(%{"ids" => ids} = request, opts) do
+    bodies =
+      Enum.map(ids, fn id ->
+        {_, body} =
+          request |> Map.delete("ids") |> Map.put("id", id) |> Foreman.CLITransport.deliver(opts)
+
+        if body["error"] == "not_found",
+          do: Map.merge(body, %{"id" => id, "ids" => ids}),
+          else: body
+      end)
+
+    Enum.find(bodies, &Foreman.RequestWait.missing?(nil, &1)) ||
+      Enum.find(bodies, &Foreman.RequestWait.resolved?(nil, &1)) ||
+      Enum.find(bodies, &(not Foreman.RequestWait.snapshot?(nil, &1))) || hd(bodies)
+  end
+
+  defp poll_wait(request, opts) do
+    {_, body} = Foreman.CLITransport.deliver(request, opts)
+    body
+  end
+
+  defp wait_timeout(%{"ids" => ids}, body), do: Map.put(body, "ids", ids)
+  defp wait_timeout(_request, body), do: body
 
   defp warn(args, message) do
     if "--json" in args or List.first(args) == "wait",
@@ -599,11 +637,14 @@ defmodule Foreman.CLI do
           {:error, :usage}
         end
 
-      {[], ["wait", id]} when kind == "ticket" ->
+      {[], ["wait" | ids]} when kind == "ticket" and ids != [] ->
         timeout = Keyword.get(opts, :timeout, 300)
 
-        if timeout >= 0 do
-          {:ok, %{request: %{"action" => "wait", "id" => id, "timeout" => timeout}, json: true}}
+        if timeout >= 0 and (opts[:any] == true or length(ids) == 1) do
+          target = if opts[:any], do: %{"ids" => Enum.uniq(ids)}, else: %{"id" => hd(ids)}
+
+          {:ok,
+           %{request: Map.merge(target, %{"action" => "wait", "timeout" => timeout}), json: true}}
         else
           {:error, :usage}
         end

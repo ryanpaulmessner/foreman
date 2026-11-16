@@ -123,10 +123,23 @@ card's ticket ID opens that ticket in the same side panel.
 Success prints the UUID alone, or `{id,state}` with `--json`. No action kinds are enabled yet.
 
 `wait <uuid>` always prints JSON. It polls every 500 ms until answered, declined,
-withdrawn, superseded, done or failed. `--timeout` is nonnegative seconds (default 300);
-zero performs one read. At timeout it prints the current request, including `state`,
-`outcome` and `note`. A transport failure prints a JSON warning instead. HTTP calls
-retain the existing bounded transport timeouts, so a deadline can overrun by one call.
+wrong_question, withdrawn, superseded, done or failed. Pending, approved and executing
+remain unresolved. `--timeout` is nonnegative seconds (default 300); zero performs one
+read. At timeout it prints the last authoritative request, including `state`, `outcome`
+and `note`, or a JSON warning if no read succeeded. Failed polls retry until the deadline.
+Stderr warns on the first failed poll, then only on failures at least 60 seconds after
+the previous warning, even across recoveries. It prints `wait polling recovered` only
+when the outage lasted at least 10 seconds.
+
+`wait --any <uuid> <uuid> ...` polls each distinct ID once per round using the same API.
+It prints the first resolved request in argument order, unchanged: read `.id` and `.state`
+as with a single wait. An unknown ID takes precedence over a resolved request and returns
+`error: not_found`, `id` and all watched `ids`; it is never silently skipped.
+At timeout, the single-wait result carries an additional `ids` array naming every watched
+request. Its `id` and `state`, when present, describe one request, not the whole set.
+Zero performs one round. HTTP calls retain their bounded transport timeouts, so a deadline
+can overrun by one round (one call for plain wait).
+
 Ask and wait always exit 0, including refusals and malformed input. Wait never spools.
 
 The authenticated `/api/commands` envelope adds:
