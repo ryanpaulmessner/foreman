@@ -392,6 +392,181 @@ defmodule Foreman.RequestAPITest do
     assert Requests.pending_count() == 0
   end
 
+  test "wait --any prints the same server request JSON as plain wait" do
+    {:ok, first} =
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "First?"})
+      })
+
+    {:ok, second} =
+      Requests.ask({"sample", "s-1"}, "decision", %{
+        "facts" => Foreman.DecisionFacts.valid(%{"question" => "Second?"})
+      })
+
+    {:ok, _} = Requests.resolve(second.id, :answer, %{"answer" => "B"})
+    opts = [req_options: [plug: {Req.Test, __MODULE__}]]
+
+    single =
+      capture_io(fn -> assert CLI.run(["wait", second.id, "--timeout", "0"], opts) == 0 end)
+
+    any =
+      capture_io(fn ->
+        assert CLI.run(["wait", "--any", first.id, second.id, "--timeout", "0"], opts) == 0
+      end)
+
+    assert Jason.decode!(any) == Jason.decode!(single)
+    assert Jason.decode!(any)["id"] == second.id
+    assert Jason.decode!(any)["state"] == "answered"
+  end
+
+  test "wait --any returns the full second request when it resolves first" do
+    result = %{
+      "id" => "b",
+      "state" => "answered",
+      "outcome" => %{"answer" => "B"},
+      "note" => "chosen"
+    }
+
+    for {id, body} <- [
+          {"a", %{"state" => "pending"}},
+          {"b", %{"state" => "executing"}},
+          {"a", %{"state" => "approved"}},
+          {"b", result}
+        ] do
+      Req.Test.expect(__MODULE__, fn conn ->
+        {:ok, bytes, conn} = Plug.Conn.read_body(conn)
+        assert Jason.decode!(bytes)["id"] == id
+        Req.Test.json(conn, body)
+      end)
+    end
+
+    output =
+      capture_io(fn ->
+        assert CLI.run(["wait", "--any", "a", "b", "--timeout", "1"],
+                 poll_interval: 0,
+                 req_options: [plug: {Req.Test, __MODULE__}]
+               ) == 0
+      end)
+
+    assert Jason.decode!(output) == result
+  end
+
+  test "wait --any immediately returns every resolved state unchanged" do
+    for state <- ~w(answered done declined withdrawn wrong_question failed superseded) do
+      result = %{"id" => "b", "state" => state, "outcome" => %{}, "note" => nil}
+
+      Req.Test.expect(__MODULE__, fn conn -> Req.Test.json(conn, %{id: "a", state: "pending"}) end)
+
+      Req.Test.expect(__MODULE__, fn conn -> Req.Test.json(conn, result) end)
+
+      output =
+        capture_io(fn ->
+          assert CLI.run(["wait", "--any", "a", "b", "--timeout", "0"],
+                   req_options: [plug: {Req.Test, __MODULE__}]
+                 ) == 0
+        end)
+
+      assert Jason.decode!(output) == result
+    end
+  end
+
+  test "wait --any timeout preserves the current snapshot and names all ids" do
+    for state <- ~w(pending approved executing) do
+      Req.Test.stub(__MODULE__, fn conn -> Req.Test.json(conn, %{id: "a", state: state}) end)
+
+      output =
+        capture_io(fn ->
+          assert CLI.run(["wait", "--any", "a", "b", "--timeout", "0"],
+                   req_options: [plug: {Req.Test, __MODULE__}]
+                 ) == 0
+        end)
+
+      assert Jason.decode!(output) == %{"id" => "a", "state" => state, "ids" => ["a", "b"]}
+    end
+  end
+
+  test "wait --any reports an unknown id even when another request is resolved" do
+    Req.Test.expect(__MODULE__, fn conn -> Req.Test.json(conn, %{id: "a", state: "answered"}) end)
+
+    Req.Test.expect(__MODULE__, fn conn ->
+      conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{error: "not_found"})
+    end)
+
+    warning =
+      capture_io(:stderr, fn ->
+        output =
+          capture_io(fn ->
+            assert CLI.run(["wait", "--any", "a", "missing", "--timeout", "1"],
+                     poll_interval: 0,
+                     req_options: [plug: {Req.Test, __MODULE__}]
+                   ) == 0
+          end)
+
+        assert %{"id" => "missing", "ids" => ["a", "missing"], "error" => "not_found"} =
+                 Jason.decode!(output)
+      end)
+
+    assert warning == ""
+  end
+
+  test "wait --any retains the snapshot through an outage until the deadline" do
+    Req.Test.expect(__MODULE__, fn conn -> Req.Test.json(conn, %{id: "a", state: "executing"}) end)
+
+    Req.Test.expect(__MODULE__, fn conn -> Req.Test.json(conn, %{id: "b", state: "pending"}) end)
+    Req.Test.stub(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 503, "unavailable") end)
+
+    warning =
+      capture_io(:stderr, fn ->
+        output =
+          capture_io(fn ->
+            assert CLI.run(["wait", "--any", "a", "b", "--timeout", "1"],
+                     poll_interval: 100,
+                     req_options: [plug: {Req.Test, __MODULE__}]
+                   ) == 0
+          end)
+
+        assert Jason.decode!(output) == %{
+                 "id" => "a",
+                 "state" => "executing",
+                 "ids" => ["a", "b"]
+               }
+      end)
+
+    assert String.trim(warning) == "warning: wait poll failed; retrying until the deadline"
+    assert Repo.aggregate("spooled_events", :count) == 0
+  end
+
+  test "wait --any with no successful poll names every id on timeout" do
+    Req.Test.stub(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 503, "unavailable") end)
+
+    capture_io(:stderr, fn ->
+      output =
+        capture_io(fn ->
+          assert CLI.run(["wait", "--any", "a", "b", "--timeout", "0"],
+                   req_options: [plug: {Req.Test, __MODULE__}]
+                 ) == 0
+        end)
+
+      assert Jason.decode!(output) == %{
+               "warning" => "foreman unavailable; read was not queued",
+               "ids" => ["a", "b"]
+             }
+    end)
+  end
+
+  test "wait argument parsing requires ids and keeps the single-id envelope" do
+    assert {:ok, %{request: %{"action" => "wait", "id" => "a", "timeout" => 300}, json: true}} =
+             CLI.parse(["wait", "a"])
+
+    assert {:ok,
+            %{request: %{"action" => "wait", "ids" => ["a", "b"], "timeout" => 2}, json: true}} =
+             CLI.parse(["wait", "--any", "a", "b", "--timeout", "2"])
+
+    for args <- [["wait", "--any"], ["wait", "a", "b"], ["wait", "--any", "a", "--timeout", "-1"]] do
+      assert {:error, _} = CLI.parse(args)
+    end
+  end
+
   test "wait retries failed polls before returning an answer" do
     Req.Test.expect(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 503, "unavailable") end)
 
@@ -415,25 +590,117 @@ defmodule Foreman.RequestAPITest do
     assert %{"state" => "answered", "outcome" => %{"answer" => "B"}} = Jason.decode!(output)
   end
 
-  test "wait warns once per failure streak and resets after recovery" do
-    for body <- [%{}, %{}, %{"state" => "pending"}, %{}, %{"state" => "answered"}] do
-      Req.Test.expect(__MODULE__, fn conn -> Req.Test.json(conn, body) end)
+  test "20 flaps within 60 seconds print one warning for both wait forms" do
+    responses =
+      for n <- 0..19,
+          pair <- [{n * 2_000, %{}}, {n * 2_000 + 1_000, %{"state" => "pending"}}],
+          do: pair
+
+    for args <- [["wait", "a"], ["wait", "--any", "a", "b"]] do
+      assert timed_wait(args, responses ++ [{40_000, %{"state" => "answered"}}]) ==
+               ["warning: wait poll failed; retrying until the deadline"]
     end
+  end
 
-    warning =
-      capture_io(:stderr, fn ->
-        output =
-          capture_io(fn ->
-            CLI.run(["wait", Ecto.UUID.generate(), "--timeout", "1"],
-              poll_interval: 0,
-              req_options: [plug: {Req.Test, __MODULE__}]
-            )
-          end)
+  test "a two-minute outage and a new outage 70 seconds after recovery print two warnings" do
+    responses = [
+      {0, %{}},
+      {120_000, %{"state" => "pending"}},
+      {190_000, %{}},
+      {191_000, %{"state" => "answered"}}
+    ]
 
-        assert Jason.decode!(output)["state"] == "answered"
+    for args <- [["wait", "a"], ["wait", "--any", "a", "b"]] do
+      assert timed_wait(args, responses) == [
+               "warning: wait poll failed; retrying until the deadline",
+               "wait polling recovered",
+               "warning: wait poll failed; retrying until the deadline"
+             ]
+    end
+  end
+
+  test "continuous failures warn at the 60-second boundary and recovery at ten seconds" do
+    assert timed_wait(["wait", "a"], [
+             {0, %{}},
+             {59_999, %{}},
+             {60_000, %{}},
+             {119_999, %{}},
+             {120_000, %{}},
+             {120_001, %{"state" => "answered"}}
+           ]) == [
+             "warning: wait poll failed; retrying until the deadline",
+             "warning: wait poll failed; retrying until the deadline",
+             "warning: wait poll failed; retrying until the deadline",
+             "wait polling recovered"
+           ]
+
+    for {duration, recovery} <- [{9_999, []}, {10_000, ["wait polling recovered"]}] do
+      assert timed_wait(["wait", "a"], [{0, %{}}, {duration, %{"state" => "answered"}}]) ==
+               ["warning: wait poll failed; retrying until the deadline"] ++ recovery
+    end
+  end
+
+  defp timed_wait(args, responses) do
+    clock = start_supervised!({Agent, fn -> 0 end}, id: make_ref())
+
+    for {time, body} <- responses do
+      Req.Test.expect(__MODULE__, fn conn ->
+        Agent.update(clock, fn _ -> time end)
+        Req.Test.json(conn, body)
       end)
 
-    assert length(String.split(String.trim(warning), "\n")) == 2
+      if "--any" in args do
+        Req.Test.expect(__MODULE__, fn conn ->
+          Req.Test.json(conn, %{id: "b", state: "pending"})
+        end)
+      end
+    end
+
+    capture_io(:stderr, fn ->
+      output =
+        capture_io(fn ->
+          assert CLI.run(args ++ ["--timeout", "7200"],
+                   poll_interval: 0,
+                   monotonic_time: fn -> Agent.get(clock, & &1) end,
+                   req_options: [plug: {Req.Test, __MODULE__}]
+                 ) == 0
+        end)
+
+      assert Jason.decode!(output)["state"] == "answered"
+    end)
+    |> String.trim()
+    |> String.split("\n")
+  end
+
+  test "quick outages do not reset the warning limit or announce recovery" do
+    for args <- [["wait", "a"], ["wait", "--any", "a", "b"]] do
+      for body <- [%{}, %{}, %{"state" => "pending"}, %{}, %{"state" => "answered"}] do
+        Req.Test.expect(__MODULE__, fn conn -> Req.Test.json(conn, body) end)
+
+        if "--any" in args do
+          Req.Test.expect(__MODULE__, fn conn ->
+            Req.Test.json(conn, %{id: "b", state: "pending"})
+          end)
+        end
+      end
+
+      warning =
+        capture_io(:stderr, fn ->
+          output =
+            capture_io(fn ->
+              assert CLI.run(args ++ ["--timeout", "1"],
+                       poll_interval: 0,
+                       req_options: [plug: {Req.Test, __MODULE__}]
+                     ) == 0
+            end)
+
+          assert Jason.decode!(output)["state"] == "answered"
+        end)
+
+      assert String.split(String.trim(warning), "\n") == [
+               "warning: wait poll failed; retrying until the deadline"
+             ]
+    end
   end
 
   test "deadline does not start another transport call" do
