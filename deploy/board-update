@@ -1,0 +1,316 @@
+#!/usr/bin/env -S python3 -B
+"""Update the launchd board checkout; external commands must be on PATH."""
+import argparse
+from datetime import datetime, timezone
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import tempfile
+import time
+
+
+STEPS = ("checkout", "state", "fetch", "merge", "migrations", "restart",
+         "health", "force_push", "cli", "record")
+TRANSITIONS = {
+    (source, "ok"): (("always", target, (target,)),)
+    for source, target in zip(("ready", *STEPS), STEPS)
+}
+TRANSITIONS[("migrations", "ok")] = (
+    ("restart_required", "restart", ("restart",)),
+    ("always", "force_push", ("skip_restart", "skip_health", "force_push")),
+)
+TRANSITIONS[("force_push", "ok")] = (
+    ("cli_requested", "cli", ("cli",)),
+    ("always", "record", ("skip_cli", "record")),
+)
+TRANSITIONS[("record", "ok")] = (("always", "done", ()),)
+TRANSITIONS.update({(state, "failed"): (("always", "failed", ()),) for state in STEPS})
+
+
+def guard(name, facts):
+    if name == "restart_required":
+        return bool(facts["head"] != facts["before"] or facts["pending"] or facts["retry"] or
+                    (facts["previous"] and facts["previous"]["sha"] != facts["head"]))
+    if name == "cli_requested":
+        return facts["cli_requested"]
+    return name == "always"
+
+
+def transition(state, event, facts):
+    """Pure deployment step: evaluate guards and return state plus named effects."""
+    for condition, target, effects in TRANSITIONS[(state, event)]:
+        if guard(condition, facts):
+            return target, effects
+    raise ValueError(f"no transition for {state}/{event}")
+
+
+def run(checkout, *command, env=None):
+    result = subprocess.run(command, cwd=checkout, env=env, text=True, capture_output=True)
+    if result.returncode:
+        detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+        raise RuntimeError(f"{' '.join(command)}: {detail}")
+    return result.stdout.strip()
+
+
+def wait_for_health(checkout, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        try:
+            result = subprocess.run(
+                ["curl", "--silent", "--output", "/dev/null", "--write-out", "%{http_code}",
+                 "--max-time", str(min(5, remaining)), "http://127.0.0.1:4747/sessions"],
+                cwd=checkout, text=True, capture_output=True, timeout=remaining)
+            if result.returncode == 0 and result.stdout.strip() == "200":
+                return
+        except subprocess.TimeoutExpired:
+            break
+        time.sleep(min(1, max(0, deadline - time.monotonic())))
+    raise RuntimeError(f"timeout after {timeout:g}s waiting for /sessions HTTP 200")
+
+
+def github_repo(checkout):
+    url = run(checkout, "git", "config", "--get", "remote.origin.url")
+    match = re.fullmatch(
+        r"(?:git@github\.com:|https://github\.com/|ssh://git@github\.com/)"
+        r"([\w.-]+/[\w.-]+?)(?:\.git)?/?", url)
+    if not match:
+        raise RuntimeError("origin must be a GitHub SSH or HTTPS URL")
+    return match[1]
+
+
+def timestamp(value):
+    if not isinstance(value, str):
+        raise ValueError("timestamp must be a string")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp lacks timezone")
+    return parsed
+
+
+def check_force_push(checkout, repo, since):
+    output = run(checkout, "gh", "api", "--paginate", "--slurp",
+                 f"repos/{repo}/activity?ref=refs/heads/main&activity_type=force_push&per_page=100")
+    pages = json.loads(output)
+    if not isinstance(pages, list) or not all(isinstance(page, list) for page in pages):
+        raise ValueError("invalid GitHub activity response")
+    found = []
+    for page in pages:
+        for event in page:
+            if event["activity_type"] == "force_push" and event["ref"] == "refs/heads/main":
+                if timestamp(event["timestamp"]) >= timestamp(since):
+                    found.append(f"{event['timestamp']} -> {event['after']}")
+    if found:
+        raise RuntimeError("main force push: " + "; ".join(found))
+
+
+def install_cli(checkout, head):
+    with tempfile.TemporaryDirectory(prefix="foreman-cli-") as directory:
+        worktree = Path(directory) / "build"
+        run(checkout, "git", "worktree", "add", "--detach", str(worktree), head)
+        try:
+            shutil.copytree(checkout / "deps", worktree / "deps")
+            run(worktree, "mix", "escript.build", env={**os.environ, "MIX_ENV": "prod"})
+            destination = Path.home() / ".local/bin/foreman"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            fd, path = tempfile.mkstemp(prefix=".foreman-", dir=destination.parent)
+            os.close(fd)
+            staged = Path(path)
+            try:
+                shutil.copyfile(worktree / "foreman", staged)
+                staged.chmod(0o755)
+                staged.replace(destination)
+            finally:
+                staged.unlink(missing_ok=True)
+        finally:
+            run(checkout, "git", "worktree", "remove", "--force", str(worktree))
+
+
+def write_checkpoint(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(data) + "\n")
+    temporary.replace(path)
+
+
+def result(step, status, detail):
+    print(f"{status} {step.replace('_', '-')}: {detail}", flush=True)
+
+
+class Deployment:
+    def __init__(self, args):
+        self.args = args
+        self.path = args.checkout
+        self.lock = None
+        self.cli_requested = args.cli
+
+    def checkout(self):
+        if run(self.path, "git", "status", "--porcelain", "--untracked-files=no"):
+            raise RuntimeError("dirty or conflicted tracked checkout; resolve it before deploying")
+        if run(self.path, "git", "branch", "--show-current") != "main":
+            raise RuntimeError("checkout must be on main")
+        merge_head = Path(run(self.path, "git", "rev-parse", "--git-path", "MERGE_HEAD"))
+        if (self.path / merge_head).exists():
+            raise RuntimeError("unfinished merge; resolve it before deploying")
+        result("checkout", "ok", "clean tracked main")
+
+    def state(self):
+        self.before = run(self.path, "git", "rev-parse", "HEAD")
+        self.repo = github_repo(self.path)
+        self.state_path = Path.home() / ".local/state/foreman/board-deploy.json"
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.lock = self.state_path.with_suffix(".lock").open("a")
+        try:
+            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError("another board-update is running") from error
+        self.attempt = self.state_path.with_name("board-deploy-attempt.json")
+        self.retry = self.attempt.exists()
+        previous_path = self.attempt if self.retry else self.state_path
+        self.previous = json.loads(previous_path.read_text()) if previous_path.exists() else None
+        if previous_path.exists():
+            if (not isinstance(self.previous, dict) or
+                    not isinstance(self.previous.get("sha"), str) or
+                    not re.fullmatch(r"[0-9a-f]{40,64}", self.previous["sha"]) or
+                    not isinstance(self.previous.get("repo"), str) or
+                    "checked_at" not in self.previous):
+                raise ValueError(f"invalid deploy checkpoint: {previous_path}")
+        if self.previous and self.previous["repo"] != self.repo:
+            raise RuntimeError("deploy state belongs to a different origin")
+        self.since = (self.previous["checked_at"] if self.previous else
+                      run(self.path, "git", "show", "-s", "--format=%cI", self.before))
+        timestamp(self.since)
+        self.started = datetime.now(timezone.utc).isoformat()
+        result("state", "ok", "previous deploy " + self.previous["sha"] if self.previous else
+               "first deploy; activity since current HEAD commit")
+
+    def fetch(self):
+        run(self.path, "git", "fetch", "origin")
+        result("fetch", "ok", "origin")
+
+    def merge(self):
+        write_checkpoint(self.attempt, {"sha": self.before, "checked_at": self.since, "repo": self.repo})
+        try:
+            run(self.path, "git", "merge", "--no-edit", "origin/main")
+        except RuntimeError as error:
+            raise RuntimeError(f"{error}; resolve the merge before retrying (no reset performed)") from error
+        self.head = run(self.path, "git", "rev-parse", "HEAD")
+        result("merge", "ok", "origin/main")
+
+    def migrations(self):
+        # Ecto starts only its temporary repo, not Foreman's supervision tree.
+        migrations = run(self.path, "mix", "ecto.migrations", "--no-compile")
+        if "Repo: Foreman.Repo" not in migrations:
+            raise RuntimeError("unrecognized ecto.migrations output")
+        self.pending = re.findall(r"^\s*down\s+(\d+\s+[^\n]+)", migrations, re.MULTILINE)
+        if self.pending:
+            run(self.path, "mix", "ecto.migrate")
+            result("migrations", "ok", "; ".join(self.pending))
+        else:
+            result("migrations", "skipped", "none pending")
+
+    def restart(self):
+        run(self.path, "launchctl", "kickstart", "-k",
+            f"gui/{os.getuid()}/com.ryanpaulmessner.foreman")
+        result("restart", "ok", "launchd board")
+
+    def skip_restart(self):
+        result("restart", "skipped", "checkout unchanged")
+
+    def health(self):
+        wait_for_health(self.path, self.args.timeout)
+        result("health", "ok", "HTTP 200")
+
+    def skip_health(self):
+        result("health", "skipped", "checkout unchanged")
+
+    def force_push(self):
+        check_force_push(self.path, self.repo, self.since)
+        result("force_push", "ok", "none since " + self.since)
+
+    def cli(self):
+        install_cli(self.path, self.head)
+        result("cli", "ok", "installed " + self.head)
+
+    def skip_cli(self):
+        result("cli", "skipped", "use --cli to install")
+
+    def record(self):
+        write_checkpoint(self.state_path, {"sha": self.head, "checked_at": self.started, "repo": self.repo})
+        self.attempt.unlink()
+        result("record", "ok", "recorded deploy")
+
+    def close(self):
+        if self.lock is not None:
+            self.lock.close()
+
+
+def dry_run(args):
+    head = run(args.checkout, "git", "rev-parse", "HEAD")
+    plan = {
+        "checkout": f"verify clean tracked main at {args.checkout} (untracked files allowed)",
+        "state": "lock deploy; read last success or unfinished attempt",
+        "fetch": "git fetch origin",
+        "merge": "git merge --no-edit origin/main; stop on conflict",
+        "migrations": "mix ecto.migrations --no-compile; mix ecto.migrate only for pending versions",
+        "restart": f"launchctl kickstart -k gui/{os.getuid()}/com.ryanpaulmessner.foreman if changed or retrying",
+        "health": f"poll http://127.0.0.1:4747/sessions for HTTP 200, timeout {args.timeout:g}s",
+        "force_push": "gh api main force_push activity since previous deploy (all pages)",
+        "cli": ("detached scratch worktree, copy deps, MIX_ENV=prod mix escript.build, atomic install"
+                if args.cli else "not requested"),
+        "record": "record successful HEAD and activity cutoff in ~/.local/state/foreman/board-deploy.json",
+    }
+    for step in STEPS:
+        result(step, "skipped", "dry-run: " + plan[step])
+    print("HEAD " + head + " (current; remote not fetched)")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, epilog=(
+        "Requires git, mix, launchctl, curl and authenticated gh. "
+        "The first activity check starts at the current HEAD's commit time; later checks "
+        "start at the previous successful deploy. Failed attempts retain their cutoff and "
+        "retry the restart. Resolve merge conflicts manually; no reset, stash or rebase is performed. "
+        "State is under ~/.local/state/foreman/. A reported force push requires investigation; "
+        "the script does not acknowledge it or advance successful state."))
+    parser.add_argument("--checkout", type=Path, default=Path.home() / "dev/foreman",
+                        help="board checkout (default: ~/dev/foreman)")
+    parser.add_argument("--timeout", type=float, default=90, help="health timeout in seconds (default: 90)")
+    parser.add_argument("--cli", action="store_true", help="build in scratch and install ~/.local/bin/foreman")
+    parser.add_argument("--dry-run", action="store_true", help="print plan without fetching or changing anything")
+    args = parser.parse_args()
+    args.checkout = args.checkout.expanduser().resolve()
+    if not 0 < args.timeout < float("inf"):
+        parser.error("--timeout must be finite and positive")
+    deploy = Deployment(args)
+    state, effects = transition("ready", "ok", vars(deploy))
+    try:
+        if args.dry_run:
+            dry_run(args)
+            return 0
+        while effects:
+            for effect in effects:
+                getattr(deploy, effect)()
+            state, effects = transition(state, "ok", vars(deploy))
+        print("HEAD " + deploy.head)
+        return 0
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError) as error:
+        result(state, "FAILED", " ".join(str(error).split()))
+        for step in STEPS[STEPS.index(state) + 1:]:
+            result(step, "skipped", "earlier step failed")
+        try:
+            print("HEAD " + run(args.checkout, "git", "rev-parse", "HEAD"))
+        except (RuntimeError, OSError):
+            print("HEAD unavailable")
+        state, effects = transition(state, "failed", vars(deploy))
+        return 1
+    finally:
+        deploy.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

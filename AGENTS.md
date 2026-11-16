@@ -8,6 +8,7 @@ Spec: `docs/spec.md` (authoritative); design pass: `docs/design.md`; approved mo
 - **Times use the shared human format** (just now, 2 min ago, full time on hover), never raw seconds or ISO strings.
 - **Stateful features sit on declared `Foreman.Fsm` machines** (workflows, sync and job lifecycles, external conversations, stateful UI); the house code-review baseline treats ad hoc status fields as Important findings.
 - Tickets live in each repo's `tickets/` folder (one Markdown file per ticket), written by the `foreman` CLI or by hand and validated by `foreman check`; the app reads them and never writes them. Board state (stages, sessions, requests) is Postgres only.
+- Board deploys: `deploy/board-update` (add `--cli` to install the CLI); see `deploy/board-update --help` and use `--dry-run` to preview. Running it against the live checkout requires Ryan's approval.
 - LiveView self-redirects on WSL clock rollback: see `docs/known-issues.md` for the test-only signing allowance and production reload behavior.
 
 This is a web application written using the Phoenix web framework.
