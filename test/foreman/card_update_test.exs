@@ -33,6 +33,42 @@ defmodule Foreman.CardUpdateTest do
     assert Requests.get(r.id).facts == second.facts
   end
 
+  test "decision updates refuse screenshots without changing the pending card", %{request: r} do
+    for changes <- [
+          %{"question" => "Does the mockup look good?"},
+          %{"question" => "Use shots/layout.jpg?"},
+          %{"text" => r.facts["text"] <> "\nSee ~/.cache/verify/runs/latest"}
+        ] do
+      assert {:error, %{error: "card_unclear", missing: [_]}} =
+               Requests.update(r.id, "pi", "build", changes)
+
+      assert Requests.get(r.id).facts == r.facts
+    end
+  end
+
+  test "visual decision updates keep the document exception", %{request: r} do
+    root = Foreman.ScratchDocs.dir("visual-update")
+    Foreman.ScratchDocs.write(root, %{"mockup.md" => "# Mockup"})
+    Foreman.ScratchDocs.configure(%{"sample" => root})
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    assert {:ok, linked} =
+             Requests.update(r.id, "pi", "build", %{
+               "question" => "Does the mockup look right?",
+               "docs" => ["mockup.md"]
+             })
+
+    assert {:ok, kept} =
+             Requests.update(r.id, "pi", "build", %{"question" => "Does the mockup look good?"})
+
+    assert kept.facts["docs"] == linked.facts["docs"]
+
+    assert {:error, %{error: "card_unclear"}} =
+             Requests.update(r.id, "pi", "build", %{"docs" => []})
+
+    assert Requests.get(r.id).facts == kept.facts
+  end
+
   test "an action card can update display text but not its executable facts", %{request: r} do
     r
     |> Ecto.Changeset.change(kind: "push", facts: %{"expected_sha" => "bound-sha"})

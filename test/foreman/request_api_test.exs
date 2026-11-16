@@ -302,6 +302,36 @@ defmodule Foreman.RequestAPITest do
     assert Jason.decode!(output)["missing"] == ["What", "Part of", "Why now", "option detail: A"]
   end
 
+  test "screenshot refusal prints the review_ui command in plain output" do
+    opts = [req_options: [plug: {Req.Test, __MODULE__}]]
+
+    output =
+      capture_io(fn ->
+        CLI.run(
+          [
+            "ask",
+            "decision",
+            "s-1",
+            "--project",
+            "sample",
+            "--question",
+            "Does layout.png look right?",
+            "--text",
+            "What: Layout\nPart of: Cards\nWhy now: Review"
+          ],
+          opts
+        )
+      end)
+
+    assert output =~ "card_unclear:"
+
+    assert output =~
+             "screenshots go on a review_ui card: foreman ask review_ui <ticket> --image <file-or-folder>"
+
+    refute output =~ "unavailable"
+    assert Requests.pending_count() == 0
+  end
+
   test "malformed option details are usage errors, not transport failures" do
     output =
       capture_io(fn ->
