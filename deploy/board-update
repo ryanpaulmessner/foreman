@@ -149,14 +149,16 @@ class Deployment:
         self.cli_requested = args.cli
 
     def checkout(self):
-        if run(self.path, "git", "status", "--porcelain", "--untracked-files=no"):
-            raise RuntimeError("dirty or conflicted tracked checkout; resolve it before deploying")
+        # Local edits are allowed: the main checkout often holds another session's uncommitted
+        # work, and git merge itself refuses when an incoming change touches an edited file.
+        if run(self.path, "git", "ls-files", "--unmerged"):
+            raise RuntimeError("conflicted tracked checkout; resolve it before deploying")
         if run(self.path, "git", "branch", "--show-current") != "main":
             raise RuntimeError("checkout must be on main")
         merge_head = Path(run(self.path, "git", "rev-parse", "--git-path", "MERGE_HEAD"))
         if (self.path / merge_head).exists():
             raise RuntimeError("unfinished merge; resolve it before deploying")
-        result("checkout", "ok", "clean tracked main")
+        result("checkout", "ok", "main, no conflicts")
 
     def state(self):
         self.before = run(self.path, "git", "rev-parse", "HEAD")
@@ -252,7 +254,7 @@ class Deployment:
 def dry_run(args):
     head = run(args.checkout, "git", "rev-parse", "HEAD")
     plan = {
-        "checkout": f"verify clean tracked main at {args.checkout} (untracked files allowed)",
+        "checkout": f"verify main with no conflicts at {args.checkout} (local edits kept; git merge refuses overlaps)",
         "state": "lock deploy; read last success or unfinished attempt",
         "fetch": "git fetch origin",
         "merge": "git merge --no-edit origin/main; stop on conflict",
