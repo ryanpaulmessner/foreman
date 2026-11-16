@@ -1,5 +1,7 @@
 # Bound the board log on macOS
 
+For board updates, run `deploy/board-update` with Ryan's approval (`--cli` also installs the CLI; `--dry-run` previews; `--help` lists options).
+
 Install after merge, with Ryan's approval. These steps change the running service.
 The build session must not run them.
 
