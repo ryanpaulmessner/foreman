@@ -155,8 +155,8 @@ defmodule Foreman.Requests do
           facts
         end
 
-      with {:ok, validated} <- validate_update(request, Map.delete(facts, "docs")),
-           {:ok, docs} <- update_docs(request, changes) do
+      with {:ok, docs} <- update_docs(request, changes),
+           {:ok, validated} <- validate_update(request, Map.delete(facts, "docs"), docs) do
         {:ok, Map.put(validated, "docs", docs)}
       end
     else
@@ -164,13 +164,16 @@ defmodule Foreman.Requests do
     end
   end
 
-  defp validate_update(%{kind: kind} = request, facts)
-       when kind in ["decision", "review_ui", "chore", "batch"] do
+  defp validate_update(%{kind: "decision"}, facts, docs),
+    do: Decision.validate_with_docs(facts, docs)
+
+  defp validate_update(%{kind: kind} = request, facts, _docs)
+       when kind in ["review_ui", "chore", "batch"] do
     {:ok, handler} = Kind.fetch(kind)
     handler.validate(facts, %{repo_key: request.repo_key})
   end
 
-  defp validate_update(_, facts) do
+  defp validate_update(_, facts, _docs) do
     if Enum.all?(
          ["question", "text"],
          &(not Map.has_key?(facts, &1) or Decision.text?(facts[&1]))
