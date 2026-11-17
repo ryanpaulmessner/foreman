@@ -142,6 +142,27 @@ defmodule Foreman.TryItTest do
     assert answered.outcome == %{"answer" => "Found a problem"}
   end
 
+  test "the commit is checked in code_path when the repo has a separate code checkout", %{
+    facts: facts,
+    root: root
+  } do
+    workspace = root <> "-workspace"
+    {_, 0} = System.cmd("git", ["init", workspace], stderr_to_stdout: true)
+    on_exit(fn -> File.rm_rf!(workspace) end)
+
+    config =
+      Foreman.RuntimeState.config().config
+      |> update_in(
+        ["repos", Access.at(0)],
+        &Map.merge(&1, %{"path" => workspace, "code_path" => root})
+      )
+
+    Foreman.Repo.update_all("board_config", set: [config: config])
+
+    assert {:ok, request} = Requests.ask({"sample", "s-1"}, "review_ui", %{"facts" => facts})
+    assert request.facts["sha"] == facts["sha"]
+  end
+
   test "URL reviews require walkthrough steps, a local URL and a known commit", %{facts: facts} do
     for bad <- [
           Map.delete(facts, "walkthrough"),
