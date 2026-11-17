@@ -47,7 +47,8 @@ defmodule Foreman.TryIt do
 
   defp commit?(sha, key) when is_binary(sha) do
     with true <- Regex.match?(~r/\A[0-9a-f]{40}\z/, sha),
-         %{"path" => path} <- Enum.find(Foreman.CardText.repos(), &(&1["key"] == key)),
+         %{"path" => _} = repo <- Enum.find(Foreman.RuntimeState.repos(), &(&1["key"] == key)),
+         path = Foreman.CodeCheckout.path(repo),
          {"commit\n", 0} <-
            System.cmd("git", ["-C", path, "cat-file", "-t", sha], stderr_to_stdout: true) do
       true
